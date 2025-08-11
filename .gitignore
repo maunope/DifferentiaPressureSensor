@@ -627,3 +627,7 @@
 .pio/build/4d_systems_esp32s3_gen4_r8n16/gdbinit/symbols
 .vscode/c_cpp_properties.json
 .vscode/launch.json
+DifferentialPressureSensor.code-workspace
+platformio.ini
+platformio.ini
+platformio.ini
