@@ -13,7 +13,7 @@
 #include "sdkconfig.h"   // For CONFIG_I2C_MASTER_SCL and CONFIG_I2C_MASTER_SDA
 #include "esp_rom_sys.h" // Required for esp_rom_delay_us
 
-#include "i2c-lcd.h"
+#include "../lib/i2c-lcd/i2c-lcd.h"
 
 // --- I2C Configuration ---
 #define I2C_MASTER_SCL_IO GPIO_NUM_21 // GPIO pin for I2C SCL
@@ -514,7 +514,7 @@ void app_main(void)
 
     lcd_clear();
 
-  
+    
 
     while (1)
     {
