@@ -39,6 +39,7 @@ void rotaryencoder_init(const rotaryencoder_config_t *cfg)
     gpio_isr_handler_add(encoder_cfg.button_pin, gpio_isr_handler, (void *)encoder_cfg.button_pin);
 }
 
+//todo refactor taking the task part out of here
 static void rotary_encoder_task(void *arg)
 {
     uint32_t gpio_num;

@@ -147,15 +147,8 @@ void app_main(void)
         snprintf(LCDout, sizeof(LCDout), "Pres: %ld Pa", pressure_pa);
         lcd_send_string(LCDout);
 
-        // Optionally display encoder info (direction/button) on serial
-        if (direction == ENC_DIR_CW)
-            ESP_LOGI(TAG, "Encoder: Clockwise");
-        else if (direction == ENC_DIR_CCW)
-            ESP_LOGI(TAG, "Encoder: Counter-Clockwise");
+   
 
-        if (button_state == ENC_BTN_PRESSED)
-            ESP_LOGI(TAG, "Encoder Button: Pressed");
-
-        vTaskDelay(pdMS_TO_TICKS(5000)); // Read sensors and update LCD every 5 seconds
+        vTaskDelay(pdMS_TO_TICKS(2000)); // Read sensors and update LCD every 5 seconds
     }
 }
