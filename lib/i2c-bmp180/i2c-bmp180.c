@@ -168,6 +168,7 @@ int32_t bmp180_read_raw_pressure(void)
     return (int32_t)(((raw_data[0] << 16) | (raw_data[1] << 8) | raw_data[2]) >> (8 - BMP180_OSS));
 }
 
+//todo fix, it's reading gibberish
 float bmp180_compensate_temperature(int32_t UT)
 {
     long X1 = (UT - (long)calib_data.AC6) * calib_data.AC5 / 32768;

@@ -12,19 +12,25 @@
 #include "driver/gpio.h"
 #include "sdkconfig.h"
 #include "esp_rom_sys.h"
+#include "esp_timer.h" // Required for esp_timer_get_time()
+#include <time.h>
 
 #include "../lib/i2c-lcd/i2c-lcd.h"
 #include "../lib/i2c-bmp180/i2c-bmp180.h" // BMP180 sensor API
 #include "../lib/rotaryencoder/rotaryencoder.h"
+#include "../lib/spi-sdcard/spi-sdcard.h"
+#include "../lib/i2c-oled/i2c-oled.h"
 
-// --- I2C Configuration ---
+// --- I2C Configuration for peripherals ---
+#define I2C_MASTER_NUM I2C_NUM_0
 #define I2C_MASTER_SCL_IO GPIO_NUM_21
 #define I2C_MASTER_SDA_IO GPIO_NUM_20
-#define I2C_MASTER_NUM I2C_NUM_0
-#define I2C_MASTER_FREQ_HZ 100000
-#define I2C_MASTER_TX_BUF_DISABLE 0
-#define I2C_MASTER_RX_BUF_DISABLE 0
-#define I2C_MASTER_TIMEOUT_MS 1000
+#define I2C_MASTER_FREQ_HZ 100000 // 100kHz I2C clock
+
+// --- I2C Configuration for OLED ---
+#define I2C_OLED_NUM I2C_NUM_1
+#define I2C_OLED_SCL_IO GPIO_NUM_39
+#define I2C_OLED_SDA_IO GPIO_NUM_40
 
 // --- Rotary Encoder Configuration ---
 #define ROTARY_ENCODER_PIN_A GPIO_NUM_41
@@ -33,8 +39,8 @@
 
 #define BUTTON_DEBOUNCE_TIME_MS 50
 
-static const char *TAG = "i2c-simple-example";
-static const char *LCD_TAG = "LCD_DISPLAY";
+static const char *TAG = "DifferentialPressureSensor";
+
 
 char buffer[10];
 float num = 12.34;
@@ -42,6 +48,8 @@ float num = 12.34;
 /**
  * @brief i2c master initialization
  */
+
+ 
 static esp_err_t i2c_master_init(void)
 {
     int i2c_master_port = I2C_MASTER_NUM;
@@ -57,12 +65,14 @@ static esp_err_t i2c_master_init(void)
 
     i2c_param_config(i2c_master_port, &conf);
 
-    return i2c_driver_install(i2c_master_port, conf.mode, I2C_MASTER_RX_BUF_DISABLE, I2C_MASTER_TX_BUF_DISABLE, 0);
+    return i2c_driver_install(i2c_master_port, conf.mode, 0, 0, 0);
 }
 
 // --- Main Application Entry Point ---
 void app_main(void)
 {
+
+   
     // Initialize I2C
     esp_err_t err = i2c_master_init();
     if (err != ESP_OK)
@@ -79,8 +89,14 @@ void app_main(void)
         return;
     }
 
+ 
 
-       // Example usage of BMP180 API
+    volatile int dummy = 0; // This variable cannot be optimized away
+
+
+    spi_sdcard_init(); // Call once at startup
+
+    // Example usage of BMP180 API
     int32_t UT = bmp180_read_raw_temp();
     float temperature = bmp180_compensate_temperature(UT);
 
@@ -89,41 +105,50 @@ void app_main(void)
 
     ESP_LOGI(TAG, "Temperature: %.2f C, Pressure: %ld Pa", temperature, pressure);
 
-
     // Initialize Rotary Encoder
     rotaryencoder_config_t encoder_cfg = {
         .pin_a = ROTARY_ENCODER_PIN_A,
         .pin_b = ROTARY_ENCODER_PIN_B,
         .button_pin = ROTARY_ENCODER_BUTTON_PIN,
-        .button_debounce_ms = BUTTON_DEBOUNCE_TIME_MS
-    };
+        .button_debounce_ms = BUTTON_DEBOUNCE_TIME_MS};
     rotaryencoder_init(&encoder_cfg);
 
     // Create the rotary encoder task
     rotaryencoder_start_task();
 
-    // --- Initialize LCD ---
-    /*x lcd_init();*/
+    // --- Initialize second I2C bus for OLED ---
+    i2c_config_t oled_conf = {
+        .mode = I2C_MODE_MASTER,
+        .sda_io_num = I2C_OLED_SDA_IO, // e.g. GPIO_NUM_19
+        .scl_io_num = I2C_OLED_SCL_IO, // e.g. GPIO_NUM_18
+        .sda_pullup_en = GPIO_PULLUP_ENABLE,
+        .scl_pullup_en = GPIO_PULLUP_ENABLE,
+        .master.clk_speed = 400000
+    };
+    i2c_param_config(I2C_OLED_NUM, &oled_conf);
+    i2c_driver_install(I2C_OLED_NUM, oled_conf.mode, 0, 0, 0);
 
-    // --- Main Loop for BMP180 Readings and LCD Updates ---
-    int32_t uncomp_temp = 0, uncomp_press = 0; // Initialized to zero
-    float temperature_c = 0.0f;                // Initialized to zero
-    long pressure_pa = 0L;                     // Initialized to zero
+    // --- OLED test ---
+    i2c_oled_init(I2C_OLED_NUM, I2C_OLED_SDA_IO, I2C_OLED_SCL_IO);
+   
 
-    /*char line1_buf[LCD_COLUMNS + 1]; // Buffer for first LCD line
-    char line2_buf[LCD_COLUMNS + 1]; // Buffer for second LCD line*/
-    const char *dir_str = "";
-    const char *btn_str_short = "";
+
+    
+   
+    ESP_LOGI(TAG, "Starting BMP180 sensor readings and Encoder monitoring...");
+
+   // lcd_init();
+   // lcd_clear();
+    spi_sdcard_init(); // Call once at startup
 
     ESP_LOGI(TAG, "Starting BMP180 sensor readings and Encoder monitoring...");
 
-    lcd_init();
-    lcd_clear();
-
-    ESP_LOGI(TAG, "Starting BMP180 sensor readings and Encoder monitoring...");
+    i2c_oled_clear(I2C_OLED_NUM); 
 
     while (1)
     {
+          
+
         // --- BMP180 Readings ---
         int32_t uncomp_temp = bmp180_read_raw_temp();
         float temperature_c = bmp180_compensate_temperature(uncomp_temp);
@@ -131,24 +156,43 @@ void app_main(void)
         int32_t uncomp_press = bmp180_read_raw_pressure();
         long pressure_pa = bmp180_compensate_pressure(uncomp_press);
 
+        time_t now;
+        char strftime_buf[64];
+        struct tm timeinfo;
+
+        time(&now);
+        // Set timezone to China Standard Time
+        setenv("TZ", "CEST", 1);
+        tzset();
+
+        localtime_r(&now, &timeinfo);
+        strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
+    
+        // --- Write to SD card in CSV format ---
+        int writeStatus = spi_sdcard_write_csv("dati.csv", strftime_buf, temperature_c, pressure_pa);
+
         ESP_LOGI(TAG, "Temperature: %.2f C, Pressure: %ld Pa", temperature_c, pressure_pa);
 
         // --- Rotary Encoder State ---
-        encoder_direction_t direction = rotaryencoder_get_direction();
-        encoder_button_state_t button_state = rotaryencoder_get_button_state();
+      
+        // Display on Olde
+        
+        i2c_oled_write_text(I2C_OLED_NUM, 0, 0, "Stato letture");
+         
+      
+        char oledOut[16];
+  
+        snprintf(oledOut, sizeof(oledOut), "Temp: %.2f C", temperature_c);
+        i2c_oled_write_text(I2C_OLED_NUM, 1, 0, oledOut);
 
-        // Display on LCD
-        char LCDout[16];
-        lcd_put_cur(0, 0);
-        snprintf(LCDout, sizeof(LCDout), "Temp: %.2f C", temperature_c);
-        lcd_send_string(LCDout);
+      
+        snprintf(oledOut, sizeof(oledOut), "Pres: %ld Pa", pressure_pa);
+        i2c_oled_write_text(I2C_OLED_NUM, 2, 0, oledOut);
+        
+        snprintf(oledOut, sizeof(oledOut), "File write: %s", writeStatus==SPI_CARD_OK?"OK":"KO");
+        i2c_oled_write_text(I2C_OLED_NUM, 3, 0, oledOut);
+        
 
-        lcd_put_cur(1, 0);
-        snprintf(LCDout, sizeof(LCDout), "Pres: %ld Pa", pressure_pa);
-        lcd_send_string(LCDout);
-
-   
-
-        vTaskDelay(pdMS_TO_TICKS(2000)); // Read sensors and update LCD every 5 seconds
+        vTaskDelay(pdMS_TO_TICKS(2000)); // Read sensors and update LCD every 2 seconds
     }
 }
