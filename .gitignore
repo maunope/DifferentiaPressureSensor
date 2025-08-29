@@ -48,8 +48,12 @@ DifferentialPressureSensor.code-workspace
 platformio.ini
 build/*
 .venv/*
+managed_components/*
 sdkconfig
 
 sdkconfig.4d_systems_esp32s3_gen4_r8n16_old
 sdkconfig.old
 sdkconfig.systemsesp32s3_debug
+
+
+dependencies.lock

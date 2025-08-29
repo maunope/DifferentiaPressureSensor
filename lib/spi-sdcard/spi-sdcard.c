@@ -1,4 +1,6 @@
 #include "spi-sdcard.h"
+#include "tinyusb.h"
+#include "tusb_msc_storage.h"
 #include <stdio.h>
 #include <string.h>
 #include "esp_log.h"
@@ -6,9 +8,10 @@
 #include "driver/sdspi_host.h"
 #include "driver/spi_common.h"
 #include "sdmmc_cmd.h"
+#include "driver/gpio.h"
+
 
 static const char *TAG = "SPI_SDCARD";
-
 // Configure CS pin with pull-up
 static void init_gpio_cs()
 {
@@ -23,6 +26,9 @@ static void init_gpio_cs()
 }
 
 static bool mounted = false;
+static tinyusb_msc_sdmmc_config_t *s_card = NULL;
+
+
 
 void spi_sdcard_init()
 {
@@ -81,6 +87,7 @@ void spi_sdcard_init()
     }
 }
 
+
 int spi_sdcard_write_csv(const char *filename, char * ts, float temperature, long pressure)
 {
     if (!mounted) {
@@ -103,4 +110,3 @@ int spi_sdcard_write_csv(const char *filename, char * ts, float temperature, lon
     fclose(f);
     return SPI_CARD_OK;
 }
-
