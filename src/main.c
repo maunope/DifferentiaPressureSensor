@@ -94,7 +94,7 @@ void app_main(void)
     volatile int dummy = 0; // This variable cannot be optimized away
 
 
-    spi_sdcard_init(); // Call once at startup
+    spi_sdcard_full_init(); // Call once at startup
 
     // Example usage of BMP180 API
     int32_t UT = bmp180_read_raw_temp();
@@ -139,7 +139,7 @@ void app_main(void)
 
    // lcd_init();
    // lcd_clear();
-    spi_sdcard_init(); // Call once at startup
+    //spi_sdcard_full_init(); // Call once at startup
 
     ESP_LOGI(TAG, "Starting BMP180 sensor readings and Encoder monitoring...");
 
