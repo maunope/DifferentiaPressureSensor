@@ -1,4 +1,4 @@
-// ESP-IDF script for reading I2C barometric sensor (BMP180) and rotary encoder,
+// ESP-IDF script for reading I2C barometric sensor (BMP280) and rotary encoder,
 // printing data to serial and a 2-line I2C LCD using a self-contained driver.
 
 #include <stdio.h>
@@ -16,15 +16,17 @@
 #include <time.h>
 
 #include "../lib/i2c-lcd/i2c-lcd.h"
-#include "../lib/i2c-bmp180/i2c-bmp180.h" // BMP180 sensor API
+#include "../lib/i2c-bmp280/i2c-bmp280.h" // BMP280 sensor API
 #include "../lib/rotaryencoder/rotaryencoder.h"
 #include "../lib/spi-sdcard/spi-sdcard.h"
 #include "../lib/i2c-oled/i2c-oled.h"
 
+//DO NOT use pins 19 and 20, they are used by the flash memory
+
 // --- I2C Configuration for peripherals ---
 #define I2C_MASTER_NUM I2C_NUM_0
-#define I2C_MASTER_SCL_IO GPIO_NUM_21
-#define I2C_MASTER_SDA_IO GPIO_NUM_20
+#define I2C_MASTER_SCL_IO GPIO_NUM_37
+#define I2C_MASTER_SDA_IO GPIO_NUM_38
 #define I2C_MASTER_FREQ_HZ 100000 // 100kHz I2C clock
 
 // --- I2C Configuration for OLED ---
@@ -82,10 +84,10 @@ void app_main(void)
     }
 
     // Initialize BMP180 Sensor
-    err = bmp180_init();
+    err = bmp280_init();
     if (err != ESP_OK)
     {
-        ESP_LOGE(TAG, "BMP180 sensor initialization failed, stopping.");
+        ESP_LOGE(TAG, "BMP280 sensor initialization failed, stopping.");
         return;
     }
 
@@ -94,16 +96,7 @@ void app_main(void)
     volatile int dummy = 0; // This variable cannot be optimized away
 
 
-    spi_sdcard_full_init(); // Call once at startup
 
-    // Example usage of BMP180 API
-    int32_t UT = bmp180_read_raw_temp();
-    float temperature = bmp180_compensate_temperature(UT);
-
-    int32_t UP = bmp180_read_raw_pressure();
-    long pressure = bmp180_compensate_pressure(UP);
-
-    ESP_LOGI(TAG, "Temperature: %.2f C, Pressure: %ld Pa", temperature, pressure);
 
     // Initialize Rotary Encoder
     rotaryencoder_config_t encoder_cfg = {
@@ -129,32 +122,31 @@ void app_main(void)
     i2c_driver_install(I2C_OLED_NUM, oled_conf.mode, 0, 0, 0);
 
     // --- OLED test ---
+
     i2c_oled_init(I2C_OLED_NUM, I2C_OLED_SDA_IO, I2C_OLED_SCL_IO);
-   
-
-
-    
-   
-    ESP_LOGI(TAG, "Starting BMP180 sensor readings and Encoder monitoring...");
-
-   // lcd_init();
-   // lcd_clear();
-    //spi_sdcard_full_init(); // Call once at startup
-
-    ESP_LOGI(TAG, "Starting BMP180 sensor readings and Encoder monitoring...");
-
     i2c_oled_clear(I2C_OLED_NUM); 
+    i2c_oled_write_text(I2C_OLED_NUM, 1, 0, "Booting...");
+
+    spi_sdcard_full_init(); // Call once at startup
+   
+  
+    
+    i2c_oled_clear(I2C_OLED_NUM); 
+    ESP_LOGI(TAG, "Starting BMP280 sensor readings and Encoder monitoring...");
+
+   
+
 
     while (1)
     {
           
 
-        // --- BMP180 Readings ---
-        int32_t uncomp_temp = bmp180_read_raw_temp();
-        float temperature_c = bmp180_compensate_temperature(uncomp_temp);
+        // --- BMP280 Readings ---
+        int32_t uncomp_temp = bmp280_read_raw_temp();
+        float temperature_c = bmp280_compensate_temperature(uncomp_temp);
 
-        int32_t uncomp_press = bmp180_read_raw_pressure();
-        long pressure_pa = bmp180_compensate_pressure(uncomp_press);
+        int32_t uncomp_press = bmp280_read_raw_pressure();
+        long pressure_pa = bmp280_compensate_pressure(uncomp_press);
 
         time_t now;
         char strftime_buf[64];
@@ -169,17 +161,18 @@ void app_main(void)
         strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
     
         // --- Write to SD card in CSV format ---
-        int writeStatus = spi_sdcard_write_csv("dati.csv", strftime_buf, temperature_c, pressure_pa);
+        int writeStatus = -1;
+        writeStatus = spi_sdcard_write_csv("dati.csv", strftime_buf, temperature_c, pressure_pa);
 
-        ESP_LOGI(TAG, "Temperature: %.2f C, Pressure: %ld Pa", temperature_c, pressure_pa);
+        ESP_LOGI(TAG, "Temperature: %.2f C, Pressure: %ld Pa, write status %d", temperature_c, pressure_pa,writeStatus);
 
         // --- Rotary Encoder State ---
       
-        // Display on Olde
+        // Display on Oled
         
         i2c_oled_write_text(I2C_OLED_NUM, 0, 0, "Stato letture");
          
-      
+       
         char oledOut[16];
   
         snprintf(oledOut, sizeof(oledOut), "Temp: %.2f C", temperature_c);

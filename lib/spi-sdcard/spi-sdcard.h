@@ -6,6 +6,7 @@
 #define SPI_CARD_ERROR_FILE_OPEN   -2
 #define SPI_CARD_OK                 0
 
-//void spi_sdcard_init();
+
 void spi_sdcard_full_init();
 int spi_sdcard_write_csv(const char *filename, char *  ts, float temperature, long pressure);
+int spi_sdcard_format(void);
