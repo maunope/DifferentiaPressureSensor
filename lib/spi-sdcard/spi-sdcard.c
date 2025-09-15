@@ -15,11 +15,15 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h" // Required for vTaskDelay
 
+
+//TODO Make this thread safe with a mutex, 
+//so that file operations from different tasks don't interfere with each other
+
 static const char *TAG = "SPI_SDCARD";
 static bool mounted = false;
 static sdmmc_card_t *s_card = NULL;
 static bool esp32_access_enabled = true; // New global state flag
-static SemaphoreHandle_t s_sd_card_mutex; // Mutex for thread-safe access
+//static SemaphoreHandle_t s_sd_card_mutex; // Mutex for thread-safe access
 
 // Global host and mount configuration for use in the event callback
 // Using SDSPI host and slot configuration for SPI mode
@@ -49,10 +53,11 @@ static void init_gpio_cs()
     };
     gpio_config(&io_conf);
 }
-
+/*
 // Callback for when the PC mounts or unmounts the disk
 static void msc_mount_change_cb(tinyusb_msc_event_t *event)
 {
+    ESP_LOGI(TAG,"msc_mount_change_cb %b", event->mount_changed_data.is_mounted);
     xSemaphoreTake(s_sd_card_mutex, portMAX_DELAY);
 
     if (event->mount_changed_data.is_mounted) {
@@ -90,6 +95,7 @@ static void msc_mount_change_cb(tinyusb_msc_event_t *event)
     xSemaphoreGive(s_sd_card_mutex);
 }
 
+*/
 // Internal function to initialize the SD card and its file system
 static void spi_sdcard_internal_init()
 {
@@ -100,13 +106,13 @@ void spi_sdcard_full_init()
 {
     ESP_LOGI(TAG, "Starting full TinyUSB and SD card initialization.");
     
-    // Create the mutex before any other tasks can try to use it
+ /*   // Create the mutex before any other tasks can try to use it
     s_sd_card_mutex = xSemaphoreCreateMutex();
     if (s_sd_card_mutex == NULL) {
         ESP_LOGE(TAG, "Failed to create mutex.");
         return;
     }
-
+*/
     // TinyUSB configuration
     const tinyusb_config_t tusb_cfg = {
         .device_descriptor = NULL,
@@ -163,7 +169,7 @@ void spi_sdcard_full_init()
         tinyusb_msc_storage_init_sdmmc(&msc_cfg);
         
         // Register the callback for the mount/unmount event
-        tinyusb_msc_register_callback(TINYUSB_MSC_EVENT_MOUNT_CHANGED, msc_mount_change_cb);
+       // tinyusb_msc_register_callback(TINYUSB_MSC_EVENT_MOUNT_CHANGED, msc_mount_change_cb);
         
         ESP_LOGI(TAG, "TinyUSB MSC storage initialized.");
     }
@@ -171,17 +177,22 @@ void spi_sdcard_full_init()
 
 int spi_sdcard_write_csv(const char *filename, char * ts, float temperature, long pressure)
 {
-    // Take the mutex before any file operation
-    if (xSemaphoreTake(s_sd_card_mutex, portMAX_DELAY) != pdTRUE) {
-        ESP_LOGE(TAG, "Failed to acquire mutex.");
-        return -4;
+    if (tud_ready()) {
+        ESP_LOGW(TAG, "USB is connected, skipping SD card write.");
+        return -5; // Return a new error code for this state
     }
 
-    if (!esp32_access_enabled) {
+    // Take the mutex before any file operation
+  /*  if (xSemaphoreTake(s_sd_card_mutex, portMAX_DELAY) != pdTRUE) {
+        ESP_LOGE(TAG, "Failed to acquire mutex.");
+        return -4;
+    }*/
+
+   /* if (!esp32_access_enabled) {
         ESP_LOGW(TAG, "SD card is mounted by USB host, skipping write.");
         xSemaphoreGive(s_sd_card_mutex); // Release mutex before returning
         return -3; // Return a new error code for this state
-    }
+    }*/
 
     char filepath[64];
     snprintf(filepath, sizeof(filepath), "/sdcard/%s", filename);
@@ -189,19 +200,19 @@ int spi_sdcard_write_csv(const char *filename, char * ts, float temperature, lon
     FILE *f = fopen(filepath, "a");
     if (f == NULL) {
         ESP_LOGE(TAG, "Failed to open file for writing: %s", filepath);
-        xSemaphoreGive(s_sd_card_mutex); // Release mutex on failure
+       // xSemaphoreGive(s_sd_card_mutex); // Release mutex on failure
         return -2;
     }
 
     // Write CSV line: ms,temperature,pressure
-    fprintf(f, "%s,%.2f,%ld\n", ts, temperature, pressure);
+    int writtenBytes=fprintf(f, "%s,%.2f,%ld\n", ts, temperature, pressure);
 
     fclose(f);
     
     // Give the mutex back after all file operations are complete
-    xSemaphoreGive(s_sd_card_mutex);
+   /* xSemaphoreGive(s_sd_card_mutex);*/
     
-    return 0;
+    return writtenBytes>0?0:-1; // Return 0 on success, -1 on write failure
 }
 
 
@@ -210,10 +221,10 @@ int spi_sdcard_format(void)
     int ret = ESP_OK;
 
     // Acquire the mutex to ensure no other file operations are in progress
-    if (xSemaphoreTake(s_sd_card_mutex, portMAX_DELAY) != pdTRUE) {
+   /* if (xSemaphoreTake(s_sd_card_mutex, portMAX_DELAY) != pdTRUE) {
         ESP_LOGE(TAG, "Failed to acquire mutex for formatting.");
         return ESP_FAIL;
-    }
+    }*/
     
     ESP_LOGW(TAG, "Formatting the SD card. All data will be erased!");
 
@@ -223,7 +234,7 @@ int spi_sdcard_format(void)
         ret = esp_vfs_fat_sdcard_unmount("/sdcard", s_card);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to unmount SD card before formatting: %s", esp_err_to_name(ret));
-            xSemaphoreGive(s_sd_card_mutex);
+         //   xSemaphoreGive(s_sd_card_mutex);
             return ret;
         }
         mounted = false;
@@ -251,7 +262,7 @@ int spi_sdcard_format(void)
     }
 
     // Release the mutex
-    xSemaphoreGive(s_sd_card_mutex);
+   // xSemaphoreGive(s_sd_card_mutex);
 
     return ret;
 }
