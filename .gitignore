@@ -53,7 +53,8 @@ sdkconfig
 
 sdkconfig.4d_systems_esp32s3_gen4_r8n16_old
 sdkconfig.old
-sdkconfig.systemsesp32s3_debug
+s
 
 
 dependencies.lock
+sdkconfig.systemsesp32s3_debug.old

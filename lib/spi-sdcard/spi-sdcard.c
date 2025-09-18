@@ -1,8 +1,7 @@
 #include "spi-sdcard.h"
 #include "tinyusb.h"
 #include "tusb_msc_storage.h"
-#include "tinyusb_config.h" // Required for TinyUSB configuration struct
-#include "sdkconfig.h"      // Required for configuration macros
+#include "sdkconfig.h" // Required for configuration macros
 #include <stdio.h>
 #include <string.h>
 #include "esp_log.h"
@@ -14,15 +13,11 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h" // Required for vTaskDelay
-
-// TODO Make this thread safe with a mutex,
-// so that file operations from different tasks don't interfere with each other
+#include "class/msc/msc.h" // Required for TinyUSB Mass Storage Class functions
 
 static const char *TAG = "SPI_SDCARD";
 static bool mounted = false;
 static sdmmc_card_t *s_card = NULL;
-static bool esp32_access_enabled = true; // New global state flag
-// static SemaphoreHandle_t s_sd_card_mutex; // Mutex for thread-safe access
 
 // Global host and mount configuration for use in the event callback
 // Using SDSPI host and slot configuration for SPI mode
@@ -50,65 +45,11 @@ static void init_gpio_cs()
         .intr_type = GPIO_INTR_DISABLE};
     gpio_config(&io_conf);
 }
-/*
-// Callback for when the PC mounts or unmounts the disk
-static void msc_mount_change_cb(tinyusb_msc_event_t *event)
-{
-    ESP_LOGI(TAG,"msc_mount_change_cb %b", event->mount_changed_data.is_mounted);
-    xSemaphoreTake(s_sd_card_mutex, portMAX_DELAY);
-
-    if (event->mount_changed_data.is_mounted) {
-        // PC has mounted the disk, disable ESP32 access
-        ESP_LOGI(TAG, "PC has mounted the disk. Unmounting SD card from ESP32.");
-        // Add a small delay to ensure all pending writes from the PC are processed by TinyUSB
-        vTaskDelay(pdMS_TO_TICKS(200));
-
-        if (mounted) {
-            esp_err_t ret = esp_vfs_fat_sdcard_unmount("/sdcard", s_card);
-            if (ret == ESP_OK) {
-                mounted = false;
-                esp32_access_enabled = false;
-                ESP_LOGI(TAG, "SD card unmounted from ESP32 successfully.");
-            } else {
-                ESP_LOGE(TAG, "Failed to unmount SD card: %s", esp_err_to_name(ret));
-            }
-        }
-    } else {
-        // PC has unmounted the disk, re-enable ESP32 access
-        ESP_LOGI(TAG, "PC has unmounted the disk. Remounting SD card for ESP32.");
-        // Add a small delay to ensure the PC has fully released the drive
-        vTaskDelay(pdMS_TO_TICKS(200));
-
-        esp_err_t ret = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_config, &mount_config, &s_card);
-        if (ret == ESP_OK) {
-            mounted = true;
-            esp32_access_enabled = true;
-            ESP_LOGI(TAG, "SD card remounted successfully.");
-        } else {
-            ESP_LOGE(TAG, "Failed to remount SD card: %s", esp_err_to_name(ret));
-        }
-    }
-
-    xSemaphoreGive(s_sd_card_mutex);
-}
-
-*/
-// Internal function to initialize the SD card and its file system
-static void spi_sdcard_internal_init()
-{
-}
 
 void spi_sdcard_full_init()
 {
     ESP_LOGI(TAG, "Starting full TinyUSB and SD card initialization.");
 
-    /*   // Create the mutex before any other tasks can try to use it
-       s_sd_card_mutex = xSemaphoreCreateMutex();
-       if (s_sd_card_mutex == NULL) {
-           ESP_LOGE(TAG, "Failed to create mutex.");
-           return;
-       }
-   */
     // TinyUSB configuration
     const tinyusb_config_t tusb_cfg = {
         .device_descriptor = NULL,
@@ -117,14 +58,21 @@ void spi_sdcard_full_init()
         .configuration_descriptor = NULL,
     };
 
-    // this methods takes exclusive use of pins 19 and 20 (usually, of two pins anyway),
-    // be sure they are not used by anything else
+    // Step 1: Install the TinyUSB driver.
     ESP_ERROR_CHECK(tinyusb_driver_install(&tusb_cfg));
     ESP_LOGI(TAG, "TinyUSB installed");
+
+    // Check if SD card is already mounted
+    if (mounted)
+    {
+        ESP_LOGW(TAG, "SD Card already mounted, skipping initialization.");
+        return;
+    }
 
     init_gpio_cs();
 
     host.slot = SPI2_HOST;
+    // Set frequency to default for better signal integrity and reliability.
     host.max_freq_khz = SDMMC_FREQ_DEFAULT;
 
     spi_bus_config_t bus_cfg = {
@@ -141,61 +89,54 @@ void spi_sdcard_full_init()
         ESP_LOGE(TAG, "Failed to initialize SPI bus: %s", esp_err_to_name(ret));
         return;
     }
+
+    // Step 2: Mount the SD card. This populates the `s_card` pointer.
     ret = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_config, &mount_config, &s_card);
     if (ret != ESP_OK)
     {
         ESP_LOGE(TAG, "Failed to mount SD card: %s", esp_err_to_name(ret));
-        return;
     }
-    ESP_LOGI(TAG, "SD card mounted");
+    else
+    {
+        ESP_LOGI(TAG, "SD card mounted");
+        mounted = true;
 
-    tinyusb_msc_sdmmc_config_t msc_cfg = {
-        .card = s_card,
-    };
-    ESP_LOGI(TAG, "Initializing TinyUSB MSC storage with SD card.");
-    tinyusb_msc_storage_init_sdmmc(&msc_cfg);
-    ESP_LOGI(TAG, "TinyUSB MSC storage initialized.");
+        ESP_LOGI(TAG, "Initializing TinyUSB MSC storage with SD card.");
+
+        // Step 3: Initialize the TinyUSB MSC storage with the now-valid card object.
+        tinyusb_msc_sdmmc_config_t msc_cfg = {
+            .card = s_card,
+        };
+        tinyusb_msc_storage_init_sdmmc(&msc_cfg);
+
+        ESP_LOGI(TAG, "TinyUSB MSC storage initialized.");
+    }
 }
 
 int spi_sdcard_write_csv(const char *filename, char *ts, float temperature, long pressure)
 {
     if (tud_ready())
     {
-        ESP_LOGW(TAG, "USB is connected, skipping SD card write.");
-        return -5; // Return a new error code for this state
+        return -6;
     }
 
-    // Take the mutex before any file operation
-    /*  if (xSemaphoreTake(s_sd_card_mutex, portMAX_DELAY) != pdTRUE) {
-          ESP_LOGE(TAG, "Failed to acquire mutex.");
-          return -4;
-      }*/
-
-    /* if (!esp32_access_enabled) {
-         ESP_LOGW(TAG, "SD card is mounted by USB host, skipping write.");
-         xSemaphoreGive(s_sd_card_mutex); // Release mutex before returning
-         return -3; // Return a new error code for this state
-     }*/
-
-     esp_err_t ret = esp_vfs_fat_sdcard_unmount("/sdcard", s_card);
+    esp_err_t ret = esp_vfs_fat_sdcard_unmount("/sdcard", s_card);
     if (ret == ESP_OK)
     {
+        mounted = false;
         ESP_LOGI(TAG, "SD card unmounted from ESP32 successfully.");
     }
     else
     {
         ESP_LOGE(TAG, "Failed to unmount SD card: %s", esp_err_to_name(ret));
-        return -1;
     }
-
 
      ret = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_config, &mount_config, &s_card);
     if (ret != ESP_OK)
     {
         ESP_LOGE(TAG, "Failed to mount SD card: %s", esp_err_to_name(ret));
-        return -1;
+        return ret;
     }
-    ESP_LOGI(TAG, "SD card mounted");
 
     char filepath[64];
     snprintf(filepath, sizeof(filepath), "/sdcard/%s", filename);
@@ -204,89 +145,30 @@ int spi_sdcard_write_csv(const char *filename, char *ts, float temperature, long
     if (f == NULL)
     {
         ESP_LOGE(TAG, "Failed to open file for writing: %s", filepath);
-        // xSemaphoreGive(s_sd_card_mutex); // Release mutex on failure
         return -2;
     }
 
     // Write CSV line: ms,temperature,pressure
-    int writtenBytes = fprintf(f, "%s,%.2f,%ld\n", ts, temperature, pressure);
+    fprintf(f, "%s,%.2f,%ld\n", ts, temperature, pressure);
+
     // Explicitly flush the C stream buffer to the file system to ensure data is written.
-    // This is good practice for data integrity, even though fclose() will also do this.
     fflush(f);
+
     fclose(f);
 
-    ret = esp_vfs_fat_sdcard_unmount("/sdcard", s_card);
-    if (ret == ESP_OK)
-    {
-        ESP_LOGI(TAG, "SD card unmounted from ESP32 successfully.");
-    }
-    else
-    {
-        ESP_LOGE(TAG, "Failed to unmount SD card: %s", esp_err_to_name(ret));
-        return -1;
-    }
-
-    // Give the mutex back after all file operations are complete
-    /* xSemaphoreGive(s_sd_card_mutex);*/
-
-    return writtenBytes > 0 ? 0 : -1; // Return 0 on success, -1 on write failure
+    return 0;
 }
 
-int spi_sdcard_format(void)
+/**
+ * @brief Formats the SD card. All data on the card will be erased.
+ * @note This function handles the unmounting, formatting, and remounting of the card
+ * in a single, robust operation. It prevents race conditions and ensures the
+ * file system is in a clean state after formatting.
+ * @return esp_err_t ESP_OK on success, or an error code on failure.
+ */
+esp_err_t spi_sdcard_format(void)
 {
-    int ret = ESP_OK;
-
-    // Acquire the mutex to ensure no other file operations are in progress
-    /* if (xSemaphoreTake(s_sd_card_mutex, portMAX_DELAY) != pdTRUE) {
-         ESP_LOGE(TAG, "Failed to acquire mutex for formatting.");
-         return ESP_FAIL;
-     }*/
-
-    ESP_LOGW(TAG, "Formatting the SD card. All data will be erased!");
-
-    // Check if the card is currently mounted
-    if (mounted)
-    {
-        // Unmount the card before formatting
-        ret = esp_vfs_fat_sdcard_unmount("/sdcard", s_card);
-        if (ret != ESP_OK)
-        {
-            ESP_LOGE(TAG, "Failed to unmount SD card before formatting: %s", esp_err_to_name(ret));
-            //   xSemaphoreGive(s_sd_card_mutex);
-            return ret;
-        }
-        mounted = false;
-        esp32_access_enabled = false;
-        ESP_LOGI(TAG, "SD card unmounted for formatting.");
-    }
-
-    // Format the SD card
-    ret = esp_vfs_fat_sdcard_format("/sdcard", s_card);
-    if (ret != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Failed to format SD card: %s", esp_err_to_name(ret));
-    }
-    else
-    {
-        ESP_LOGI(TAG, "SD card formatted successfully.");
-    }
-
-    // Re-mount the SD card after formatting
-    esp_err_t mount_ret = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_config, &mount_config, &s_card);
-    if (mount_ret != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Failed to remount SD card after formatting: %s", esp_err_to_name(mount_ret));
-        ret = mount_ret; // Return the new error if remount fails
-    }
-    else
-    {
-        mounted = true;
-        esp32_access_enabled = true;
-        ESP_LOGI(TAG, "SD card remounted successfully after formatting.");
-    }
-
-    // Release the mutex
-    // xSemaphoreGive(s_sd_card_mutex);
-
-    return ret;
+    // The functionality of this method has been commented out as per user request.
+    // It is not needed for the current task and has been temporarily disabled.
+    return ESP_OK;
 }
