@@ -1,5 +1,5 @@
 ## idf_component.yml
 dependencies:
   # This adds the official esp_tinyusb component to your project
-    espressif/esp_tinyusb: "1.7.6"
+    espressif/esp_tinyusb: "2.0.0"
 

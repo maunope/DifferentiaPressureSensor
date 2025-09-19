@@ -1,27 +1,26 @@
 #include "spi-sdcard.h"
 #include "tinyusb.h"
-#include "tusb_msc_storage.h"
-#include "sdkconfig.h" // Required for configuration macros
+#include "sdkconfig.h"
 #include <stdio.h>
 #include <string.h>
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
-#include "driver/sdspi_host.h" // Use the SDSPI host driver
+#include "driver/sdspi_host.h"
 #include "driver/spi_common.h"
 #include "sdmmc_cmd.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
-#include "freertos/task.h" // Required for vTaskDelay
-#include "class/msc/msc.h" // Required for TinyUSB Mass Storage Class functions
+#include "freertos/task.h"
+#include "tinyusb_msc.h"
+#include "tinyusb_default_config.h"
 
-
-static const char *TAG = "SPI_SDCARD";
+static const char *TAG = "SPI_SDCARD_V2";
 static bool mounted = false;
 static sdmmc_card_t *s_card = NULL;
+static tinyusb_msc_storage_handle_t s_msc_storage_handle = NULL;
 
-// Global host and mount configuration for use in the event callback
-// Using SDSPI host and slot configuration for SPI mode
+// Global host and mount configuration
 static sdmmc_host_t host = SDSPI_HOST_DEFAULT();
 static sdspi_device_config_t slot_config = {
     .host_id = SPI2_HOST,
@@ -30,10 +29,12 @@ static sdspi_device_config_t slot_config = {
     .gpio_wp = -1,
     .gpio_int = -1,
 };
+
 static esp_vfs_fat_sdmmc_mount_config_t mount_config = {
     .format_if_mount_failed = true,
     .max_files = 5,
-    .allocation_unit_size = 16 * 1024};
+    .allocation_unit_size = 16 * 1024
+};
 
 // Configure CS pin with pull-up for SPI mode
 static void init_gpio_cs()
@@ -43,40 +44,27 @@ static void init_gpio_cs()
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_ENABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE};
+        .intr_type = GPIO_INTR_DISABLE
+    };
     gpio_config(&io_conf);
+}/*
+  static void device_event_handler(tinyusb_event_t *event, void *arg) {
+    switch (event->id) {
+    case TINYUSB_EVENT_ATTACHED:
+    ESP_LOGI(TAG, "TinyUSB MSC is now mounted on the host.");
+    case TINYUSB_EVENT_DETACHED:
+    ESP_LOGI(TAG, "TinyUSB MSC is now detached from the host.");
+    default:
+        break;
+    }
 }
-
-
-void msc_keep_alive_cb(tinyusb_msc_event_t *event)
-{
-    ESP_LOGD(TAG, "USB keep-alive signal detected.");
-}
-
-
+*/
 
 void spi_sdcard_full_init()
 {
+    ESP_LOGI(TAG, "Starting full TinyUSB and SD card initialization (v2.0.0).");
 
-
-
-    ESP_LOGI(TAG, "Starting full TinyUSB and SD card initialization.");
-
-    // TinyUSB configuration
-    const tinyusb_config_t tusb_cfg = {
-        .device_descriptor = NULL,
-        .string_descriptor = NULL,
-        .external_phy = false, // In the ESP32-S3, the USB PHY is integrated
-        .configuration_descriptor = NULL,
-    };
-
-    // Step 1: Install the TinyUSB driver.
-    ESP_ERROR_CHECK(tinyusb_driver_install(&tusb_cfg));
-    ESP_LOGI(TAG, "TinyUSB installed");
-
-    // Check if SD card is already mounted
-    if (mounted)
-    {
+    if (mounted) {
         ESP_LOGW(TAG, "SD Card already mounted, skipping initialization.");
         return;
     }
@@ -84,8 +72,7 @@ void spi_sdcard_full_init()
     init_gpio_cs();
 
     host.slot = SPI2_HOST;
-    // Set frequency to default for better signal integrity and reliability.
-    host.max_freq_khz = SDMMC_FREQ_PROBING;
+    host.max_freq_khz = SDMMC_FREQ_DEFAULT;
 
     spi_bus_config_t bus_cfg = {
         .mosi_io_num = GPIO_NUM_11,
@@ -93,82 +80,83 @@ void spi_sdcard_full_init()
         .sclk_io_num = GPIO_NUM_12,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
-        .max_transfer_sz = 4000};
+        .max_transfer_sz = 4000
+    };
 
     esp_err_t ret = spi_bus_initialize(host.slot, &bus_cfg, SDSPI_DEFAULT_DMA);
-    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE)
-    {
+    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "Failed to initialize SPI bus: %s", esp_err_to_name(ret));
         return;
     }
 
-    // Step 2: Mount the SD card. This populates the `s_card` pointer.
     ret = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_config, &mount_config, &s_card);
-    if (ret != ESP_OK)
-    {
+    if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to mount SD card: %s", esp_err_to_name(ret));
-    }
-    else
-    {
-        ESP_LOGI(TAG, "SD card mounted");
+    } else {
+        ESP_LOGI(TAG, "SD card mounted.");
         mounted = true;
 
-        ESP_LOGI(TAG, "Initializing TinyUSB MSC storage with SD card.");
-
-        // Step 3: Initialize the TinyUSB MSC storage with the now-valid card object.
-        tinyusb_msc_sdmmc_config_t msc_cfg = {
-            .card = s_card,
+        ESP_LOGI(TAG, "Configuring and installing TinyUSB for MSC.");
+        
+        // Step 1: Install the general TinyUSB driver with a valid task config.
+        const tinyusb_config_t tusb_cfg = {
+            .task.size = 4096,
+            .task.priority = 2,
+            .task.xCoreID = 0
         };
-        tinyusb_msc_storage_init_sdmmc(&msc_cfg);
 
-        ESP_LOGI(TAG, "TinyUSB MSC storage initialized.");
+       // const tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG(device_event_handler);
+        
+        ESP_ERROR_CHECK(tinyusb_driver_install(&tusb_cfg));
+
+        // Step 2: Create a handle for the SD card storage using the new API
+        tinyusb_msc_storage_config_t sd_storage_config = {
+            .medium = {
+                .wl_handle = (long)s_card,
+            },
+            
+        };
+        
+        ESP_ERROR_CHECK(tinyusb_msc_new_storage_sdmmc(&sd_storage_config, &s_msc_storage_handle));
+        
+
+        ESP_LOGI(TAG, "TinyUSB and MSC storage initialized.");
     }
-
-
 }
 
 int spi_sdcard_write_csv(const char *filename, char *ts, float temperature, long pressure)
 {
-    if (tud_ready())
-    {
+    if (tud_ready()) {
+        ESP_LOGE(TAG, "TinyUSB is connected and mounted, cannot write to SD card directly.");
         return -6;
     }
 
-    
     esp_err_t ret = esp_vfs_fat_sdcard_unmount("/sdcard", s_card);
-    if (ret == ESP_OK)
-    {
+    if (ret == ESP_OK) {
         mounted = false;
         ESP_LOGI(TAG, "SD card unmounted from ESP32 successfully.");
-    }
-    else
-    {
+    } else {
         ESP_LOGE(TAG, "Failed to unmount SD card: %s", esp_err_to_name(ret));
+        return -1;
     }
 
-     ret = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_config, &mount_config, &s_card);
-    if (ret != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Failed to mount SD card: %s", esp_err_to_name(ret));
-        return ret;
+    ret = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_config, &mount_config, &s_card);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to remount SD card: %s", esp_err_to_name(ret));
+        return -2;
     }
 
     char filepath[64];
     snprintf(filepath, sizeof(filepath), "/sdcard/%s", filename);
 
     FILE *f = fopen(filepath, "a");
-    if (f == NULL)
-    {
+    if (f == NULL) {
         ESP_LOGE(TAG, "Failed to open file for writing: %s", filepath);
-        return -2;
+        return -3;
     }
 
-    // Write CSV line: ms,temperature,pressure
     fprintf(f, "%s,%.2f,%ld\n", ts, temperature, pressure);
-
-    // Explicitly flush the C stream buffer to the file system to ensure data is written.
     fflush(f);
-
     fclose(f);
 
     return 0;
@@ -183,7 +171,5 @@ int spi_sdcard_write_csv(const char *filename, char *ts, float temperature, long
  */
 esp_err_t spi_sdcard_format(void)
 {
-    // The functionality of this method has been commented out as per user request.
-    // It is not needed for the current task and has been temporarily disabled.
     return ESP_OK;
 }
