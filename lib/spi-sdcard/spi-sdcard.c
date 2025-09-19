@@ -15,6 +15,7 @@
 #include "freertos/task.h" // Required for vTaskDelay
 #include "class/msc/msc.h" // Required for TinyUSB Mass Storage Class functions
 
+
 static const char *TAG = "SPI_SDCARD";
 static bool mounted = false;
 static sdmmc_card_t *s_card = NULL;
@@ -46,8 +47,19 @@ static void init_gpio_cs()
     gpio_config(&io_conf);
 }
 
+
+void msc_keep_alive_cb(tinyusb_msc_event_t *event)
+{
+    ESP_LOGD(TAG, "USB keep-alive signal detected.");
+}
+
+
+
 void spi_sdcard_full_init()
 {
+
+
+
     ESP_LOGI(TAG, "Starting full TinyUSB and SD card initialization.");
 
     // TinyUSB configuration
@@ -73,7 +85,7 @@ void spi_sdcard_full_init()
 
     host.slot = SPI2_HOST;
     // Set frequency to default for better signal integrity and reliability.
-    host.max_freq_khz = SDMMC_FREQ_DEFAULT;
+    host.max_freq_khz = SDMMC_FREQ_PROBING;
 
     spi_bus_config_t bus_cfg = {
         .mosi_io_num = GPIO_NUM_11,
@@ -111,6 +123,8 @@ void spi_sdcard_full_init()
 
         ESP_LOGI(TAG, "TinyUSB MSC storage initialized.");
     }
+
+
 }
 
 int spi_sdcard_write_csv(const char *filename, char *ts, float temperature, long pressure)
@@ -120,6 +134,7 @@ int spi_sdcard_write_csv(const char *filename, char *ts, float temperature, long
         return -6;
     }
 
+    
     esp_err_t ret = esp_vfs_fat_sdcard_unmount("/sdcard", s_card);
     if (ret == ESP_OK)
     {
