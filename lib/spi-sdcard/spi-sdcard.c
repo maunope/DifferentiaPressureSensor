@@ -137,7 +137,7 @@ int spi_sdcard_write_csv(const char *filename, char *ts, float temperature, long
         ESP_LOGI(TAG, "SD card unmounted from ESP32 successfully.");
     } else {
         ESP_LOGE(TAG, "Failed to unmount SD card: %s", esp_err_to_name(ret));
-        return -1;
+       // return -1;
     }
 
     ret = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_config, &mount_config, &s_card);

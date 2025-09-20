@@ -1,6 +1,7 @@
 #include "rotaryencoder.h"
 #include "esp_log.h"
 #include "freertos/task.h"
+#include "ui_render.h"
 
 static const char *TAG = "ROTARY_ENCODER";
 
@@ -46,7 +47,7 @@ void rotaryencoder_init(const rotaryencoder_config_t *cfg)
     // mode and pull_up_en are already set from before
     gpio_config(&io_conf);
 
-    gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
+    gpio_evt_queue = xQueueCreate(16, sizeof(uint32_t));
     gpio_install_isr_service(0);
     gpio_isr_handler_add(encoder_cfg.pin_a, gpio_isr_handler, (void *)encoder_cfg.pin_a);
     gpio_isr_handler_add(encoder_cfg.pin_b, gpio_isr_handler, (void *)encoder_cfg.pin_b);
@@ -57,9 +58,13 @@ static void rotary_encoder_task(void *arg)
 {
     uint32_t gpio_num;
     TickType_t last_button_press_time = 0;
+    int32_t encoder_position = 0; // Track absolute position
 
     while (1)
     {
+         // DO NOT log  in this loop, unless it's for debug
+         // ESP_LOGI is stack-heavy and can stack overflow this task when many events come in.
+         // OR, figure some clever way to log in a more memory-efficient manner.
         if (xQueueReceive(gpio_evt_queue, &gpio_num, portMAX_DELAY))
         {
             if (gpio_num == encoder_cfg.button_pin)
@@ -71,8 +76,11 @@ static void rotary_encoder_task(void *arg)
                     vTaskDelay(pdMS_TO_TICKS(10));
                     if (gpio_get_level(encoder_cfg.button_pin) == 0)
                     {
-                        ESP_LOGI(TAG, "Rotary Encoder Button Pressed!");
+                     
+                      //  ESP_LOGI(TAG, "Rotary Encoder Button Pressed!");
                         g_encoder_button_state = ENC_BTN_PRESSED;
+                        // Send button event to UI
+                        uiRender_send_event(UI_EVENT_BTN, NULL, 0);
                     }
                     last_button_press_time = current_time;
                 }
@@ -84,23 +92,29 @@ static void rotary_encoder_task(void *arg)
                 
                 // Use the state table to find the direction
                 int8_t direction = KNOB_STATES[(g_encoder_state << 2) | new_state];
-                
-                switch (direction)
-                {
-                case 1: // Clockwise
-                    ESP_LOGI(TAG, "Rotary Encoder: Clockwise");
+
+                if (direction == 1) { // Clockwise
+                    encoder_position++;
+                   // ESP_LOGI(TAG, "Rotary Encoder: Clockwise, pos=%ld", encoder_position);
                     g_encoder_direction = ENC_DIR_CW;
-                    break;
-                case -1: // Counter-Clockwise
-                    ESP_LOGI(TAG, "Rotary Encoder: Counter-Clockwise");
+                    // Send event only on even positions (0, 2, 4, ...)
+                    if ((encoder_position % 2) == 0) {
+                        uiRender_send_event(UI_EVENT_CW, NULL, 0);
+                    }
+                } else if (direction == -1) { // Counter-Clockwise
+                    encoder_position--;
+                  //  ESP_LOGI(TAG, "Rotary Encoder: Counter-Clockwise, pos=%ld", encoder_position);
                     g_encoder_direction = ENC_DIR_CCW;
-                    break;
-                default: // No change or invalid state
-                    break;
+                    // Send event only on even positions (0, -2, -4, ...)
+                    if ((encoder_position % 2) == 0) {
+                        uiRender_send_event(UI_EVENT_CCW, NULL, 0);
+                    }
                 }
+                // else: no change or invalid state
 
                 // Update the state for the next transition
                 g_encoder_state = new_state;
+              
             }
         }
     }

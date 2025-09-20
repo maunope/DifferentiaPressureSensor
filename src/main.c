@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h" // Required for semaphore
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "esp_system.h"
@@ -20,6 +21,9 @@
 #include "../lib/rotaryencoder/rotaryencoder.h"
 #include "../lib/spi-sdcard/spi-sdcard.h"
 #include "../lib/i2c-oled/i2c-oled.h"
+#include "ui_render.h"
+#include "../lib/buffers.h"
+
 
 //DO NOT use pins 19 and 20, they are used by the flash memory
 
@@ -70,10 +74,15 @@ static esp_err_t i2c_master_init(void)
     return i2c_driver_install(i2c_master_port, conf.mode, 0, 0, 0);
 }
 
+// --- Global buffer and mutex definition ---
+sensor_buffer_t g_sensor_buffer = {0};
+SemaphoreHandle_t g_sensor_buffer_mutex = NULL;
+
 // --- Main Application Entry Point ---
 void app_main(void)
 {
 
+    g_sensor_buffer_mutex = xSemaphoreCreateMutex();
    
     // Initialize I2C
     esp_err_t err = i2c_master_init();
@@ -134,8 +143,12 @@ void app_main(void)
     i2c_oled_clear(I2C_OLED_NUM); 
     ESP_LOGI(TAG, "Starting BMP280 sensor readings and Encoder monitoring...");
 
-   
+    // Initialize UI renderer with OLED config
+    uiRender_init(I2C_OLED_NUM, I2C_OLED_SDA_IO, I2C_OLED_SCL_IO);
 
+    xTaskCreate(uiRender_task, "uiRender", 4096, NULL, 5, NULL);
+
+   
 
     while (1)
     {
@@ -146,7 +159,7 @@ void app_main(void)
         float temperature_c = bmp280_compensate_temperature(uncomp_temp);
 
         int32_t uncomp_press = bmp280_read_raw_pressure();
-        long pressure_pa = bmp280_compensate_pressure(uncomp_press);
+        float pressure_pa = bmp280_compensate_pressure(uncomp_press);
 
         time_t now;
         char strftime_buf[64];
@@ -164,28 +177,16 @@ void app_main(void)
         int writeStatus = -1;
         writeStatus = spi_sdcard_write_csv("dati.csv", strftime_buf, temperature_c, pressure_pa);
 
-        ESP_LOGI(TAG, "Temperature: %.2f C, Pressure: %ld Pa, write status %d", temperature_c, pressure_pa,writeStatus);
+        ESP_LOGI(TAG, "Temperature: %.2f C, Pressure: %.2f Pa, write status %d", temperature_c, pressure_pa, writeStatus);
 
-        // --- Rotary Encoder State ---
-      
-        // Display on Oled
-        
-        i2c_oled_write_text(I2C_OLED_NUM, 0, 0, "Stato letture");
-         
-       
-        char oledOut[16];
-  
-        snprintf(oledOut, sizeof(oledOut), "Temp: %.2f C", temperature_c);
-        i2c_oled_write_text(I2C_OLED_NUM, 1, 0, oledOut);
+        // --- Copy to shared buffer under mutex ---
+        if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+            g_sensor_buffer.temperature_c = temperature_c;
+            g_sensor_buffer.pressure_pa = pressure_pa;
+            g_sensor_buffer.writeStatus = writeStatus;
+            xSemaphoreGive(g_sensor_buffer_mutex);
+        }
 
-      
-        snprintf(oledOut, sizeof(oledOut), "Pres: %ld Pa", pressure_pa);
-        i2c_oled_write_text(I2C_OLED_NUM, 2, 0, oledOut);
-        
-        snprintf(oledOut, sizeof(oledOut), "File write: %s", writeStatus==SPI_CARD_OK?"OK":"KO");
-        i2c_oled_write_text(I2C_OLED_NUM, 3, 0, oledOut);
-        
-
-        vTaskDelay(pdMS_TO_TICKS(2000)); // Read sensors and update LCD every 2 seconds
+        vTaskDelay(pdMS_TO_TICKS(2000));
     }
 }
