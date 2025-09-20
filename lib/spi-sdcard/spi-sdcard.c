@@ -20,11 +20,13 @@ static bool mounted = false;
 static sdmmc_card_t *s_card = NULL;
 static tinyusb_msc_storage_handle_t s_msc_storage_handle = NULL;
 
+/
+
 // Global host and mount configuration
 static sdmmc_host_t host = SDSPI_HOST_DEFAULT();
 static sdspi_device_config_t slot_config = {
     .host_id = SPI2_HOST,
-    .gpio_cs = GPIO_NUM_10,
+    .gpio_cs = GPIO_NUM_13,
     .gpio_cd = -1,
     .gpio_wp = -1,
     .gpio_int = -1,
@@ -40,7 +42,7 @@ static esp_vfs_fat_sdmmc_mount_config_t mount_config = {
 static void init_gpio_cs()
 {
     gpio_config_t io_conf = {
-        .pin_bit_mask = (1ULL << GPIO_NUM_10),
+        .pin_bit_mask = (1ULL << GPIO_NUM_13),
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_ENABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
@@ -72,15 +74,14 @@ void spi_sdcard_full_init()
     init_gpio_cs();
 
     host.slot = SPI2_HOST;
-    host.max_freq_khz = SDMMC_FREQ_DEFAULT;
-
+    host.max_freq_khz = SDMMC_FR20EQ_DEFAULT;
     spi_bus_config_t bus_cfg = {
-        .mosi_io_num = GPIO_NUM_11,
-        .miso_io_num = GPIO_NUM_13,
-        .sclk_io_num = GPIO_NUM_12,
+        .mosi_io_num = GPIO_NUM_12,
+        .miso_io_num = GPIO_NUM_10,
+        .sclk_io_num = GPIO_NUM_11,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
-        .max_transfer_sz = 4000
+        .max_transfer_sz = 16384 // Increased DMA transfer size to 16384 bytes for better performance with large files
     };
 
     esp_err_t ret = spi_bus_initialize(host.slot, &bus_cfg, SDSPI_DEFAULT_DMA);
@@ -100,9 +101,10 @@ void spi_sdcard_full_init()
         
         // Step 1: Install the general TinyUSB driver with a valid task config.
         const tinyusb_config_t tusb_cfg = {
-            .task.size = 4096,
+            .task.size = 16384*2,
             .task.priority = 2,
             .task.xCoreID = 0
+            
         };
 
        // const tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG(device_event_handler);
@@ -126,6 +128,7 @@ void spi_sdcard_full_init()
 
 int spi_sdcard_write_csv(const char *filename, char *ts, float temperature, long pressure)
 {
+    return 0;
     if (tud_ready()) {
         ESP_LOGE(TAG, "TinyUSB is connected and mounted, cannot write to SD card directly.");
         return -6;
