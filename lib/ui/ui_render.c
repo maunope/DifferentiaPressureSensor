@@ -138,21 +138,27 @@ void render_sensor_callback(void) {
     if (!s_oled_initialized) return;
     static char last_lines[8][20] = {{0}};
     char new_lines[8][20] = {{0}};
+    
 
-    // Copy shared buffer under mutex
-    float temperature_c = 0.0f, pressure_pa = 0.0f;
+     sensor_buffer_t local_buffer;
+
     int writeStatus = -1;
+
     if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
-        temperature_c = g_sensor_buffer.temperature_c;
-        pressure_pa = g_sensor_buffer.pressure_pa;
-        writeStatus = g_sensor_buffer.writeStatus;
+        local_buffer = g_sensor_buffer;
         xSemaphoreGive(g_sensor_buffer_mutex);
     }
 
+    struct tm *local_time = localtime(&local_buffer.timestamp);
+    char time_str[20];
+    //todo make timestamp format a centralized var
+    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", local_time);
+
     snprintf(new_lines[0], sizeof(new_lines[0]), "%-16s", "Stato letture");
-    snprintf(new_lines[1], sizeof(new_lines[1]), "T: %.2f C    ", temperature_c);
-    snprintf(new_lines[2], sizeof(new_lines[2]), "P: %.2f Pa   ", pressure_pa);
-    snprintf(new_lines[3], sizeof(new_lines[3]), "File write: %s", writeStatus == 0 ? "OK" : "KO");
+    snprintf(new_lines[1], sizeof(new_lines[1]), "%s", time_str);
+    snprintf(new_lines[2], sizeof(new_lines[2]), "T: %.2f C    ", local_buffer.temperature_c);
+    snprintf(new_lines[3], sizeof(new_lines[3]), "P: %ld Pa   ", local_buffer.pressure_pa);
+    snprintf(new_lines[4], sizeof(new_lines[4]), "File write: %s", local_buffer.pressure_pa == 0 ? "OK" : "KO");
 
     for (uint8_t row = 0; row < 8; ++row) {
         if (new_lines[row][0] != '\0') {

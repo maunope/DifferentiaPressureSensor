@@ -1,12 +1,15 @@
 #pragma once
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include <time.h>
 
 // Shared sensor data buffer
 typedef struct {
     int writeStatus;
-    float pressure_pa;
+    long pressure_pa;
     float temperature_c;
+    time_t timestamp;
+    bool timestamp_from_rtc; 
 } sensor_buffer_t;
 
 // Global buffer and mutex declarations

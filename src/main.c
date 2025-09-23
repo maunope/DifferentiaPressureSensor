@@ -23,9 +23,9 @@
 #include "../lib/i2c-oled/i2c-oled.h"
 #include "ui_render.h"
 #include "../lib/buffers.h"
+#include "i2c-ds3231.h"
 
-
-//DO NOT use pins 19 and 20, they are used by the flash memory
+// DO NOT use pins 19 and 20, they are used by the flash memory
 
 // --- I2C Configuration for peripherals ---
 #define I2C_MASTER_NUM I2C_NUM_0
@@ -48,14 +48,12 @@
 static const char *TAG = "DifferentialPressureSensor";
 
 
-char buffer[10];
-float num = 12.34;
+bool rtc_available = false;
 
 /**
  * @brief i2c master initialization
  */
 
- 
 static esp_err_t i2c_master_init(void)
 {
     int i2c_master_port = I2C_MASTER_NUM;
@@ -74,6 +72,16 @@ static esp_err_t i2c_master_init(void)
     return i2c_driver_install(i2c_master_port, conf.mode, 0, 0, 0);
 }
 
+    void check_rtc_available(ds3231_t *rtc) {
+        struct tm timeinfo;
+        if (ds3231_get_time(rtc, &timeinfo) == 0) {
+            rtc_available = true;
+            ESP_LOGI(TAG, "RTC available, using DS3231 for timestamps.");
+        } else {
+            rtc_available = false;
+            ESP_LOGW(TAG, "RTC not available, using ESP32 system time.");
+        }
+    }
 // --- Global buffer and mutex definition ---
 sensor_buffer_t g_sensor_buffer = {0};
 SemaphoreHandle_t g_sensor_buffer_mutex = NULL;
@@ -83,7 +91,7 @@ void app_main(void)
 {
 
     g_sensor_buffer_mutex = xSemaphoreCreateMutex();
-   
+
     // Initialize I2C
     esp_err_t err = i2c_master_init();
     if (err != ESP_OK)
@@ -100,13 +108,13 @@ void app_main(void)
         return;
     }
 
- 
+    ds3231_t rtc;
 
-    volatile int dummy = 0; // This variable cannot be optimized away
+    //TODO make uniform with bmp280 init
+    ds3231_init(&rtc, I2C_NUM_0, 0x68);
+    check_rtc_available(&rtc);
 
-
-
-
+   
     // Initialize Rotary Encoder
     rotaryencoder_config_t encoder_cfg = {
         .pin_a = ROTARY_ENCODER_PIN_A,
@@ -125,22 +133,19 @@ void app_main(void)
         .scl_io_num = I2C_OLED_SCL_IO, // e.g. GPIO_NUM_18
         .sda_pullup_en = GPIO_PULLUP_ENABLE,
         .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = 400000
-    };
+        .master.clk_speed = 400000};
     i2c_param_config(I2C_OLED_NUM, &oled_conf);
     i2c_driver_install(I2C_OLED_NUM, oled_conf.mode, 0, 0, 0);
 
     // --- OLED test ---
 
     i2c_oled_init(I2C_OLED_NUM, I2C_OLED_SDA_IO, I2C_OLED_SCL_IO);
-    i2c_oled_clear(I2C_OLED_NUM); 
+    i2c_oled_clear(I2C_OLED_NUM);
     i2c_oled_write_text(I2C_OLED_NUM, 1, 0, "Booting...");
 
     spi_sdcard_full_init(); // Call once at startup
-   
-  
-    
-    i2c_oled_clear(I2C_OLED_NUM); 
+
+    i2c_oled_clear(I2C_OLED_NUM);
     ESP_LOGI(TAG, "Starting BMP280 sensor readings and Encoder monitoring...");
 
     // Initialize UI renderer with OLED config
@@ -148,44 +153,56 @@ void app_main(void)
 
     xTaskCreate(uiRender_task, "uiRender", 4096, NULL, 5, NULL);
 
-   
+    static bool rtc_available = false;
+
+
 
     while (1)
     {
-          
 
         // --- BMP280 Readings ---
         int32_t uncomp_temp = bmp280_read_raw_temp();
         float temperature_c = bmp280_compensate_temperature(uncomp_temp);
 
         int32_t uncomp_press = bmp280_read_raw_pressure();
-        float pressure_pa = bmp280_compensate_pressure(uncomp_press);
+        long pressure_pa = bmp280_compensate_pressure(uncomp_press);
 
-        time_t now;
-        char strftime_buf[64];
-        struct tm timeinfo;
+        // Read RTC time
+        time_t timestamp;
+        if (rtc_available) {
+            struct tm timeinfo;
+            if (ds3231_get_time(&rtc, &timeinfo) == 0) {
+                timestamp = mktime(&timeinfo);
+                timestamp = ds3231_compensate_dst(timestamp);
+            } else {
+                timestamp = time(NULL);
+            }
+        } else {
+            //todo must be the current timestamp based on millis from device
+            timestamp = time(NULL);
+        }
 
-        time(&now);
-        // Set timezone to China Standard Time
-        setenv("TZ", "CEST", 1);
-        tzset();
 
-        localtime_r(&now, &timeinfo);
-        strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
-    
-        // --- Write to SD card in CSV format ---
+        ESP_LOGI(TAG, "TS: %s Temperature: %.2f C, Pressure: %ld Pa, write status %d", timestamp, temperature_c, pressure_pa, g_sensor_buffer.writeStatus);
+
         int writeStatus = -1;
-        writeStatus = spi_sdcard_write_csv("dati.csv", strftime_buf, temperature_c, pressure_pa);
-
-        ESP_LOGI(TAG, "Temperature: %.2f C, Pressure: %.2f Pa, write status %d", temperature_c, pressure_pa, writeStatus);
-
         // --- Copy to shared buffer under mutex ---
-        if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
+        {
             g_sensor_buffer.temperature_c = temperature_c;
             g_sensor_buffer.pressure_pa = pressure_pa;
-            g_sensor_buffer.writeStatus = writeStatus;
+            g_sensor_buffer.timestamp = timestamp;
+            writeStatus = g_sensor_buffer.writeStatus;
             xSemaphoreGive(g_sensor_buffer_mutex);
         }
+        else
+        {
+            ESP_LOGE(TAG, "Failed to acquire mutex to update sensor buffer.");
+        }
+        ESP_LOGI(TAG, "TS: %s Temperature: %.2f C, Pressure: %ld Pa, write status %d", timestamp, temperature_c, pressure_pa, g_sensor_buffer.writeStatus);
+
+
+        spi_sdcard_write_csv("dati.csv");
 
         vTaskDelay(pdMS_TO_TICKS(2000));
     }

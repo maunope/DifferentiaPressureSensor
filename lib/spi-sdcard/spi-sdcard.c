@@ -14,13 +14,12 @@
 #include "freertos/task.h"
 #include "tinyusb_msc.h"
 #include "tinyusb_default_config.h"
+#include "../buffers.h"
 
 static const char *TAG = "SPI_SDCARD_V2";
 static bool mounted = false;
 static sdmmc_card_t *s_card = NULL;
 static tinyusb_msc_storage_handle_t s_msc_storage_handle = NULL;
-
-/
 
 // Global host and mount configuration
 static sdmmc_host_t host = SDSPI_HOST_DEFAULT();
@@ -35,8 +34,7 @@ static sdspi_device_config_t slot_config = {
 static esp_vfs_fat_sdmmc_mount_config_t mount_config = {
     .format_if_mount_failed = true,
     .max_files = 5,
-    .allocation_unit_size = 16 * 1024
-};
+    .allocation_unit_size = 16 * 1024};
 
 // Configure CS pin with pull-up for SPI mode
 static void init_gpio_cs()
@@ -46,27 +44,27 @@ static void init_gpio_cs()
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_ENABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE
-    };
+        .intr_type = GPIO_INTR_DISABLE};
     gpio_config(&io_conf);
-}/*
-  static void device_event_handler(tinyusb_event_t *event, void *arg) {
-    switch (event->id) {
-    case TINYUSB_EVENT_ATTACHED:
-    ESP_LOGI(TAG, "TinyUSB MSC is now mounted on the host.");
-    case TINYUSB_EVENT_DETACHED:
-    ESP_LOGI(TAG, "TinyUSB MSC is now detached from the host.");
-    default:
-        break;
-    }
-}
-*/
+} /*
+   static void device_event_handler(tinyusb_event_t *event, void *arg) {
+     switch (event->id) {
+     case TINYUSB_EVENT_ATTACHED:
+     ESP_LOGI(TAG, "TinyUSB MSC is now mounted on the host.");
+     case TINYUSB_EVENT_DETACHED:
+     ESP_LOGI(TAG, "TinyUSB MSC is now detached from the host.");
+     default:
+         break;
+     }
+ }
+ */
 
 void spi_sdcard_full_init()
 {
     ESP_LOGI(TAG, "Starting full TinyUSB and SD card initialization (v2.0.0).");
 
-    if (mounted) {
+    if (mounted)
+    {
         ESP_LOGW(TAG, "SD Card already mounted, skipping initialization.");
         return;
     }
@@ -74,7 +72,7 @@ void spi_sdcard_full_init()
     init_gpio_cs();
 
     host.slot = SPI2_HOST;
-    host.max_freq_khz = SDMMC_FR20EQ_DEFAULT;
+    host.max_freq_khz = SDMMC_FREQ_DEFAULT;
     spi_bus_config_t bus_cfg = {
         .mosi_io_num = GPIO_NUM_12,
         .miso_io_num = GPIO_NUM_10,
@@ -85,30 +83,34 @@ void spi_sdcard_full_init()
     };
 
     esp_err_t ret = spi_bus_initialize(host.slot, &bus_cfg, SDSPI_DEFAULT_DMA);
-    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE)
+    {
         ESP_LOGE(TAG, "Failed to initialize SPI bus: %s", esp_err_to_name(ret));
         return;
     }
 
     ret = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_config, &mount_config, &s_card);
-    if (ret != ESP_OK) {
+    if (ret != ESP_OK)
+    {
         ESP_LOGE(TAG, "Failed to mount SD card: %s", esp_err_to_name(ret));
-    } else {
+    }
+    else
+    {
         ESP_LOGI(TAG, "SD card mounted.");
         mounted = true;
 
         ESP_LOGI(TAG, "Configuring and installing TinyUSB for MSC.");
-        
+
         // Step 1: Install the general TinyUSB driver with a valid task config.
         const tinyusb_config_t tusb_cfg = {
-            .task.size = 16384*2,
+            .task.size = 16384 * 2,
             .task.priority = 2,
             .task.xCoreID = 0
-            
+
         };
 
-       // const tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG(device_event_handler);
-        
+        // const tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG(device_event_handler);
+
         ESP_ERROR_CHECK(tinyusb_driver_install(&tusb_cfg));
 
         // Step 2: Create a handle for the SD card storage using the new API
@@ -116,53 +118,125 @@ void spi_sdcard_full_init()
             .medium = {
                 .wl_handle = (long)s_card,
             },
-            
+
         };
-        
+
         ESP_ERROR_CHECK(tinyusb_msc_new_storage_sdmmc(&sd_storage_config, &s_msc_storage_handle));
-        
 
         ESP_LOGI(TAG, "TinyUSB and MSC storage initialized.");
     }
 }
 
-int spi_sdcard_write_csv(const char *filename, char *ts, float temperature, long pressure)
+// todo refactor to update struct
+void spi_sdcard_write_csv(const char *filename)
 {
-    return 0;
-    if (tud_ready()) {
-        ESP_LOGE(TAG, "TinyUSB is connected and mounted, cannot write to SD card directly.");
-        return -6;
+
+    if (tud_ready())
+    {
+        ESP_LOGI(TAG, "TinyUSB is connected and mounted, cannot write to SD card directly.");
+        // Acquire mutex and copy buffer
+        if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
+        {
+            g_sensor_buffer.writeStatus = -6; // Indicate USB is connected
+            xSemaphoreGive(g_sensor_buffer_mutex);
+        }
+        else
+        {
+            ESP_LOGE(TAG, "Failed to acquire mutex to update writeStatus.");
+            return;
+        }
     }
 
     esp_err_t ret = esp_vfs_fat_sdcard_unmount("/sdcard", s_card);
-    if (ret == ESP_OK) {
+    if (ret == ESP_OK)
+    {
         mounted = false;
         ESP_LOGI(TAG, "SD card unmounted from ESP32 successfully.");
-    } else {
+    }
+    else
+    {
         ESP_LOGE(TAG, "Failed to unmount SD card: %s", esp_err_to_name(ret));
-       // return -1;
+        if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
+        {
+            g_sensor_buffer.writeStatus = -1; // Indicate unmount failure
+            xSemaphoreGive(g_sensor_buffer_mutex);
+        }
+        else
+        {
+            ESP_LOGE(TAG, "Failed to acquire mutex to update writeStatus.");
+            return;
+        }
     }
 
     ret = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_config, &mount_config, &s_card);
-    if (ret != ESP_OK) {
+    if (ret != ESP_OK)
+    {
         ESP_LOGE(TAG, "Failed to remount SD card: %s", esp_err_to_name(ret));
-        return -2;
+        if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
+        {
+            g_sensor_buffer.writeStatus = -2; // Indicate remount failure
+            xSemaphoreGive(g_sensor_buffer_mutex);
+        }
+        else
+        {
+            ESP_LOGE(TAG, "Failed to acquire mutex to update writeStatus.");
+            return;
+        }
+    }
+
+    sensor_buffer_t local_buffer;
+
+    // Acquire mutex and copy buffer
+    if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
+    {
+        local_buffer = g_sensor_buffer;
+        xSemaphoreGive(g_sensor_buffer_mutex);
+    }
+    else
+    {
+        ESP_LOGE(TAG, "Failed to acquire mutex to update writeStatus.");
+        return;
     }
 
     char filepath[64];
     snprintf(filepath, sizeof(filepath), "/sdcard/%s", filename);
 
     FILE *f = fopen(filepath, "a");
-    if (f == NULL) {
+    if (f == NULL)
+    {
         ESP_LOGE(TAG, "Failed to open file for writing: %s", filepath);
-        return -3;
+        if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
+        {
+            g_sensor_buffer.writeStatus = -3; // Indicate file open failure
+            xSemaphoreGive(g_sensor_buffer_mutex);
+        }
+        else
+        {
+            ESP_LOGE(TAG, "Failed to acquire mutex to update writeStatus.");
+            return;
+        }
     }
 
-    fprintf(f, "%s,%.2f,%ld\n", ts, temperature, pressure);
+    struct tm *local_time = localtime(&local_buffer.timestamp);
+    char time_str[20];
+    //todo make timestamp format a centralized var
+    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", local_time);
+    fprintf(f, "%s,%.2f,%ld\n", time_str, local_buffer.temperature_c, local_buffer.pressure_pa);
     fflush(f);
     fclose(f);
 
-    return 0;
+    if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
+    {
+        g_sensor_buffer.writeStatus = 0; // Indicate file write success
+        xSemaphoreGive(g_sensor_buffer_mutex);
+    }
+    else
+    {
+        ESP_LOGE(TAG, "Failed to acquire mutex to update writeStatus.");
+        return;
+    }
+
+    return;
 }
 
 /**
@@ -172,7 +246,6 @@ int spi_sdcard_write_csv(const char *filename, char *ts, float temperature, long
  * file system is in a clean state after formatting.
  * @return esp_err_t ESP_OK on success, or an error code on failure.
  */
-esp_err_t spi_sdcard_format(void)
+void spi_sdcard_format(void)
 {
-    return ESP_OK;
 }
