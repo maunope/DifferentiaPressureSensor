@@ -3,11 +3,14 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "esp_log.h"
+
 #include <time.h>
 
 #include "../lib/i2c-bmp280/i2c-bmp280.h"
 #include "../lib/spi-sdcard/spi-sdcard.h"
 #include "../lib/buffers.h"
+
+#include "../lib/lipo-battery/lipo-battery.h"
 
 static const char *TAG = "DataloggerTask";
 
@@ -34,6 +37,11 @@ void datalogger_task(void *pvParameters)
             xSemaphoreGive(g_i2c_bus_mutex);
         }
 
+        
+        // --- Battery Readings ---
+        float battery_voltage = battery_reader_get_voltage();
+        int battery_percentage = battery_reader_get_percentage();
+
         time_t timestamp = time(NULL); // System time is synchronized with RTC at startup
 
         // --- Format timestamps for logging ---
@@ -52,6 +60,8 @@ void datalogger_task(void *pvParameters)
             g_sensor_buffer.temperature_c = temperature_c;
             g_sensor_buffer.pressure_pa = pressure_pa;
             g_sensor_buffer.timestamp = timestamp;
+            g_sensor_buffer.battery_voltage = battery_voltage;
+            g_sensor_buffer.battery_percentage = battery_percentage;
             xSemaphoreGive(g_sensor_buffer_mutex);
         }
         else
@@ -60,8 +70,7 @@ void datalogger_task(void *pvParameters)
         }
 
         // Log to console
-        ESP_LOGI(TAG, "TS: %s (UTC: %s) Temp: %.2fC, Press: %ldPa, SD Status: %d", local_time_str, utc_time_str, temperature_c, pressure_pa, g_sensor_buffer.writeStatus);
-
+        ESP_LOGI(TAG, "TS: %s, Temp: %.2fC, Press: %ldPa, Batt: %d%% (%.2fV), SD: %d", local_time_str, temperature_c, pressure_pa, battery_percentage, battery_voltage, g_sensor_buffer.writeStatus);
         // Write to SD card (this is a potentially slow operation)
         spi_sdcard_write_csv();
 

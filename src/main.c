@@ -26,6 +26,7 @@
 #include "../lib/buffers.h"
 #include "i2c-ds3231.h"
 #include "datalogger_task.h"
+#include "../lib/lipo-battery/lipo-battery.h"
 
 // DO NOT use pins 19 and 20, they are used by the flash memory
 
@@ -44,6 +45,9 @@
 #define ROTARY_ENCODER_PIN_A GPIO_NUM_41
 #define ROTARY_ENCODER_PIN_B GPIO_NUM_42
 #define ROTARY_ENCODER_BUTTON_PIN GPIO_NUM_5
+
+// --- Battery ADC Configuration ---
+#define BATTERY_ADC_PIN GPIO_NUM_1
 
 #define BUTTON_DEBOUNCE_TIME_MS 50
 
@@ -181,6 +185,9 @@ void app_main(void)
 
     g_sensor_buffer_mutex = xSemaphoreCreateMutex();
     g_app_cmd_queue = xQueueCreate(10, sizeof(app_command_t));
+
+    // Initialize Battery Reader first, as it uses ADC which can conflict if I2C is initialized first
+    //battery_reader_init(BATTERY_ADC_PIN, 2.0f);
 
     // Initialize I2C
     esp_err_t err = i2c_master_init();
