@@ -191,13 +191,14 @@ void app_main(void)
     }
 
     // Initialize BMP180 Sensor
-    /*err = bmp280_init(&g_bmp280, I2C_MASTER_NUM, BMP280_SENSOR_ADDR);
+    err = bmp280_init(&g_bmp280, I2C_MASTER_NUM, BMP280_SENSOR_ADDR);
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "BMP280 sensor initialization failed, stopping.");
         return;
-    }*/
+    }
 
+    //TODO make 0x68 a define
     // --- Initialize and check RTC ---
     ds3231_init(&g_rtc, I2C_NUM_0, 0x68);
     struct tm timeinfo;

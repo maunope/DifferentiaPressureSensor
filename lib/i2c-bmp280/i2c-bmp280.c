@@ -134,14 +134,18 @@ esp_err_t bmp280_init(bmp280_t *dev, i2c_port_t port, uint8_t addr)
 int32_t bmp280_read_raw_temp(bmp280_t *dev)
 {
     uint8_t raw_data[3];
-    bmp280_i2c_read_bytes(dev, 0xFA, raw_data, 3);
+    if (bmp280_i2c_read_bytes(dev, 0xFA, raw_data, 3) != ESP_OK) {
+        return 0; // Return 0 on read failure
+    }
     return (int32_t)((raw_data[0] << 12) | (raw_data[1] << 4) | (raw_data[2] >> 4));
 }
 
 int32_t bmp280_read_raw_pressure(bmp280_t *dev)
 {
     uint8_t raw_data[3];
-    bmp280_i2c_read_bytes(dev, 0xF7, raw_data, 3);
+    if (bmp280_i2c_read_bytes(dev, 0xF7, raw_data, 3) != ESP_OK) {
+        return 0; // Return 0 on read failure
+    }
     return (int32_t)((raw_data[0] << 12) | (raw_data[1] << 4) | (raw_data[2] >> 4));
 }
 
