@@ -1,15 +1,17 @@
 #include "ui_render.h"
 #include "i2c-oled.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include <string.h>
+#include "esp_timer.h"
 #include <ui_menudef.h>
 #include "esp_log.h"
 #include "../buffers.h"
 
 #define UI_QUEUE_LEN 8
-#define UI_MENU_STACK_DEPTH 4
+#define UI_MENU_STACK_DEPTH 8
 #define UI_MENU_VISIBLE_ROWS 6
 
 typedef struct {
@@ -34,6 +36,12 @@ static bool s_oled_initialized = false;
 // UI mode: true = menu, false = page
 static bool s_menu_mode = true;
 static const ui_page_t* s_current_page = NULL;
+
+// Command feedback UI state
+static bool s_cmd_pending_mode = false;
+static uint64_t s_cmd_start_time_ms = 0;
+
+
 
 // Data for rendering
 static float last_values[8] = {0};
@@ -62,11 +70,28 @@ void uiRender_send_event(int event, float *values, int value_count) {
     xQueueSend(ui_event_queue, &msg, 0);
 }
 
+// --- Helper to write a flicker-free, padded line ---
+static void write_padded_line(uint8_t row, const char* text) {
+    if (!s_oled_initialized) return;
+    char padded_buffer[21]; // 20 chars + null terminator
+    snprintf(padded_buffer, sizeof(padded_buffer), "%-20s", text ? text : "");
+    i2c_oled_write_text(s_oled_i2c_num, row, 0, padded_buffer);
+}
+
+// --- Helper to write a flicker-free, inverted line ---
+static void write_inverted_line(uint8_t row, const char* text) {
+    if (!s_oled_initialized) return;
+    char padded_buffer[21]; // 20 chars + null terminator
+    snprintf(padded_buffer, sizeof(padded_buffer), "%-20s", text ? text : "");
+    // This new function handles inversion at the pixel level, preventing flicker.
+    i2c_oled_write_inverted_text(s_oled_i2c_num, row, 0, padded_buffer);
+}
+
 // --- Menu rendering callback ---
 void render_menu_callback(void) {
     if (!s_oled_initialized) return;
-    static char last_lines[8][20] = {{0}};
-    char new_lines[8][20] = {{0}};
+    static char last_lines[8][21] = {{0}};
+    char new_lines[8][21] = {{0}};
 
     const ui_menu_page_t *page = &ui_menu_tree[current_page];
     int total = page->item_count;
@@ -81,33 +106,25 @@ void render_menu_callback(void) {
     if (total > win) {
         start = current_item - win / 2;
         if (start < 0) start = 0;
-        if (start > total - win) start = total - win;
+        if (start > total - win) start = total - 1;
     }
 
-    snprintf(new_lines[0], sizeof(new_lines[0]), "%-16s", page->title);
+    snprintf(new_lines[0], sizeof(new_lines[0]), "%s", page->title);
 
+    // new_lines[1] is intentionally left blank
     for (int i = 0; i < win && (start + i) < total; ++i) {
         int idx = start + i;
         const ui_menu_item_t *item = &page->items[idx];
-        // Left arrow for selected, right arrow for submenu
         if (item->has_submenu) {
-            snprintf(new_lines[i + 1], sizeof(new_lines[i + 1]), "%c%-13s >", (idx == current_item) ? '>' : ' ', item->label);
+            snprintf(new_lines[i + 2], sizeof(new_lines[i + 2]), "%c%s >", (idx == current_item) ? '>' : ' ', item->label);
         } else {
-            snprintf(new_lines[i + 1], sizeof(new_lines[i + 1]), "%c%-15s", (idx == current_item) ? '>' : ' ', item->label);
+            snprintf(new_lines[i + 2], sizeof(new_lines[i + 2]), "%c%s", (idx == current_item) ? '>' : ' ', item->label);
         }
     }
 
-    // Clear remaining lines
-    for (int i = win + 1; i < 8; ++i) {
-        new_lines[i][0] = '\0';
-    }
-
-    for (uint8_t row = 0; row < 8; ++row) {
-        if (new_lines[row][0] != '\0') {
-            i2c_oled_write_text(s_oled_i2c_num, row, 0, new_lines[row]);
-        } else {
-            i2c_oled_write_text(s_oled_i2c_num, row, 0, "                ");
-        }
+    write_inverted_line(0, new_lines[0]);
+    for (uint8_t row = 1; row < 8; ++row) {
+        write_padded_line(row, new_lines[row]);
         strncpy(last_lines[row], new_lines[row], sizeof(last_lines[row]));
     }
 }
@@ -115,20 +132,18 @@ void render_menu_callback(void) {
 // --- About rendering callback ---
 void render_about_callback(void) {
     if (!s_oled_initialized) return;
-    static char last_lines[8][20] = {{0}};
-    char new_lines[8][20] = {{0}};
-    snprintf(new_lines[0], sizeof(new_lines[0]), "%-16s", "About");
-    snprintf(new_lines[1], sizeof(new_lines[1]), "%-16s", "Differential");
-    snprintf(new_lines[2], sizeof(new_lines[2]), "%-16s", "Pressure Sensor");
-    snprintf(new_lines[3], sizeof(new_lines[3]), "%-16s", "V1.0");
+    static char last_lines[8][21] = {{0}};
+    char new_lines[8][21] = {{0}};
+    snprintf(new_lines[0], sizeof(new_lines[0]), "About");
+    snprintf(new_lines[2], sizeof(new_lines[2]), "Differential");
+    snprintf(new_lines[3], sizeof(new_lines[3]), "Pressure Sensor");
+    snprintf(new_lines[4], sizeof(new_lines[4]), "V1.0");
     // The rest remain empty
 
-    for (uint8_t row = 0; row < 8; ++row) {
-        if (new_lines[row][0] != '\0') {
-            i2c_oled_write_text(s_oled_i2c_num, row, 0, new_lines[row]);
-        } else {
-            i2c_oled_write_text(s_oled_i2c_num, row, 0, "                ");
-        }
+    write_inverted_line(0, new_lines[0]);
+    write_padded_line(1, ""); // Blank line
+    for (uint8_t row = 2; row < 8; ++row) {
+        write_padded_line(row, new_lines[row]);
         strncpy(last_lines[row], new_lines[row], sizeof(last_lines[row]));
     }
 }
@@ -136,54 +151,33 @@ void render_about_callback(void) {
 // --- Sensor rendering callback ---
 void render_sensor_callback(void) {
     if (!s_oled_initialized) return;
-    static char last_lines[8][20] = {{0}};
-    char new_lines[8][20] = {{0}};
+    static char last_lines[8][21] = {{0}};
+    char new_lines[8][21] = {{0}};
     
 
      sensor_buffer_t local_buffer;
 
-    int writeStatus = -1;
-
-    if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
+    if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
         local_buffer = g_sensor_buffer;
         xSemaphoreGive(g_sensor_buffer_mutex);
+
+        struct tm *local_time = localtime(&local_buffer.timestamp);
+        char time_str[20];
+        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", local_time);
+
+        // new_lines[1] is intentionally left blank
+        snprintf(new_lines[0], sizeof(new_lines[0]), "Stato letture");
+        snprintf(new_lines[2], sizeof(new_lines[2]), "%s", time_str);
+        snprintf(new_lines[3], sizeof(new_lines[3]), "T: %.2f C", local_buffer.temperature_c);
+        snprintf(new_lines[4], sizeof(new_lines[4]), "P: %ld Pa", local_buffer.pressure_pa);
+        snprintf(new_lines[5], sizeof(new_lines[5]), "File write: %s", local_buffer.writeStatus == 0 ? "OK" : "KO");
+    } else {
+        return; // Don't update display if we can't get the data
     }
 
-    struct tm *local_time = localtime(&local_buffer.timestamp);
-    char time_str[20];
-    //todo make timestamp format a centralized var
-    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", local_time);
-
-    snprintf(new_lines[0], sizeof(new_lines[0]), "%-16s", "Stato letture");
-    snprintf(new_lines[1], sizeof(new_lines[1]), "%s", time_str);
-    snprintf(new_lines[2], sizeof(new_lines[2]), "T: %.2f C    ", local_buffer.temperature_c);
-    snprintf(new_lines[3], sizeof(new_lines[3]), "P: %ld Pa   ", local_buffer.pressure_pa);
-    snprintf(new_lines[4], sizeof(new_lines[4]), "File write: %s", local_buffer.pressure_pa == 0 ? "OK" : "KO");
-
-    for (uint8_t row = 0; row < 8; ++row) {
-        if (new_lines[row][0] != '\0') {
-            i2c_oled_write_text(s_oled_i2c_num, row, 0, new_lines[row]);
-        } else {
-            i2c_oled_write_text(s_oled_i2c_num, row, 0, "                ");
-        }
-        strncpy(last_lines[row], new_lines[row], sizeof(last_lines[row]));
-    }
-}
-
-// --- Settings rendering callback ---
-void render_settings_callback(void) {
-    if (!s_oled_initialized) return;
-    static char last_lines[8][20] = {{0}};
-    char new_lines[8][20] = {{0}};
-    snprintf(new_lines[0], sizeof(new_lines[0]), "%-16s", "Settings Page");
-    // Fill in more as needed
-
-    for (uint8_t row = 0; row < 8; ++row) {
-        if (new_lines[row][0] != '\0') {
-            i2c_oled_write_text(s_oled_i2c_num, row, 0, new_lines[row]);
-        } else {
-            i2c_oled_write_text(s_oled_i2c_num, row, 0, "                ");
-        }
+    write_inverted_line(0, new_lines[0]);
+    for (uint8_t row = 1; row < 8; ++row) {
+        write_padded_line(row, new_lines[row]);
         strncpy(last_lines[row], new_lines[row], sizeof(last_lines[row]));
     }
 }
@@ -239,6 +233,59 @@ void menu_cancel_on_btn(void) {
     s_current_page = NULL;
 }
 
+void render_cmd_feedback_screen(void) {
+    write_inverted_line(0, " "); // Inverted title bar
+    uint64_t now = esp_timer_get_time() / 1000;
+
+    command_status_t current_status = CMD_STATUS_IDLE;
+    if (xSemaphoreTake(g_command_status_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        current_status = g_command_status;
+        xSemaphoreGive(g_command_status_mutex);
+    }
+
+    // --- Polling and State Transition Logic ---
+    if (current_status == CMD_STATUS_PENDING) {
+        if (now - s_cmd_start_time_ms > 5000) { // 5-second timeout
+            write_padded_line(3, "Timeout");
+            vTaskDelay(pdMS_TO_TICKS(500));
+            s_cmd_pending_mode = false; // Exit loading mode
+            if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY)) {
+                g_command_status = CMD_STATUS_IDLE;
+                xSemaphoreGive(g_command_status_mutex);
+            }
+        } else {
+            write_padded_line(3, "Loading...");
+        }
+    } else if (current_status == CMD_STATUS_SUCCESS) {
+        write_padded_line(3, "Success");
+        vTaskDelay(pdMS_TO_TICKS(300));
+        s_cmd_pending_mode = false; // Exit loading mode
+        if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY)) {
+            g_command_status = CMD_STATUS_IDLE;
+            xSemaphoreGive(g_command_status_mutex);
+        }
+    } else if (current_status == CMD_STATUS_FAIL) {
+        write_padded_line(3, "Failed");
+        vTaskDelay(pdMS_TO_TICKS(500));
+        s_cmd_pending_mode = false; // Exit loading mode
+        if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY)) {
+            g_command_status = CMD_STATUS_IDLE;
+            xSemaphoreGive(g_command_status_mutex);
+        }
+    } else {
+        // Should not happen, but as a fallback
+        s_cmd_pending_mode = false;
+    }
+
+    // Clear other lines
+    for (int i = 1; i < 8; i++) {
+        if (i != 3) { // Don't clear the message line
+            write_padded_line(i, ""); // Clear other non-title lines
+        }
+    }
+}
+
+
 // --- UI task ---
 void uiRender_task(void *pvParameters) {
     ui_event_queue = xQueueCreate(UI_QUEUE_LEN, sizeof(ui_event_msg_t));
@@ -246,7 +293,10 @@ void uiRender_task(void *pvParameters) {
     while (1) {
         ui_event_msg_t msg;
         if (xQueueReceive(ui_event_queue, &msg, pdMS_TO_TICKS(100))) {
-            if (s_menu_mode) {
+            if (s_cmd_pending_mode) {
+                // Ignore all input while a command is pending
+            }
+            else if (s_menu_mode) {
                 if (msg.event == UI_EVENT_CW) menu_on_cw();
                 else if (msg.event == UI_EVENT_CCW) menu_on_ccw();
                 else if (msg.event == UI_EVENT_BTN) menu_on_btn();
@@ -261,7 +311,9 @@ void uiRender_task(void *pvParameters) {
             }
         }
         // Always call the correct render callback
-        if (s_menu_mode) {
+        if (s_cmd_pending_mode) {
+            render_cmd_feedback_screen();
+        } else if (s_menu_mode) {
             render_menu_callback();
         } else if (s_current_page && s_current_page->render) {
             s_current_page->render();
@@ -279,15 +331,22 @@ void menu_sensor_on_btn(void) {
     s_menu_mode = false;
     s_current_page = &sensor_page;
 }
-void menu_settings_on_btn(void) {
-    s_menu_mode = false;
-    s_current_page = &settings_page;
+
+void menu_set_time_on_btn(void) {
+    if (g_app_cmd_queue != NULL) {
+        app_command_t cmd = APP_CMD_SET_RTC_BUILD_TIME;
+        xQueueSend(g_app_cmd_queue, &cmd, 0);
+        s_cmd_pending_mode = true; // Enter loading screen mode
+        s_cmd_start_time_ms = esp_timer_get_time() / 1000;
+        if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY)) {
+            g_command_status = CMD_STATUS_PENDING; // Set initial status for UI
+            xSemaphoreGive(g_command_status_mutex);
+        }
+    } else {
+        ESP_LOGE("UI", "App command queue not initialized!");
+    }
 }
 void page_about_on_btn(void) { 
-    s_menu_mode = true;
-    s_current_page = NULL;
-}
-void page_settings_on_btn(void) {
     s_menu_mode = true;
     s_current_page = NULL;
 }
@@ -299,5 +358,3 @@ void page_sensor_on_btn(void) {
 }
 void page_sensor_on_cw(void) { /* Do nothing */ }
 void page_sensor_on_ccw(void) { /* Do nothing */ }
-void page_settings_on_cw(void) { /* Do nothing */ }
-void page_settings_on_ccw(void) { /* Do nothing */ }

@@ -79,3 +79,32 @@ void i2c_oled_write_text(i2c_port_t i2c_num, uint8_t row, uint8_t col, const cha
         text++;
     }
 }
+
+void i2c_oled_set_invert(i2c_port_t i2c_num, bool invert) {
+    // 0xA6 is normal, 0xA7 is inverted
+    oled_cmd(i2c_num, invert ? 0xA7 : 0xA6);
+}
+
+void i2c_oled_write_inverted_text(i2c_port_t i2c_num, uint8_t row, uint8_t col, const char *text) {
+    uint8_t line_buffer[128];
+    memset(line_buffer, 0xFF, sizeof(line_buffer)); // Fill with 1s for a lit background
+
+    uint8_t current_col = col * 6;
+
+    while (*text && current_col < 128) {
+        if (*text >= 32 && *text <= 127) {
+            const uint8_t* font_char = font5x7[*text - 32];
+            for (int i = 0; i < 5 && (current_col + i) < 128; i++) {
+                line_buffer[current_col + i] = ~font_char[i]; // Invert font bits
+            }
+            current_col += 6; // 5 for char, 1 for space
+        }
+        text++;
+    }
+
+    oled_cmd(i2c_num, 0xB0 | row); // Set page address
+    oled_cmd(i2c_num, 0x00);       // Set lower column to 0
+    oled_cmd(i2c_num, 0x10);       // Set higher column to 0
+
+    oled_data(i2c_num, line_buffer, sizeof(line_buffer));
+}

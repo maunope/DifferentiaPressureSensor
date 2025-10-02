@@ -45,6 +45,7 @@ void uiRender_init(i2c_port_t oled_i2c_num, gpio_num_t sda, gpio_num_t scl);
 void uiRender_task(void *pvParameters);
 void uiRender_send_event(int event, float *values, int value_count);
 
+
 typedef enum {
     UI_EVENT_CW,
     UI_EVENT_CCW,

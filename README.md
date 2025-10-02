@@ -1,43 +1,40 @@
-# differentialBarometer
-A small Arduino project to record data from an I2C differential barometer
+# ESP32-S3 Environmental Datalogger
 
+This project is a datalogger built on the ESP32-S3 platform using the ESP-IDF framework. It's designed to read environmental data from a BMP280 sensor, display it on an OLED screen with a menu-driven interface, and log the data to an SD card. The system uses a DS3231 Real-Time Clock (RTC) for accurate timestamping and exposes the SD card as a USB Mass Storage Device for easy data access.
 
-**BAROMETRO DIFFERENZIALE**
+### Key Features
 
-Serve a misurare la differenza di pressione fra un ambiente in aria libera e uno confinato.
+*   **Sensor Datalogging**: Periodically reads temperature and pressure from a BMP280 sensor.
+*   **SD Card Storage**: Logs sensor data to CSV files on an SD card, with support for file rotation based on size (10MB limit).
+*   **Real-Time Clock (RTC)**: Utilizes a DS3231 RTC for accurate timestamps. The system can synchronize its time from the RTC on startup and provides a menu option to set the RTC to the compile-time.
+*   **OLED Display & UI**: Features a menu-driven user interface on an OLED display, controlled by a rotary encoder with a push-button. The UI displays:
+    *   Real-time sensor data (temperature, pressure).
+    *   Current timestamp.
+    *   SD card write status.
+    *   A settings menu to manage the RTC.
+*   **USB Mass Storage**: The SD card can be accessed as a USB Mass Storage Device when connected to a computer, allowing for easy retrieval of log files. The system intelligently prevents SD card writes while the USB is mounted.
+*   **RTOS-based**: Built on FreeRTOS, with separate tasks for data logging and UI rendering for a responsive and robust application.
 
-Nel nostro caso la differenza di pressione atmosferica presente all’esterno della grotta e la pressione all’interna della stessa.
+### Hardware Components
 
-La grotta viene sigillata.
+*   **Microcontroller**: ESP32-S3
+*   **Sensors**:
+    *   BMP280 Barometric Pressure and Temperature Sensor (I2C)
+*   **Storage**:
+    *   MicroSD Card Slot (SPI)
+*   **Display**:
+    *   OLED Display (I2C)
+*   **User Input**:
+    *   Rotary Encoder with Push-button
+*   **Timekeeping**:
+    *   DS3231 Real-Time Clock (I2C)
 
-Lo strumento resta all’esterno.
+### Software & Libraries
 
-Lo strumento ha due sensori di pressione.
-
-Un sensore deve essere collegato a un tubicino di qualche decina di centimetri che possa raggiungere la zona confinata.
-
-Serve un sistema di allineamento dei due sensori che li riporti allo zero virtuale, interessa solo la differenza di pressione, non i valori di pressione presenti.
-
-Sono consigliati sensori con scala compresa entro 50 Pa.
-
-(Esiste un prototipo con 2 coppie di sensori 50 Pa e 100 Pa ma non ha dato alcun vantaggio… anzi)
-
-La precisione richiesta è di 1 Pa (la pressione di un decimo di millimetro di acqua al livello del mare)
-
-Molto utile, direi indispensabile,  un piccolo schermo che indichi l’avvenuto allineamento a zero,  il differenziale in tempo reale, e l’attivazione del data logger (vedi sotto)
-
-Sono stati costruiti prototipi che contengono lettori di temperatura, umidità e CO2 ma è preferibile dedicare uno strumento a ciascun parametro. Il sistema risulta più versatile. Il troppo guasta!
-
-**DATA LOGGER**
-
-Serve un registratore programmabile per eseguire una lettura puntuale ogni 60 – 120 secondi (se si prevede un sistema piccolo può servire una lettura ogni 30 secondi, per sistemi molto grandi ogni 180 secondi, ma sono casi limite difficilmente utilizzati)
-
-La lettura deve essere puntuale, non servono registrazioni prolungate perché i valori non cambiano mai tanto rapidamente.
-
-Il data logger deve poter registrare data ora e valori per almeno 24 ore.
-
-Sono stati fatti studi particolari su intere aree carsiche molto complesse che hanno richiesto registrazioni annuali, queste ricerche non rientrano attualmente nei nostri obiettivi.
-
-!!!ATT!!! All’esterno della grotta viene posto un lettore della pressione atmosferica per meglio interpretare i valori letti. Qui possiamo aprire una discussione sulla opportunità o meno di introdurre un allineamento automatico dei sensori ogni 300 o 600 secondi .
-
-https://docs.google.com/spreadsheets/d/1zlWzPYfntZh6GAmRLwcTypwWLMDD_adUwLnR_UYPygM/edit?gid=1617350203#gid=1617350203
+*   **Framework**: ESP-IDF
+*   **RTOS**: FreeRTOS
+*   **Key Libraries**:
+    *   `driver/i2c`, `driver/spi`, `driver/gpio`: ESP-IDF drivers for hardware communication.
+    *   `esp_vfs_fat`, `sdmmc_cmd`: For SD card filesystem handling.
+    *   `tinyusb`: For USB Mass Storage functionality.
+    *   Custom drivers for peripherals: BMP280, DS3231, OLED, and Rotary Encoder.

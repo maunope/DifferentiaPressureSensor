@@ -16,10 +16,15 @@
 #include "tinyusb_default_config.h"
 #include "../buffers.h"
 
+#include <sys/stat.h>
+
 static const char *TAG = "SPI_SDCARD_V2";
 static bool mounted = false;
 static sdmmc_card_t *s_card = NULL;
-static tinyusb_msc_storage_handle_t s_msc_storage_handle = NULL;
+static tinyusb_msc_storage_handle_t s_msc_storage_handle = NULL; // Not used, can be removed if not needed elsewhere
+static char current_filepath[260] = ""; // Increased size for long filenames (255 chars + null terminator)
+#define MAX_FILE_SIZE_BYTES (10 * 1024 * 1024) // 10 MB
+
 
 // Global host and mount configuration
 static sdmmc_host_t host = SDSPI_HOST_DEFAULT();
@@ -128,13 +133,13 @@ void spi_sdcard_full_init()
 }
 
 // todo refactor to update struct
-void spi_sdcard_write_csv(const char *filename)
+void spi_sdcard_write_csv()
 {
+    //TODO make all erro codes defines
 
     if (tud_ready())
     {
         ESP_LOGI(TAG, "TinyUSB is connected and mounted, cannot write to SD card directly.");
-        // Acquire mutex and copy buffer
         if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
         {
             g_sensor_buffer.writeStatus = -6; // Indicate USB is connected
@@ -143,45 +148,17 @@ void spi_sdcard_write_csv(const char *filename)
         else
         {
             ESP_LOGE(TAG, "Failed to acquire mutex to update writeStatus.");
-            return;
         }
+        return;
     }
 
-    esp_err_t ret = esp_vfs_fat_sdcard_unmount("/sdcard", s_card);
-    if (ret == ESP_OK)
-    {
-        mounted = false;
-        ESP_LOGI(TAG, "SD card unmounted from ESP32 successfully.");
-    }
-    else
-    {
-        ESP_LOGE(TAG, "Failed to unmount SD card: %s", esp_err_to_name(ret));
-        if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
-        {
-            g_sensor_buffer.writeStatus = -1; // Indicate unmount failure
+    if (!mounted) {
+        ESP_LOGE(TAG, "SD card not mounted, cannot write.");
+         if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+            g_sensor_buffer.writeStatus = -1; // Indicate mount failure
             xSemaphoreGive(g_sensor_buffer_mutex);
         }
-        else
-        {
-            ESP_LOGE(TAG, "Failed to acquire mutex to update writeStatus.");
-            return;
-        }
-    }
-
-    ret = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_config, &mount_config, &s_card);
-    if (ret != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Failed to remount SD card: %s", esp_err_to_name(ret));
-        if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
-        {
-            g_sensor_buffer.writeStatus = -2; // Indicate remount failure
-            xSemaphoreGive(g_sensor_buffer_mutex);
-        }
-        else
-        {
-            ESP_LOGE(TAG, "Failed to acquire mutex to update writeStatus.");
-            return;
-        }
+        return;
     }
 
     sensor_buffer_t local_buffer;
@@ -194,21 +171,28 @@ void spi_sdcard_write_csv(const char *filename)
     }
     else
     {
-        ESP_LOGE(TAG, "Failed to acquire mutex to update writeStatus.");
+        ESP_LOGE(TAG, "Failed to acquire mutex to read sensor buffer.");
         return;
     }
 
-    char filepath[64];
-    snprintf(filepath, sizeof(filepath), "/sdcard/%s", filename);
+    // --- File Rotation Logic ---
+    struct stat st;
+    if (current_filepath[0] == '\0' || (stat(current_filepath, &st) == 0 && st.st_size > MAX_FILE_SIZE_BYTES))
+    {
+        // Create a new filename based on the current timestamp
+        snprintf(current_filepath, sizeof(current_filepath), "/sdcard/data_%lld.csv", local_buffer.timestamp);
+        ESP_LOGI(TAG, "Starting new log file: %s", current_filepath);
+    }
 
-    FILE *f = fopen(filepath, "a");
+    FILE *f = fopen(current_filepath, "a");
     if (f == NULL)
     {
-        ESP_LOGE(TAG, "Failed to open file for writing: %s", filepath);
+        ESP_LOGE(TAG, "Failed to open file for writing: %s", current_filepath);
         if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
         {
             g_sensor_buffer.writeStatus = -3; // Indicate file open failure
             xSemaphoreGive(g_sensor_buffer_mutex);
+            return;
         }
         else
         {
@@ -220,8 +204,8 @@ void spi_sdcard_write_csv(const char *filename)
     struct tm *local_time = localtime(&local_buffer.timestamp);
     char time_str[20];
     //todo make timestamp format a centralized var
-    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", local_time);
-    fprintf(f, "%s,%.2f,%ld\n", time_str, local_buffer.temperature_c, local_buffer.pressure_pa);
+    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", local_time); // Format as YYYY-MM-DD HH:MM:SS
+    fprintf(f, "%lld,%s,%.2f,%ld\n", (long long)local_buffer.timestamp, time_str, local_buffer.temperature_c, local_buffer.pressure_pa);
     fflush(f);
     fclose(f);
 
@@ -229,6 +213,7 @@ void spi_sdcard_write_csv(const char *filename)
     {
         g_sensor_buffer.writeStatus = 0; // Indicate file write success
         xSemaphoreGive(g_sensor_buffer_mutex);
+        return;
     }
     else
     {
@@ -236,7 +221,6 @@ void spi_sdcard_write_csv(const char *filename)
         return;
     }
 
-    return;
 }
 
 /**
@@ -248,4 +232,42 @@ void spi_sdcard_write_csv(const char *filename)
  */
 void spi_sdcard_format(void)
 {
+  /*  ESP_LOGI(TAG, "Attempting to format SD card.");
+
+    if (tud_ready())
+    {
+        ESP_LOGE(TAG, "Cannot format: SD card is mounted as USB Mass Storage.");
+        return;
+    }
+
+    if (!mounted)
+    {
+        ESP_LOGE(TAG, "Cannot format: SD card is not mounted.");
+        return;
+    }
+
+    // Unmount the card before formatting
+    esp_err_t ret = esp_vfs_fat_sdcard_unmount("/sdcard", s_card);
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to unmount SD card for formatting: %s", esp_err_to_name(ret));
+        return;
+    }
+    mounted = false;
+    ESP_LOGI(TAG, "SD card unmounted successfully.");
+
+    // Format the card
+    ret = esp_vfs_fat_sdspi_format("/sdcard", s_card);
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to format SD card: %s", esp_err_to_name(ret));
+    }
+    else
+    {
+        ESP_LOGI(TAG, "SD card formatted successfully.");
+        current_filepath[0] = '\0'; // Reset filename to force creation of a new one
+    }
+
+    // Remount the card regardless of format success to restore system state
+    spi_sdcard_full_init();*/
 }

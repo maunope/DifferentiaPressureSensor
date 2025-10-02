@@ -1,8 +1,11 @@
 #ifndef I2C_BMP280_H
 #define I2C_BMP280_H
 
+#include "driver/i2c.h"
 #include <stdint.h>
 #include "esp_err.h"
+
+#define BMP280_SENSOR_ADDR 0x76
 
 // BMP280 Calibration data structure
 typedef struct {
@@ -20,11 +23,17 @@ typedef struct {
     int16_t dig_P9;
 } bmp280_calib_data_t;
 
+typedef struct {
+    i2c_port_t i2c_port;
+    uint8_t i2c_addr;
+    bmp280_calib_data_t calib_data;
+} bmp280_t;
+
 // Function prototypes
-esp_err_t bmp280_init(void);
-int32_t bmp280_read_raw_temp(void);
-int32_t bmp280_read_raw_pressure(void);
-float bmp280_compensate_temperature(int32_t adc_T);
-long bmp280_compensate_pressure(int32_t adc_P);
+esp_err_t bmp280_init(bmp280_t *dev, i2c_port_t port, uint8_t addr);
+int32_t bmp280_read_raw_temp(bmp280_t *dev);
+int32_t bmp280_read_raw_pressure(bmp280_t *dev);
+float bmp280_compensate_temperature(bmp280_t *dev, int32_t adc_T);
+long bmp280_compensate_pressure(bmp280_t *dev, int32_t adc_P);
 
 #endif // I2C_BMP280_H

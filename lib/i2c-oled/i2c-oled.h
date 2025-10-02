@@ -114,3 +114,5 @@ static const uint8_t font5x7[96][5] = {
 void i2c_oled_init(i2c_port_t i2c_num, gpio_num_t sda, gpio_num_t scl);
 void i2c_oled_clear(i2c_port_t i2c_num);
 void i2c_oled_write_text(i2c_port_t i2c_num, uint8_t row, uint8_t col, const char *text);
+void i2c_oled_set_invert(i2c_port_t i2c_num, bool invert);
+void i2c_oled_write_inverted_text(i2c_port_t i2c_num, uint8_t row, uint8_t col, const char *text);
