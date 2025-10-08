@@ -12,8 +12,15 @@ void page_about_on_ccw(void);
 void page_sensor_on_btn(void);
 void page_sensor_on_cw(void);
 void page_sensor_on_ccw(void);
+void menu_fs_stats_on_btn(void);
+void page_fs_stats_on_cw(void);
+void page_fs_stats_on_ccw(void);
+void page_fs_stats_on_btn(void);
+void menu_format_sd_on_btn(void);
+void menu_format_sd_confirm_on_btn(void);
 void render_about_callback(void);
 void render_sensor_callback(void);
+void page_fs_stats_render_callback(void);
 
 #define MENU_BACK_ITEM { \
     .label = "Back", \
@@ -37,22 +44,36 @@ const ui_menu_page_t ui_menu_tree[] = {
     {
         .title = "Settings",
         .items = {
+            { .label = "Real Time Clock", .has_submenu = true, .submenu_page_index = 2, .on_btn = NULL },
+            { .label = "File System", .has_submenu = true, .submenu_page_index = 3, .on_btn = NULL },
+            MENU_BACK_ITEM
+        },
+        .item_count = 3
+    },
+    {
+        .title = "Real Time Clock",
+        .items = {
             { .label = "Build ts to RTC", .has_submenu = false, .on_btn = menu_set_time_on_btn },
             MENU_BACK_ITEM
         },
         .item_count = 2
-    }
-    ,
+    },
     {
-        .title = "Ovf Sub-Menu",
+        .title = "File System",
         .items = {
-            { .label = "Sub-Item 1", .has_submenu = false, .on_btn = NULL },
-            { .label = "Sub-Item 2", .has_submenu = false, .on_btn = NULL },
-            { .label = "Sub-Item 3", .has_submenu = false, .on_btn = NULL },
-
+            { .label = "Stats", .has_submenu = false, .on_btn = menu_fs_stats_on_btn },
+            { .label = "Format SD Card", .has_submenu = true, .submenu_page_index = 4, .on_btn = NULL },
             MENU_BACK_ITEM
         },
-        .item_count = 4
+        .item_count = 3
+    },
+    {
+        .title = "Format SD Card?",
+        .items = {
+            { .label = "Cancel", .has_submenu = false, .on_btn = menu_cancel_on_btn },
+            { .label = "Confirm", .has_submenu = false, .on_btn = menu_format_sd_confirm_on_btn }
+        },
+        .item_count = 2
     }
 };
 const uint8_t ui_menu_page_count = sizeof(ui_menu_tree) / sizeof(ui_menu_tree[0]);
@@ -69,4 +90,11 @@ const ui_page_t sensor_page = {
     .on_ccw = page_sensor_on_ccw,
     .on_btn = page_sensor_on_btn,
     .render = render_sensor_callback
+};
+
+const ui_page_t fs_stats_page = {
+    .on_cw = page_fs_stats_on_cw,
+    .on_ccw = page_fs_stats_on_ccw,
+    .on_btn = page_fs_stats_on_btn,
+    .render = page_fs_stats_render_callback
 };

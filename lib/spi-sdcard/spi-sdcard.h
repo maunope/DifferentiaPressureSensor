@@ -11,3 +11,13 @@
 void spi_sdcard_full_init();
 void spi_sdcard_write_csv();
 void spi_sdcard_format(void);
+
+/**
+ * @brief Counts the number of files on the SD card and updates the shared buffer.
+ */
+void spi_sdcard_get_file_count(void);
+
+/**
+ * @brief Gets the free space on the SD card in MB and updates the shared buffer.
+ */
+void spi_sdcard_get_free_space_mb(void);

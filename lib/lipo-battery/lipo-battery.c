@@ -21,7 +21,7 @@ static gpio_num_t s_pwr_gpio_num = -1;
 static float s_voltage_divider_ratio = 2.0f; // Default to a 1:1 divider (ratio of 2.0)
 
 // Number of ADC samples to average for a more stable reading
-#define NUM_SAMPLES   64
+#define NUM_SAMPLES   3
 
 // LiPo battery discharge curve (voltage -> percentage)
 // This is a simplified table. For higher accuracy, you might need a more detailed curve.

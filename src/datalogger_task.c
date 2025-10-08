@@ -72,7 +72,7 @@ void datalogger_task(void *pvParameters)
         }
 
         // Log to console
-        ESP_LOGI(TAG, "TS: %s, Temp: %.2fC, Press: %ldPa, Batt: %d%% (%.2fV), Charging: %d, WriteSD: %d", local_time_str, temperature_c, pressure_pa, battery_percentage, battery_voltage, g_sensor_buffer.writeStatus, g_sensor_buffer.battery_externally_powered);
+        ESP_LOGI(TAG, "TS: %s, Temp: %.2fC, Press: %ldPa, Batt: %d%% (%.2fV), Charging: %d, WriteSD: %d", local_time_str, temperature_c, pressure_pa, battery_percentage, battery_voltage,  g_sensor_buffer.battery_externally_powered,g_sensor_buffer.writeStatus);
         // Write to SD card (this is a potentially slow operation)
         spi_sdcard_write_csv();
 

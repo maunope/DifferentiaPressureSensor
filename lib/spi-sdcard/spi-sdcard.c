@@ -253,6 +253,76 @@ void spi_sdcard_write_csv()
 
 }
 
+void spi_sdcard_get_file_count(void)
+{
+    int file_count = -1; // Default to -1 for error cases
+
+    if (!mounted) {
+        ESP_LOGE(TAG, "SD card not mounted, cannot count files.");
+    } else {
+        int count = 0;
+        DIR *dir = opendir("/sdcard");
+        if (dir) {
+            struct dirent *ent;
+            while ((ent = readdir(dir)) != NULL) {
+                // Count only regular files, ignore directories
+                if (ent->d_type == DT_REG) {
+                    count++;
+                }
+            }
+            closedir(dir);
+            file_count = count;
+        } else {
+            ESP_LOGE(TAG, "Failed to open /sdcard directory to count files.");
+        }
+    }
+
+    // Update the shared buffer with the file count
+    if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
+    {
+        g_sensor_buffer.sd_card_file_count = file_count;
+        xSemaphoreGive(g_sensor_buffer_mutex);
+    }
+    else
+    {
+        ESP_LOGE(TAG, "Failed to acquire mutex to update sd_card_file_count.");
+    }
+}
+
+void spi_sdcard_get_free_space_mb(void) {
+    int free_space_mb = -1; // Default to -1 for error
+
+    if (!mounted) {
+        ESP_LOGE(TAG, "SD card not mounted, cannot get free space.");
+    } else {
+        FATFS *fs;
+        DWORD free_clusters;
+        // Get volume information and free clusters about the drive 0 (mounted at /sdcard)
+        FRESULT res = f_getfree("/sdcard", &free_clusters, &fs);
+
+        if (res == FR_OK) {
+            // Calculate free space in bytes
+            uint64_t free_bytes = (uint64_t)free_clusters * fs->csize * s_card->csd.sector_size;
+            // Convert to MB
+            free_space_mb = (int)(free_bytes / (1024 * 1024));
+            ESP_LOGI(TAG, "SD card free space: %d MB", free_space_mb);
+        } else {
+            ESP_LOGE(TAG, "Failed to get free space, f_getfree() error: %d", res);
+        }
+    }
+
+    // Update the shared buffer
+    if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
+    {
+        g_sensor_buffer.sd_card_free_bytes = free_space_mb;
+        xSemaphoreGive(g_sensor_buffer_mutex);
+    }
+    else
+    {
+        ESP_LOGE(TAG, "Failed to acquire mutex to update sd_card_free_bytes.");
+    }
+}
+
 /**
  * @brief Formats the SD card. All data on the card will be erased.
  * @note This function handles the unmounting, formatting, and remounting of the card
@@ -262,42 +332,35 @@ void spi_sdcard_write_csv()
  */
 void spi_sdcard_format(void)
 {
-  /*  ESP_LOGI(TAG, "Attempting to format SD card.");
+    ESP_LOGI(TAG, "Attempting to format SD card.");
+    esp_err_t ret = ESP_FAIL;
 
     if (tud_ready())
     {
         ESP_LOGE(TAG, "Cannot format: SD card is mounted as USB Mass Storage.");
-        return;
     }
-
-    if (!mounted)
+    else if (!mounted)
     {
         ESP_LOGE(TAG, "Cannot format: SD card is not mounted.");
-        return;
-    }
-
-    // Unmount the card before formatting
-    esp_err_t ret = esp_vfs_fat_sdcard_unmount("/sdcard", s_card);
-    if (ret != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Failed to unmount SD card for formatting: %s", esp_err_to_name(ret));
-        return;
-    }
-    mounted = false;
-    ESP_LOGI(TAG, "SD card unmounted successfully.");
-
-    // Format the card
-    ret = esp_vfs_fat_sdspi_format("/sdcard", s_card);
-    if (ret != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Failed to format SD card: %s", esp_err_to_name(ret));
     }
     else
     {
-        ESP_LOGI(TAG, "SD card formatted successfully.");
-        current_filepath[0] = '\0'; // Reset filename to force creation of a new one
+        ret = esp_vfs_fat_sdcard_format("/sdcard", s_card);
+        if (ret != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Failed to format SD card: %s", esp_err_to_name(ret));
+            spi_sdcard_full_init(); // Attempt to remount to restore state
+        }
+        else
+        {
+            ESP_LOGI(TAG, "SD card formatted successfully.");
+            mounted = true; // esp_vfs_fat_sdcard_format remounts it.
+            current_filepath[0] = '\0'; // Reset filename to force creation of a new one
+        }
     }
 
-    // Remount the card regardless of format success to restore system state
-    spi_sdcard_full_init();*/
+    if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY)) {
+        g_command_status = (ret == ESP_OK) ? CMD_STATUS_SUCCESS : CMD_STATUS_FAIL;
+        xSemaphoreGive(g_command_status_mutex);
+    }
 }

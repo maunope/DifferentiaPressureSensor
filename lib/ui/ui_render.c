@@ -29,6 +29,11 @@ static QueueHandle_t ui_event_queue = NULL;
 static menu_stack_entry_t menu_stack[UI_MENU_STACK_DEPTH];
 static int menu_stack_pos = 0;
 
+typedef enum {
+    POST_ACTION_NONE,
+    POST_ACTION_GO_BACK,
+} post_cmd_action_t;
+
 static i2c_port_t s_oled_i2c_num;
 static gpio_num_t s_oled_sda, s_oled_scl;
 static bool s_oled_initialized = false;
@@ -40,6 +45,8 @@ static const ui_page_t* s_current_page = NULL;
 // Command feedback UI state
 static bool s_cmd_pending_mode = false;
 static uint64_t s_cmd_start_time_ms = 0;
+static uint32_t s_cmd_timeout_ms = 5000; // Default timeout
+static post_cmd_action_t s_post_cmd_action = POST_ACTION_NONE;
 
 
 
@@ -115,10 +122,16 @@ void render_menu_callback(void) {
     for (int i = 0; i < win && (start + i) < total; ++i) {
         int idx = start + i;
         const ui_menu_item_t *item = &page->items[idx];
+        char* buffer = new_lines[i + 2];
+        const size_t buffer_size = sizeof(new_lines[i + 2]);
+        char prefix = (idx == current_item) ? '>' : ' ';
+
         if (item->has_submenu) {
-            snprintf(new_lines[i + 2], sizeof(new_lines[i + 2]), "%c%s >", (idx == current_item) ? '>' : ' ', item->label);
+            // e.g., "> Label >" needs 4 chars + label + null
+            snprintf(buffer, buffer_size, "%c %.*s >", prefix, (int)(buffer_size - 5), item->label);
         } else {
-            snprintf(new_lines[i + 2], sizeof(new_lines[i + 2]), "%c%s", (idx == current_item) ? '>' : ' ', item->label);
+            // e.g., "> Label" needs 2 chars + label + null
+            snprintf(buffer, buffer_size, "%c %.*s", prefix, (int)(buffer_size - 3), item->label);
         }
     }
 
@@ -166,7 +179,7 @@ void render_sensor_callback(void) {
         strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", local_time);
 
         // new_lines[1] is intentionally left blank
-        snprintf(new_lines[0], sizeof(new_lines[0]), "Stato letture");
+        snprintf(new_lines[0], sizeof(new_lines[0]), "Stato Letture");
         snprintf(new_lines[2], sizeof(new_lines[2]), "%s", time_str);
         snprintf(new_lines[3], sizeof(new_lines[3]), "T: %.2f C", local_buffer.temperature_c);
         snprintf(new_lines[4], sizeof(new_lines[4]), "P: %ld Pa", local_buffer.pressure_pa);
@@ -183,6 +196,41 @@ void render_sensor_callback(void) {
     }
 }
 
+void page_fs_stats_render_callback(void) {
+    char new_lines[8][21] = {{0}}; // Initialize all lines to empty
+    snprintf(new_lines[0], sizeof(new_lines[0]), "File System Stats");
+
+    int file_count = -2; // Default to loading state
+    int free_space_mb = -2;
+    if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        file_count = g_sensor_buffer.sd_card_file_count;
+        free_space_mb = g_sensor_buffer.sd_card_free_bytes;
+        xSemaphoreGive(g_sensor_buffer_mutex);
+    }
+
+    if (file_count == -2) {
+        snprintf(new_lines[2], sizeof(new_lines[2]), "Files: Loading...");
+    } else {
+        if (file_count >= 0) {
+            snprintf(new_lines[2], sizeof(new_lines[2]), "Files: %d", file_count);
+        } else {
+            snprintf(new_lines[2], sizeof(new_lines[2]), "Files: Error");
+        }
+    }
+    
+    if (free_space_mb == -2) {
+        snprintf(new_lines[3], sizeof(new_lines[3]), "Free: Loading...");
+    } else if (free_space_mb >= 0) {
+        snprintf(new_lines[3], sizeof(new_lines[3]), "Free: %d MB", free_space_mb);
+    } else {
+        snprintf(new_lines[3], sizeof(new_lines[3]), "Free: Error");
+    }
+
+    write_inverted_line(0, new_lines[0]);
+    for (uint8_t row = 1; row < 8; ++row) {
+        write_padded_line(row, new_lines[row]);
+    }
+}
 // --- Menu event handlers ---
 void menu_on_cw(void) {
     const ui_menu_page_t *page = &ui_menu_tree[current_page];
@@ -246,7 +294,7 @@ void render_cmd_feedback_screen(void) {
 
     // --- Polling and State Transition Logic ---
     if (current_status == CMD_STATUS_PENDING) {
-        if (now - s_cmd_start_time_ms > 5000) { // 5-second timeout
+        if (now - s_cmd_start_time_ms > s_cmd_timeout_ms) { // Use parametric timeout
             write_padded_line(3, "Timeout");
             vTaskDelay(pdMS_TO_TICKS(500));
             s_cmd_pending_mode = false; // Exit loading mode
@@ -254,6 +302,7 @@ void render_cmd_feedback_screen(void) {
                 g_command_status = CMD_STATUS_IDLE;
                 xSemaphoreGive(g_command_status_mutex);
             }
+            s_post_cmd_action = POST_ACTION_NONE; // Clear action on timeout
         } else {
             write_padded_line(3, "Loading...");
         }
@@ -265,6 +314,10 @@ void render_cmd_feedback_screen(void) {
             g_command_status = CMD_STATUS_IDLE;
             xSemaphoreGive(g_command_status_mutex);
         }
+        if (s_post_cmd_action == POST_ACTION_GO_BACK) {
+            menu_cancel_on_btn();
+        }
+        s_post_cmd_action = POST_ACTION_NONE; // Clear action
     } else if (current_status == CMD_STATUS_FAIL) {
         write_padded_line(3, "Failed");
         vTaskDelay(pdMS_TO_TICKS(500));
@@ -273,9 +326,11 @@ void render_cmd_feedback_screen(void) {
             g_command_status = CMD_STATUS_IDLE;
             xSemaphoreGive(g_command_status_mutex);
         }
+        s_post_cmd_action = POST_ACTION_NONE; // Clear action
     } else {
         // Should not happen, but as a fallback
         s_cmd_pending_mode = false;
+        s_post_cmd_action = POST_ACTION_NONE;
     }
 
     // Clear other lines
@@ -333,12 +388,51 @@ void menu_sensor_on_btn(void) {
     s_current_page = &sensor_page;
 }
 
+void menu_fs_stats_on_btn(void) {
+    // Always trigger a new read when entering the stats page
+    if (g_app_cmd_queue != NULL) {
+        // Set buffer to "loading" state
+        if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY)) {
+            g_sensor_buffer.sd_card_file_count = -2; // -2 indicates loading for file count
+            g_sensor_buffer.sd_card_free_bytes = -2; // -2 indicates loading for free space
+            xSemaphoreGive(g_sensor_buffer_mutex);
+        }
+        // Send commands to get both stats
+        app_command_t cmd_file_count = APP_CMD_GET_SD_FILE_COUNT;
+        xQueueSend(g_app_cmd_queue, &cmd_file_count, 0);
+
+        app_command_t cmd_free_space = APP_CMD_GET_SD_FREE_SPACE;
+        xQueueSend(g_app_cmd_queue, &cmd_free_space, 0);
+    }
+    s_menu_mode = false;
+    s_current_page = &fs_stats_page;
+}
+
+void menu_format_sd_confirm_on_btn(void) {
+    if (g_app_cmd_queue != NULL) {
+        app_command_t cmd = APP_CMD_FORMAT_SD_CARD;
+        xQueueSend(g_app_cmd_queue, &cmd, 0);
+        s_cmd_pending_mode = true; // Enter loading screen mode
+        s_cmd_start_time_ms = esp_timer_get_time() / 1000;
+        s_cmd_timeout_ms = 30000; // 30-second timeout for format
+        s_post_cmd_action = POST_ACTION_GO_BACK;
+        if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY)) {
+            g_command_status = CMD_STATUS_PENDING; // Set initial status for UI
+            xSemaphoreGive(g_command_status_mutex);
+        }
+    } else {
+        ESP_LOGE("UI", "App command queue not initialized!");
+    }
+}
+
 void menu_set_time_on_btn(void) {
     if (g_app_cmd_queue != NULL) {
         app_command_t cmd = APP_CMD_SET_RTC_BUILD_TIME;
         xQueueSend(g_app_cmd_queue, &cmd, 0);
         s_cmd_pending_mode = true; // Enter loading screen mode
         s_cmd_start_time_ms = esp_timer_get_time() / 1000;
+        s_post_cmd_action = POST_ACTION_NONE;
+        s_cmd_timeout_ms = 5000; // 5-second timeout for RTC set
         if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY)) {
             g_command_status = CMD_STATUS_PENDING; // Set initial status for UI
             xSemaphoreGive(g_command_status_mutex);
@@ -359,3 +453,10 @@ void page_sensor_on_btn(void) {
 }
 void page_sensor_on_cw(void) { /* Do nothing */ }
 void page_sensor_on_ccw(void) { /* Do nothing */ }
+
+void page_fs_stats_on_btn(void) {
+    s_menu_mode = true;
+    s_current_page = NULL;
+}
+void page_fs_stats_on_cw(void) { /* Do nothing */ }
+void page_fs_stats_on_ccw(void) { /* Do nothing */ }

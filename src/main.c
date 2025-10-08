@@ -65,10 +65,9 @@ bool rtc_available = false;
 ds3231_t g_rtc; // Global RTC device handle
 bmp280_t g_bmp280; // Global BMP280 device handle
 
-static int set_rtc_to_build_time(void) {
+static void set_rtc_to_build_time(void) {
     if (!rtc_available) {
         ESP_LOGE(TAG, "Cannot set time, RTC not available.");
-        return -1; // RTC not available
     }
      //TODO make this parametric to address different timezones
     // Set the timezone to correctly interpret the local build time
@@ -111,10 +110,14 @@ static int set_rtc_to_build_time(void) {
         // Also update system time immediately
         struct timeval tv = {.tv_sec = build_ts};
         settimeofday(&tv, NULL);
-        return 0;
     } else {
         ESP_LOGE(TAG, "Failed to set RTC time.");
-        return -1;
+    }
+
+    // Update the global command status
+    if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY)) {
+        g_command_status = (ret == 0) ? CMD_STATUS_SUCCESS : CMD_STATUS_FAIL;
+        xSemaphoreGive(g_command_status_mutex);
     }
 }
 
@@ -160,21 +163,20 @@ void main_task(void *pvParameters)
             switch (cmd) {
                 case APP_CMD_SET_RTC_BUILD_TIME:
                     ESP_LOGI(TAG, "Received command to set RTC to build time.");
-                    if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY)) {
-                        g_command_status = CMD_STATUS_PENDING;
-                        xSemaphoreGive(g_command_status_mutex);
-                    }
-                    if (set_rtc_to_build_time() == 0) {
-                        if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY)) {
-                            g_command_status = CMD_STATUS_SUCCESS;
-                            xSemaphoreGive(g_command_status_mutex);
-                        }
-                    } else {
-                        if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY)) {
-                            g_command_status = CMD_STATUS_FAIL;
-                            xSemaphoreGive(g_command_status_mutex);
-                        }
-                    }
+                    set_rtc_to_build_time();
+                    break;
+                case APP_CMD_GET_SD_FREE_SPACE:
+                    ESP_LOGI(TAG, "Received command to get SD card free space.");
+                    spi_sdcard_get_free_space_mb();
+                    break;
+                case APP_CMD_GET_SD_FILE_COUNT:
+                    ESP_LOGI(TAG, "Received command to get SD card file count.");
+                    spi_sdcard_get_file_count();
+                    break;
+                case APP_CMD_FORMAT_SD_CARD:
+                    ESP_LOGI(TAG, "Received command to format SD card.");
+                    spi_sdcard_format();
+                    // Status is now handled inside spi_sdcard_format
                     break;
                 default:
                     ESP_LOGW(TAG, "Unknown command received: %d", cmd);

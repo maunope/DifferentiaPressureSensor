@@ -5,7 +5,7 @@
 
 
 #define UI_MAX_MENU_ITEMS 20
-#define UI_MAX_LABEL_LEN  16
+#define UI_MAX_LABEL_LEN  21
 #define UI_MAX_PAGES      4
 
 typedef void (*ui_action_callback_t)(void);
@@ -39,6 +39,7 @@ extern const uint8_t ui_menu_page_count;
 extern const ui_page_t about_page;
 extern const ui_page_t sensor_page;
 extern const ui_page_t settings_page;
+extern const ui_page_t fs_stats_page;
 
 // UI task API
 void uiRender_init(i2c_port_t oled_i2c_num, gpio_num_t sda, gpio_num_t scl);

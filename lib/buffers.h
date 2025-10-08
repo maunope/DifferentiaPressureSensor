@@ -14,6 +14,8 @@ typedef struct {
     float battery_voltage;
     int battery_percentage;
     int battery_externally_powered;
+    int sd_card_file_count;
+    int sd_card_free_bytes;
 } sensor_buffer_t;
 
 // Global buffer and mutex declarations
@@ -25,6 +27,10 @@ extern SemaphoreHandle_t g_i2c_bus_mutex;
 typedef enum {
     APP_CMD_NONE,
     APP_CMD_SET_RTC_BUILD_TIME,
+    APP_CMD_GET_SD_FILE_COUNT,
+    APP_CMD_GET_SD_FREE_SPACE,
+    APP_CMD_FORMAT_SD_CARD,
+
 } app_command_t;
 
 extern QueueHandle_t g_app_cmd_queue;
