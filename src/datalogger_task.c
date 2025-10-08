@@ -20,7 +20,6 @@ void datalogger_task(void *pvParameters)
 {
     ESP_LOGI(TAG, "Datalogger task started.");
  
-
     while (1)
     {
         // --- BMP280 Readings ---
@@ -41,6 +40,8 @@ void datalogger_task(void *pvParameters)
         // --- Battery Readings ---
         float battery_voltage = battery_reader_get_voltage();
         int battery_percentage = battery_reader_get_percentage();
+        int battery_externally_powered = battery_is_externally_powered();
+
 
         time_t timestamp = time(NULL); // System time is synchronized with RTC at startup
 
@@ -62,6 +63,7 @@ void datalogger_task(void *pvParameters)
             g_sensor_buffer.timestamp = timestamp;
             g_sensor_buffer.battery_voltage = battery_voltage;
             g_sensor_buffer.battery_percentage = battery_percentage;
+            g_sensor_buffer.battery_externally_powered = battery_externally_powered;
             xSemaphoreGive(g_sensor_buffer_mutex);
         }
         else
@@ -70,7 +72,7 @@ void datalogger_task(void *pvParameters)
         }
 
         // Log to console
-        ESP_LOGI(TAG, "TS: %s, Temp: %.2fC, Press: %ldPa, Batt: %d%% (%.2fV), SD: %d", local_time_str, temperature_c, pressure_pa, battery_percentage, battery_voltage, g_sensor_buffer.writeStatus);
+        ESP_LOGI(TAG, "TS: %s, Temp: %.2fC, Press: %ldPa, Batt: %d%% (%.2fV), Charging: %d, WriteSD: %d", local_time_str, temperature_c, pressure_pa, battery_percentage, battery_voltage, g_sensor_buffer.writeStatus, g_sensor_buffer.battery_externally_powered);
         // Write to SD card (this is a potentially slow operation)
         spi_sdcard_write_csv();
 

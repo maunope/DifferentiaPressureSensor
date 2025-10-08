@@ -171,6 +171,7 @@ void render_sensor_callback(void) {
         snprintf(new_lines[3], sizeof(new_lines[3]), "T: %.2f C", local_buffer.temperature_c);
         snprintf(new_lines[4], sizeof(new_lines[4]), "P: %ld Pa", local_buffer.pressure_pa);
         snprintf(new_lines[5], sizeof(new_lines[5]), "File write: %s", local_buffer.writeStatus == 0 ? "OK" : "KO");
+        snprintf(new_lines[6], sizeof(new_lines[6]), "Batt: %.2fV-%d%% %s", local_buffer.battery_voltage, local_buffer.battery_percentage,local_buffer.battery_externally_powered==1?"(C)":"");
     } else {
         return; // Don't update display if we can't get the data
     }

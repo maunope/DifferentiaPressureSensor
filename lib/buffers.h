@@ -13,6 +13,7 @@ typedef struct {
     bool timestamp_from_rtc; 
     float battery_voltage;
     int battery_percentage;
+    int battery_externally_powered;
 } sensor_buffer_t;
 
 // Global buffer and mutex declarations

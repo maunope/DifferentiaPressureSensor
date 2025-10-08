@@ -29,6 +29,8 @@
 #include "../lib/lipo-battery/lipo-battery.h"
 
 // DO NOT use pins 19 and 20, they are used by the flash memory
+// DO NOT use pins 5 and 6, they are used for LiPo battery measurements
+
 
 // --- I2C Configuration for peripherals ---
 #define I2C_MASTER_NUM I2C_NUM_0
@@ -44,12 +46,16 @@
 // --- Rotary Encoder Configuration ---
 #define ROTARY_ENCODER_PIN_A GPIO_NUM_41
 #define ROTARY_ENCODER_PIN_B GPIO_NUM_42
-#define ROTARY_ENCODER_BUTTON_PIN GPIO_NUM_5
+#define ROTARY_ENCODER_BUTTON_PIN GPIO_NUM_7
+#define BUTTON_DEBOUNCE_TIME_MS 50
 
 // --- Battery ADC Configuration ---
-#define BATTERY_ADC_PIN GPIO_NUM_1
+#define BATTERY_PWR_PIN GPIO_NUM_5
+#define BATTERY_ADC_PIN GPIO_NUM_6
+#define BATTERY_VOLTAGE_DIVIDER_RATIO 4.133f // (470k + 150k) / 150k
 
-#define BUTTON_DEBOUNCE_TIME_MS 50
+
+
 
 static const char *TAG = "DifferentialPressureSensor";
 
@@ -187,7 +193,7 @@ void app_main(void)
     g_app_cmd_queue = xQueueCreate(10, sizeof(app_command_t));
 
     // Initialize Battery Reader first, as it uses ADC which can conflict if I2C is initialized first
-    //battery_reader_init(BATTERY_ADC_PIN, 2.0f);
+    battery_reader_init(BATTERY_ADC_PIN, BATTERY_PWR_PIN, BATTERY_VOLTAGE_DIVIDER_RATIO);
 
     // Initialize I2C
     esp_err_t err = i2c_master_init();

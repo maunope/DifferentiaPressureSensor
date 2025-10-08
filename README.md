@@ -12,7 +12,7 @@ This project is a datalogger built on the ESP32-S3 platform using the ESP-IDF fr
     *   Current timestamp.
     *   SD card write status.
     *   A settings menu to manage the RTC.
-*   **USB Mass Storage**: The SD card can be accessed as a USB Mass Storage Device when connected to a computer, allowing for easy retrieval of log files. The system intelligently prevents SD card writes while the USB is mounted.
+*   **USB Mass Storage**: The SD card can be accessed as a USB Mass Storage Device when connected to a computer, allowing for easy retrieval of log files. The system  prevents SD card writes while the USB is mounted.
 *   **RTOS-based**: Built on FreeRTOS, with separate tasks for data logging and UI rendering for a responsive and robust application.
 
 ### Hardware Components

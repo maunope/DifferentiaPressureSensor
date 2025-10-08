@@ -17,12 +17,13 @@
 #include "../buffers.h"
 
 #include <sys/stat.h>
+#include <dirent.h>
 
 static const char *TAG = "SPI_SDCARD_V2";
 static bool mounted = false;
 static sdmmc_card_t *s_card = NULL;
-static tinyusb_msc_storage_handle_t s_msc_storage_handle = NULL; // Not used, can be removed if not needed elsewhere
-static char current_filepath[260] = ""; // Increased size for long filenames (255 chars + null terminator)
+static tinyusb_msc_storage_handle_t s_msc_storage_handle = NULL;
+static char current_filepath[264] = ""; // 8 for "/sdcard/" + 255 for d_name + 1 for null
 #define MAX_FILE_SIZE_BYTES (10 * 1024 * 1024) // 10 MB
 
 
@@ -177,10 +178,39 @@ void spi_sdcard_write_csv()
 
     // --- File Rotation Logic ---
     struct stat st;
-    if (current_filepath[0] == '\0' || (stat(current_filepath, &st) == 0 && st.st_size > MAX_FILE_SIZE_BYTES))
+    if (current_filepath[0] == '\0') {
+        // First run, find the latest file
+        DIR *dir = opendir("/sdcard");
+        if (dir) {
+            struct dirent *ent;
+            long long latest_ts = 0;
+            char latest_file[sizeof(current_filepath)] = "";
+
+            while ((ent = readdir(dir)) != NULL) {
+                long long ts;
+                if (sscanf(ent->d_name, "data_%lld.csv", &ts) == 1) {
+                    if (ts > latest_ts) {
+                        latest_ts = ts;
+                        snprintf(latest_file, sizeof(latest_file), "/sdcard/%.255s", ent->d_name);
+                    }
+                }
+            }
+            closedir(dir);
+
+            if (latest_ts > 0) {
+                // Found a previous file, check its size
+                if (stat(latest_file, &st) == 0 && st.st_size < MAX_FILE_SIZE_BYTES) {
+                    ESP_LOGI(TAG, "Continuing with existing log file: %s", latest_file);
+                    strncpy(current_filepath, latest_file, sizeof(current_filepath));
+                }
+            }
+        }
+    }
+
+    if (current_filepath[0] == '\0' || (stat(current_filepath, &st) == 0 && st.st_size >= MAX_FILE_SIZE_BYTES))
     {
         // Create a new filename based on the current timestamp
-        snprintf(current_filepath, sizeof(current_filepath), "/sdcard/data_%lld.csv", local_buffer.timestamp);
+        snprintf(current_filepath, sizeof(current_filepath), "/sdcard/data_%lld.csv", (long long)local_buffer.timestamp);
         ESP_LOGI(TAG, "Starting new log file: %s", current_filepath);
     }
 
@@ -205,7 +235,7 @@ void spi_sdcard_write_csv()
     char time_str[20];
     //todo make timestamp format a centralized var
     strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", local_time); // Format as YYYY-MM-DD HH:MM:SS
-    fprintf(f, "%lld,%s,%.2f,%ld\n", (long long)local_buffer.timestamp, time_str, local_buffer.temperature_c, local_buffer.pressure_pa);
+    fprintf(f, "%lld,%s,%.2f,%ld,%.2f,%d,%d\n", (long long)local_buffer.timestamp, time_str, local_buffer.temperature_c, local_buffer.pressure_pa, local_buffer.battery_voltage, local_buffer.battery_percentage, local_buffer.battery_externally_powered);
     fflush(f);
     fclose(f);
 
