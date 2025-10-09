@@ -1,0 +1,3 @@
+[submodule "board/ESP32-S3-DevKit-LiPo"]
+	path = board/ESP32-S3-DevKit-LiPo
+	url = https://github.com/OLIMEX/ESP32-S3-DevKit-LiPo.git
