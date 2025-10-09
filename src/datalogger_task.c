@@ -77,6 +77,6 @@ void datalogger_task(void *pvParameters)
         spi_sdcard_write_csv();
 
         // Wait for the next cycle
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        vTaskDelay(pdMS_TO_TICKS(30000)); // Align with 30-second sleep duration
     }
 }

@@ -58,63 +58,69 @@ static void rotary_encoder_task(void *arg)
 {
     uint32_t gpio_num;
     TickType_t last_button_press_time = 0;
+    TickType_t last_rotation_time = 0;
     int32_t encoder_position = 0; // Track absolute position
 
     while (1)
     {
+        
          // DO NOT log  in this loop, unless it's for debug
          // ESP_LOGI is stack-heavy and can stack overflow this task when many events come in.
          // OR, figure some clever way to log in a more memory-efficient manner.
-        if (xQueueReceive(gpio_evt_queue, &gpio_num, portMAX_DELAY))
+        if (xQueueReceive(gpio_evt_queue, &gpio_num, portMAX_DELAY) )
         {
             if (gpio_num == encoder_cfg.button_pin)
             {
+                // Disable interrupt to prevent bouncing
+                gpio_intr_disable(encoder_cfg.button_pin);
+
                 TickType_t current_time = xTaskGetTickCount();
                 if ((current_time - last_button_press_time) * portTICK_PERIOD_MS > encoder_cfg.button_debounce_ms)
                 {
-                    // Add a small delay to ensure the button state is stable after the interrupt
-                    vTaskDelay(pdMS_TO_TICKS(10));
+                    last_button_press_time = current_time;
+                    // Add a small delay to ensure the button state is stable
+                    vTaskDelay(pdMS_TO_TICKS(20)); 
                     if (gpio_get_level(encoder_cfg.button_pin) == 0)
                     {
-                     
-                      //  ESP_LOGI(TAG, "Rotary Encoder Button Pressed!");
                         g_encoder_button_state = ENC_BTN_PRESSED;
-                        // Send button event to UI
                         uiRender_send_event(UI_EVENT_BTN, NULL, 0);
                     }
-                    last_button_press_time = current_time;
                 }
+                // Re-enable interrupt after processing
+                gpio_intr_enable(encoder_cfg.button_pin);
             }
             else if (gpio_num == encoder_cfg.pin_a || gpio_num == encoder_cfg.pin_b)
             {
-                // Read the new state of the encoder pins
-                uint8_t new_state = (gpio_get_level(encoder_cfg.pin_a) << 1) | gpio_get_level(encoder_cfg.pin_b);
-                
-                // Use the state table to find the direction
-                int8_t direction = KNOB_STATES[(g_encoder_state << 2) | new_state];
+                TickType_t current_time = xTaskGetTickCount();
+                if ((current_time - last_rotation_time) * portTICK_PERIOD_MS > 2) // 2ms debounce
+                {
+                    // Read the new state of the encoder pins
+                    uint8_t new_state = (gpio_get_level(encoder_cfg.pin_a) << 1) | gpio_get_level(encoder_cfg.pin_b);
+                    
+                    // Use the state table to find the direction
+                    int8_t direction = KNOB_STATES[(g_encoder_state << 2) | new_state];
 
-                if (direction == 1) { // Clockwise
-                    encoder_position++;
-                   // ESP_LOGI(TAG, "Rotary Encoder: Clockwise, pos=%ld", encoder_position);
-                    g_encoder_direction = ENC_DIR_CW;
-                    // Send event only on even positions (0, 2, 4, ...)
-                    if ((encoder_position % 2) == 0) {
-                        uiRender_send_event(UI_EVENT_CW, NULL, 0);
+                    if (direction != 0) {
+                        last_rotation_time = current_time; // Update time on valid rotation
+                        if (direction == 1) { // Clockwise
+                            encoder_position++;
+                            g_encoder_direction = ENC_DIR_CW;
+                            // Send event only on even positions (full step)
+                            if ((encoder_position % 2) == 0) {
+                                uiRender_send_event(UI_EVENT_CW, NULL, 0);
+                            }
+                        } else { // Counter-Clockwise (direction == -1)
+                            encoder_position--;
+                            g_encoder_direction = ENC_DIR_CCW;
+                            // Send event only on even positions (full step)
+                            if ((encoder_position % 2) == 0) {
+                                uiRender_send_event(UI_EVENT_CCW, NULL, 0);
+                            }
+                        }
                     }
-                } else if (direction == -1) { // Counter-Clockwise
-                    encoder_position--;
-                  //  ESP_LOGI(TAG, "Rotary Encoder: Counter-Clockwise, pos=%ld", encoder_position);
-                    g_encoder_direction = ENC_DIR_CCW;
-                    // Send event only on even positions (0, -2, -4, ...)
-                    if ((encoder_position % 2) == 0) {
-                        uiRender_send_event(UI_EVENT_CCW, NULL, 0);
-                    }
+                    // Update the state for the next transition
+                    g_encoder_state = new_state;
                 }
-                // else: no change or invalid state
-
-                // Update the state for the next transition
-                g_encoder_state = new_state;
-              
             }
         }
     }

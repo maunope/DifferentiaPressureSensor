@@ -16,6 +16,7 @@
 #include "esp_timer.h" // Required for esp_timer_get_time()
 #include <time.h>
 #include <sys/time.h>
+#include "esp_sleep.h"
 
 #include "../lib/i2c-lcd/i2c-lcd.h"
 #include "../lib/i2c-bmp280/i2c-bmp280.h" // BMP280 sensor API
@@ -48,6 +49,9 @@
 #define ROTARY_ENCODER_PIN_B GPIO_NUM_42
 #define ROTARY_ENCODER_BUTTON_PIN GPIO_NUM_7
 #define BUTTON_DEBOUNCE_TIME_MS 50
+#define INACTIVITY_TIMEOUT_MS 10000 // 10 seconds
+#define SLEEP_DURATION_US (30 * 1000 * 1000) // 30 seconds
+
 
 // --- Battery ADC Configuration ---
 #define BATTERY_PWR_PIN GPIO_NUM_5
@@ -59,11 +63,15 @@
 
 static const char *TAG = "DifferentialPressureSensor";
 
-
 bool rtc_available = false;
 
 ds3231_t g_rtc; // Global RTC device handle
 bmp280_t g_bmp280; // Global BMP280 device handle
+
+
+static uint64_t last_activity_ms = 0;
+
+
 
 static void set_rtc_to_build_time(void) {
     if (!rtc_available) {
@@ -121,6 +129,28 @@ static void set_rtc_to_build_time(void) {
     }
 }
 
+static void resync_time_from_rtc(void)
+{
+    if (!rtc_available) {
+        return;
+    }
+
+    struct tm timeinfo;
+    time_t rtc_ts = -1;
+
+    if (xSemaphoreTake(g_i2c_bus_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        if (ds3231_get_time(&g_rtc, &timeinfo) == 0) {
+            rtc_ts = mktime(&timeinfo);
+        }
+        xSemaphoreGive(g_i2c_bus_mutex);
+    }
+
+    if (rtc_ts != -1) {
+        struct timeval tv = {.tv_sec = rtc_ts};
+        settimeofday(&tv, NULL);
+        ESP_LOGI(TAG, "System time re-synced from DS3231 RTC.");
+    }
+}
 /**
  * @brief i2c master initialization
  */
@@ -155,6 +185,19 @@ volatile command_status_t g_command_status = CMD_STATUS_IDLE;
 
 void main_task(void *pvParameters)
 {
+    // Configure wake-up sources
+    // Wake on any rotary encoder activity (button or rotation)
+    const uint64_t ext_wakeup_pin_mask = (1ULL << ROTARY_ENCODER_BUTTON_PIN) | (1ULL << ROTARY_ENCODER_PIN_A) | (1ULL << ROTARY_ENCODER_PIN_B);
+    // Since all encoder pins have pull-ups, they are HIGH when idle.
+    // Any interaction (press or turn) will pull at least one pin LOW.
+    // Therefore, we wake when ANY of the monitored pins go LOW.
+    esp_sleep_enable_ext1_wakeup(ext_wakeup_pin_mask, ESP_EXT1_WAKEUP_ANY_LOW);
+    // Wake up periodically
+    esp_sleep_enable_timer_wakeup(SLEEP_DURATION_US);
+
+    ESP_LOGI(TAG, "Light sleep configured. Inactivity timeout: %dms, Sleep duration: %llus",
+             INACTIVITY_TIMEOUT_MS, SLEEP_DURATION_US / 1000000);
+
     while (1)
     {
         // --- Process commands from other tasks ---
@@ -178,16 +221,38 @@ void main_task(void *pvParameters)
                     spi_sdcard_format();
                     // Status is now handled inside spi_sdcard_format
                     break;
+                case APP_CMD_ACTIVITY_DETECTED:
+                    ESP_LOGI(TAG, "Received activity from the UI");
+                    last_activity_ms = esp_timer_get_time() / 1000;
+                   
+                    break;
                 default:
                     ESP_LOGW(TAG, "Unknown command received: %d", cmd);
                     break;
             }
         }
+
+        // --- Power Saving Logic ---
+   
+        uint64_t current_time_ms = esp_timer_get_time() / 1000;
+
+        if (current_time_ms - last_activity_ms > INACTIVITY_TIMEOUT_MS) {
+            ESP_LOGI(TAG, "Inactivity timeout. Entering light sleep.");
+            
+            esp_light_sleep_start();
+            last_activity_ms = esp_timer_get_time() / 1000; // Reset activity timer on wakeup
+    
+            resync_time_from_rtc(); // Re-sync system time with external RTC
+            ESP_LOGI(TAG, "Woke up from light sleep.");
+        }
+
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 void app_main(void)
 {
+    last_activity_ms = esp_timer_get_time() / 1000;
+
     g_command_status_mutex = xSemaphoreCreateMutex();
     g_i2c_bus_mutex = xSemaphoreCreateMutex();
 
@@ -268,7 +333,7 @@ void app_main(void)
     spi_sdcard_full_init(); // Call once at startup
 
     i2c_oled_clear(I2C_OLED_NUM);
-    ESP_LOGI(TAG, "Starting BMP280 sensor readings and Encoder monitoring...");
+    ESP_LOGI(TAG, "Starting  sensor readings and Encoder monitoring...");
 
     xTaskCreate(uiRender_task, "uiRender", 4096, NULL, 5, NULL);
 

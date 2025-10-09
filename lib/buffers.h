@@ -30,6 +30,7 @@ typedef enum {
     APP_CMD_GET_SD_FILE_COUNT,
     APP_CMD_GET_SD_FREE_SPACE,
     APP_CMD_FORMAT_SD_CARD,
+    APP_CMD_ACTIVITY_DETECTED,
 
 } app_command_t;
 

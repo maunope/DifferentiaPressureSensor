@@ -45,6 +45,7 @@ extern const ui_page_t fs_stats_page;
 void uiRender_init(i2c_port_t oled_i2c_num, gpio_num_t sda, gpio_num_t scl);
 void uiRender_task(void *pvParameters);
 void uiRender_send_event(int event, float *values, int value_count);
+void uiRender_reset_activity_timer(void);
 
 
 typedef enum {

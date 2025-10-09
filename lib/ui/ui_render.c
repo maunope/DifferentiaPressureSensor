@@ -342,13 +342,22 @@ void render_cmd_feedback_screen(void) {
 }
 
 
+
+void uiRender_reset_activity_timer(void) {
+    app_command_t cmd = APP_CMD_ACTIVITY_DETECTED;
+            xQueueSend(g_app_cmd_queue, &cmd, 0);   
+}
+
 // --- UI task ---
 void uiRender_task(void *pvParameters) {
     ui_event_queue = xQueueCreate(UI_QUEUE_LEN, sizeof(ui_event_msg_t));
+     uiRender_reset_activity_timer();
 
     while (1) {
         ui_event_msg_t msg;
         if (xQueueReceive(ui_event_queue, &msg, pdMS_TO_TICKS(100))) {
+            ESP_LOGI("UI", "Event received: %d", msg.event);
+             uiRender_reset_activity_timer();
             if (s_cmd_pending_mode) {
                 // Ignore all input while a command is pending
             }
