@@ -1,0 +1,4 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "Olimex ESP32 S3 LiPo Devkit")(type "KiCad")(uri "${KIPRJMOD}/ESP32-S3-DEVKIT-LIPO/ESP32-S3-DEVKIT-LIPO.kicad_sym")(options "")(descr ""))
+)
