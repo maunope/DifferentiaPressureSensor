@@ -60,3 +60,8 @@ dependencies.lock
 sdkconfig.systemsesp32s3_debug.old
 sdkconfig.systemsesp32s3_debug.old
 sdkconfig.systemsesp32s3_debug.old
+board/DifferentialPressureSensor/DifferentialPressureSensor-backups/DifferentialPressureSensor-2025-10-09_180424.zip
+board/DifferentialPressureSensor/DifferentialPressureSensor-backups/DifferentialPressureSensor-2025-10-09_184527.zip
+board/DifferentialPressureSensor/DifferentialPressureSensor-backups/DifferentialPressureSensor-2025-10-09_190336.zip
+board/DifferentialPressureSensor/DifferentialPressureSensor-backups/DifferentialPressureSensor-2025-10-09_191152.zip
+board/DifferentialPressureSensor/fp-info-cache
