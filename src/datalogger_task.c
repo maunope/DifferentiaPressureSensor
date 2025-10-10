@@ -9,6 +9,7 @@
 #include "../lib/i2c-bmp280/i2c-bmp280.h"
 #include "../lib/spi-sdcard/spi-sdcard.h"
 #include "../lib/buffers.h"
+#include "../lib/ui/time_utils.h"
 
 #include "../lib/lipo-battery/lipo-battery.h"
 
@@ -103,7 +104,7 @@ void datalogger_task(void *pvParameters)
                 // Format timestamp for logging
                 char local_time_str[32];
                 struct tm local_tm;
-                localtime_r(&local_buffer.timestamp, &local_tm);
+                convert_gmt_to_cet(local_buffer.timestamp, &local_tm);
                 strftime(local_time_str, sizeof(local_time_str), "%Y-%m-%d %H:%M:%S %Z", &local_tm);
 
                 // Log to console

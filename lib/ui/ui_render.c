@@ -8,6 +8,7 @@
 #include "esp_timer.h"
 #include <ui_menudef.h>
 #include "esp_log.h"
+#include "time_utils.h"
 #include "../buffers.h"
 
 #define UI_QUEUE_LEN 8
@@ -212,9 +213,10 @@ void render_sensor_callback(void)
         local_buffer = g_sensor_buffer;
         xSemaphoreGive(g_sensor_buffer_mutex);
 
-        struct tm *local_time = localtime(&local_buffer.timestamp);
+        struct tm local_tm;
+        convert_gmt_to_cet(local_buffer.timestamp, &local_tm);
         char time_str[20];
-        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", local_time);
+        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &local_tm);
 
         // new_lines[1] is intentionally left blank
         snprintf(new_lines[0], sizeof(new_lines[0]), "Stato Letture");

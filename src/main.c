@@ -364,10 +364,7 @@ void app_main(void)
         tzset();
         struct timeval tv = {.tv_sec = rtc_ts};
         settimeofday(&tv, NULL);
-        ESP_LOGI(TAG, "System time synchronized from DS3231 RTC.");
-        // Now, set the local timezone for display purposes
-        setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1);
-        tzset();
+        ESP_LOGI(TAG, "System time synchronized from DS3231 RTC to UTC.");
     } else {
         rtc_available = false;
         ESP_LOGW(TAG, "RTC not available, using ESP32 system time.");

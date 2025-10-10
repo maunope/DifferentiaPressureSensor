@@ -15,6 +15,7 @@
 #include "tinyusb_msc.h"
 #include "tinyusb_default_config.h"
 #include "../buffers.h"
+#include "../ui/time_utils.h"
 
 #include <sys/stat.h>
 #include <dirent.h>
@@ -231,10 +232,11 @@ void spi_sdcard_write_csv()
         }
     }
 
-    struct tm *local_time = localtime(&local_buffer.timestamp);
+    struct tm local_tm;
+    convert_gmt_to_cet(local_buffer.timestamp, &local_tm);
     char time_str[20];
     //todo make timestamp format a centralized var
-    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", local_time); // Format as YYYY-MM-DD HH:MM:SS
+    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &local_tm); // Format as YYYY-MM-DD HH:MM:SS
     fprintf(f, "%lld,%s,%.2f,%ld,%.2f,%d,%d\n", (long long)local_buffer.timestamp, time_str, local_buffer.temperature_c, local_buffer.pressure_pa, local_buffer.battery_voltage, local_buffer.battery_percentage, local_buffer.battery_externally_powered);
     fflush(f);
     fclose(f);
