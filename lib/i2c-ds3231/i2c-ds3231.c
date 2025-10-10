@@ -87,6 +87,8 @@ int ds3231_set_time(ds3231_t *rtc, const struct tm *timeinfo) {
 
 int ds3231_set_time_t(ds3231_t *rtc, time_t timestamp) {
     struct tm timeinfo;
-    localtime_r(&timestamp, &timeinfo);
+    // The timestamp is UTC (seconds since epoch).
+    // We need to convert it to a struct tm representing UTC.
+    gmtime_r(&timestamp, &timeinfo);
     return ds3231_set_time(rtc, &timeinfo);
 }

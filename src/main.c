@@ -78,7 +78,7 @@ static void set_rtc_to_build_time(void) {
     if (!rtc_available) {
         ESP_LOGE(TAG, "Cannot set time, RTC not available.");
     }
-     //TODO make this parametric to address different timezones
+
     // Set the timezone to correctly interpret the local build time
     setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1);
     tzset();
@@ -123,6 +123,10 @@ static void set_rtc_to_build_time(void) {
         ESP_LOGE(TAG, "Failed to set RTC time.");
     }
 
+    // Restore the system timezone to UTC
+    setenv("TZ", "UTC0", 1);
+    tzset();
+
     // Update the global command status
     if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY)) {
         g_command_status = (ret == 0) ? CMD_STATUS_SUCCESS : CMD_STATUS_FAIL;
@@ -142,9 +146,8 @@ static void resync_time_from_rtc(void)
     if (xSemaphoreTake(g_i2c_bus_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         if (ds3231_get_time(&g_rtc, &timeinfo) == 0) {
             // The RTC provides a struct tm in UTC.
-            // Use our custom timegm to convert it to a time_t (seconds since epoch, UTC).
-            // This correctly sets the system's base time to UTC.
-           rtc_ts = mktime(&timeinfo);
+            // Since system TZ is UTC, mktime works like timegm.
+            rtc_ts = mktime(&timeinfo);
         }
         xSemaphoreGive(g_i2c_bus_mutex);
     }
@@ -185,28 +188,6 @@ SemaphoreHandle_t g_command_status_mutex = NULL;
 SemaphoreHandle_t g_i2c_bus_mutex = NULL;
 volatile command_status_t g_command_status = CMD_STATUS_IDLE;
 QueueHandle_t g_datalogger_cmd_queue = NULL;
-
-// Custom implementation of timegm, as it's a non-standard GNU extension
-static time_t timegm_custom(struct tm *tm) {
-    const int days_before[12] = {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
-    int year = tm->tm_year + 1900;
-    int month = tm->tm_mon;
-    if (month > 11) {
-        year += month / 12;
-        month %= 12;
-    } else if (month < 0) {
-        int years_diff = (-month + 11) / 12;
-        year -= years_diff;
-        month += years_diff * 12;
-    }
-    long days = (year - 1970) * 365L + (year - 1969) / 4 - (year - 1901) / 100 + (year - 1601) / 400;
-    days += days_before[month];
-    if (month > 1 && (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0))) {
-        days++;
-    }
-    days += tm->tm_mday - 1;
-    return days * 86400L + tm->tm_hour * 3600L + tm->tm_min * 60L + tm->tm_sec;
-}
 
 TaskHandle_t g_uiRender_task_handle = NULL;
 
@@ -359,10 +340,8 @@ void app_main(void)
     time_t rtc_ts = -1;
     if (xSemaphoreTake(g_i2c_bus_mutex, portMAX_DELAY)) {
         if (ds3231_get_time(&g_rtc, &timeinfo) == 0) {
-            // The RTC provides a struct tm in UTC.
-            // Use our custom timegm to convert it to a time_t (seconds since epoch, UTC).
-            // This correctly sets the system's base time to UTC.
-            rtc_ts = timegm_custom(&timeinfo);
+            // Since system TZ is UTC, mktime works like timegm.
+            rtc_ts = mktime(&timeinfo);
         }
         xSemaphoreGive(g_i2c_bus_mutex);
     }
@@ -380,11 +359,15 @@ void app_main(void)
 
         rtc_available = true;
         ESP_LOGI(TAG, "RTC available, using DS3231 for timestamps.");
-        setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1);
+        // Set system time to UTC
+        setenv("TZ", "UTC0", 1);
         tzset();
         struct timeval tv = {.tv_sec = rtc_ts};
         settimeofday(&tv, NULL);
         ESP_LOGI(TAG, "System time synchronized from DS3231 RTC.");
+        // Now, set the local timezone for display purposes
+        setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1);
+        tzset();
     } else {
         rtc_available = false;
         ESP_LOGW(TAG, "RTC not available, using ESP32 system time.");
