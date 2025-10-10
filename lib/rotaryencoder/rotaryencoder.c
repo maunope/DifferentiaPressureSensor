@@ -18,7 +18,7 @@ static volatile uint8_t g_encoder_state = 0;
 // static makes it private to this file. const places it in flash.
 static const int8_t KNOB_STATES[] = {0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0};
 
-static void IRAM_ATTR gpio_isr_handler(void *arg)
+void IRAM_ATTR gpio_isr_handler(void *arg)
 {
     // This is an optional but recommended FreeRTOS feature.
     // It allows for an immediate context switch if the message unblocks a higher-priority task.
@@ -52,6 +52,15 @@ void rotaryencoder_init(const rotaryencoder_config_t *cfg)
     gpio_isr_handler_add(encoder_cfg.pin_a, gpio_isr_handler, (void *)encoder_cfg.pin_a);
     gpio_isr_handler_add(encoder_cfg.pin_b, gpio_isr_handler, (void *)encoder_cfg.pin_b);
     gpio_isr_handler_add(encoder_cfg.button_pin, gpio_isr_handler, (void *)encoder_cfg.button_pin);
+}
+
+void rotaryencoder_enable_wakeup_source(void)
+{
+    // --- Configure wake-up sources ---
+    // Wake on button press (HIGH to LOW). This is the only reliable GPIO wakeup source
+    // on non-RTC pins.
+    esp_err_t err = gpio_wakeup_enable(encoder_cfg.button_pin, GPIO_INTR_LOW_LEVEL);
+    if (err != ESP_OK) ESP_LOGE(TAG, "Failed to enable wakeup for button pin: %s", esp_err_to_name(err));
 }
 
 static void rotary_encoder_task(void *arg)
@@ -143,4 +152,9 @@ encoder_button_state_t rotaryencoder_get_button_state(void)
     encoder_button_state_t state = g_encoder_button_state;
     g_encoder_button_state = ENC_BTN_IDLE; // Reset after reading
     return state;
+}
+
+QueueHandle_t rotaryencoder_get_queue_handle(void)
+{
+    return gpio_evt_queue;
 }

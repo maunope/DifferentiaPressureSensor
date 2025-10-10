@@ -32,6 +32,7 @@ typedef enum {
     APP_CMD_FORMAT_SD_CARD,
     APP_CMD_ACTIVITY_DETECTED,
 
+    APP_CMD_REFRESH_SENSOR_DATA,
 } app_command_t;
 
 extern QueueHandle_t g_app_cmd_queue;

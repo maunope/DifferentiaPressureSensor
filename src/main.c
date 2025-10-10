@@ -18,7 +18,6 @@
 #include <sys/time.h>
 #include "esp_sleep.h"
 
-#include "../lib/i2c-lcd/i2c-lcd.h"
 #include "../lib/i2c-bmp280/i2c-bmp280.h" // BMP280 sensor API
 #include "../lib/rotaryencoder/rotaryencoder.h"
 #include "../lib/spi-sdcard/spi-sdcard.h"
@@ -56,12 +55,12 @@
 // --- Battery ADC Configuration ---
 #define BATTERY_PWR_PIN GPIO_NUM_5
 #define BATTERY_ADC_PIN GPIO_NUM_6
-#define BATTERY_VOLTAGE_DIVIDER_RATIO 4.133f // (470k + 150k) / 150k
+#define BATTERY_VOLTAGE_DIVIDER_RATIO 4.1428f // (470k + 150k) / 150k, then tuned experimentally
 
 
 
 
-static const char *TAG = "DifferentialPressureSensor";
+static const char *TAG = "main";
 
 bool rtc_available = false;
 
@@ -70,6 +69,8 @@ bmp280_t g_bmp280; // Global BMP280 device handle
 
 
 static uint64_t last_activity_ms = 0;
+
+
 
 
 
@@ -140,7 +141,10 @@ static void resync_time_from_rtc(void)
 
     if (xSemaphoreTake(g_i2c_bus_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         if (ds3231_get_time(&g_rtc, &timeinfo) == 0) {
-            rtc_ts = mktime(&timeinfo);
+            // The RTC provides a struct tm in UTC.
+            // Use our custom timegm to convert it to a time_t (seconds since epoch, UTC).
+            // This correctly sets the system's base time to UTC.
+           rtc_ts = mktime(&timeinfo);
         }
         xSemaphoreGive(g_i2c_bus_mutex);
     }
@@ -180,21 +184,36 @@ QueueHandle_t g_app_cmd_queue = NULL;
 SemaphoreHandle_t g_command_status_mutex = NULL;
 SemaphoreHandle_t g_i2c_bus_mutex = NULL;
 volatile command_status_t g_command_status = CMD_STATUS_IDLE;
+QueueHandle_t g_datalogger_cmd_queue = NULL;
+
+// Custom implementation of timegm, as it's a non-standard GNU extension
+static time_t timegm_custom(struct tm *tm) {
+    const int days_before[12] = {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
+    int year = tm->tm_year + 1900;
+    int month = tm->tm_mon;
+    if (month > 11) {
+        year += month / 12;
+        month %= 12;
+    } else if (month < 0) {
+        int years_diff = (-month + 11) / 12;
+        year -= years_diff;
+        month += years_diff * 12;
+    }
+    long days = (year - 1970) * 365L + (year - 1969) / 4 - (year - 1901) / 100 + (year - 1601) / 400;
+    days += days_before[month];
+    if (month > 1 && (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0))) {
+        days++;
+    }
+    days += tm->tm_mday - 1;
+    return days * 86400L + tm->tm_hour * 3600L + tm->tm_min * 60L + tm->tm_sec;
+}
+
+TaskHandle_t g_uiRender_task_handle = NULL;
 
 // --- Main Application Entry Point ---
 
 void main_task(void *pvParameters)
 {
-    // Configure wake-up sources
-    // Wake on any rotary encoder activity (button or rotation)
-    const uint64_t ext_wakeup_pin_mask = (1ULL << ROTARY_ENCODER_BUTTON_PIN) | (1ULL << ROTARY_ENCODER_PIN_A) | (1ULL << ROTARY_ENCODER_PIN_B);
-    // Since all encoder pins have pull-ups, they are HIGH when idle.
-    // Any interaction (press or turn) will pull at least one pin LOW.
-    // Therefore, we wake when ANY of the monitored pins go LOW.
-    esp_sleep_enable_ext1_wakeup(ext_wakeup_pin_mask, ESP_EXT1_WAKEUP_ANY_LOW);
-    // Wake up periodically
-    esp_sleep_enable_timer_wakeup(SLEEP_DURATION_US);
-
     ESP_LOGI(TAG, "Light sleep configured. Inactivity timeout: %dms, Sleep duration: %llus",
              INACTIVITY_TIMEOUT_MS, SLEEP_DURATION_US / 1000000);
 
@@ -222,9 +241,16 @@ void main_task(void *pvParameters)
                     // Status is now handled inside spi_sdcard_format
                     break;
                 case APP_CMD_ACTIVITY_DETECTED:
-                    ESP_LOGI(TAG, "Received activity from the UI");
+                   // ESP_LOGI(TAG, "Received activity from the UI");
                     last_activity_ms = esp_timer_get_time() / 1000;
                    
+                    break;
+                case APP_CMD_REFRESH_SENSOR_DATA:
+                    //ESP_LOGI(TAG, "Received command to refresh sensor data, forwarding to datalogger.");
+                    if (g_datalogger_cmd_queue != NULL) {
+                        datalogger_command_t logger_cmd = DATALOGGER_CMD_FORCE_REFRESH;
+                        xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
+                    }
                     break;
                 default:
                     ESP_LOGW(TAG, "Unknown command received: %d", cmd);
@@ -237,13 +263,60 @@ void main_task(void *pvParameters)
         uint64_t current_time_ms = esp_timer_get_time() / 1000;
 
         if (current_time_ms - last_activity_ms > INACTIVITY_TIMEOUT_MS) {
+            // --- Prepare for sleep ---
+            // 1. Tell the UI to show the sleep message
+            uiRender_send_event(UI_EVENT_PREPARE_SLEEP, NULL, 0);
+            vTaskDelay(pdMS_TO_TICKS(200)); // Give UI time to update display
+
             ESP_LOGI(TAG, "Inactivity timeout. Entering light sleep.");
-            
+
+            // 1. Disable normal ISRs to prepare for sleep
+            gpio_isr_handler_remove(ROTARY_ENCODER_PIN_A);
+            gpio_isr_handler_remove(ROTARY_ENCODER_PIN_B);
+            gpio_isr_handler_remove(ROTARY_ENCODER_BUTTON_PIN);
+
+            ESP_LOGI(TAG, "Wakeup enabled for GPIO: %d (Button)", ROTARY_ENCODER_BUTTON_PIN);
+
+            // 2. Configure and enable GPIO wakeup sources
+            rotaryencoder_enable_wakeup_source();
+            esp_sleep_enable_gpio_wakeup();
+            esp_sleep_enable_timer_wakeup(SLEEP_DURATION_US); // Also re-enable timer wakeup
+
+            // 3. Go to sleep
             esp_light_sleep_start();
-            last_activity_ms = esp_timer_get_time() / 1000; // Reset activity timer on wakeup
-    
+
+            // --- WAKE UP ---
+            // Tell the UI task to wake up and resume normal rendering
+            uiRender_send_event(UI_EVENT_WAKE_UP, NULL, 0);
+
+            esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+            if (cause == ESP_SLEEP_WAKEUP_TIMER) {
+                ESP_LOGI(TAG, "Woke up from light sleep due to timer.");
+            } 
+            else if (cause == ESP_SLEEP_WAKEUP_GPIO) {
+                ESP_LOGI(TAG, "Woke up from light sleep due to GPIO.");
+                // Debounce after GPIO wakeup to prevent the wake-up press from being processed as a command.
+                // A small delay to allow the button to be released.
+                vTaskDelay(pdMS_TO_TICKS(100));
+                // Flush any pending GPIO events that might have been queued during the wake-up transition.
+                // This is crucial to prevent the wake-up press from being processed as a UI command.
+                xQueueReset(rotaryencoder_get_queue_handle());
+
+            } else {
+                ESP_LOGI(TAG, "Woke up from light sleep due to other reason (%d)", cause);
+            }
+
+            // 4. Re-install normal ISRs for active operation
+            // The ISR handler is now visible via rotaryencoder.h
+            gpio_isr_handler_add(ROTARY_ENCODER_PIN_A, gpio_isr_handler, (void *)ROTARY_ENCODER_PIN_A);
+            gpio_isr_handler_add(ROTARY_ENCODER_PIN_B, gpio_isr_handler, (void *)ROTARY_ENCODER_PIN_B);
+            gpio_isr_handler_add(ROTARY_ENCODER_BUTTON_PIN, gpio_isr_handler, (void *)ROTARY_ENCODER_BUTTON_PIN);
+
+            gpio_wakeup_disable(ROTARY_ENCODER_BUTTON_PIN); // Disable wakeup to use normal ISR
+
             resync_time_from_rtc(); // Re-sync system time with external RTC
-            ESP_LOGI(TAG, "Woke up from light sleep.");
+            last_activity_ms = esp_timer_get_time() / 1000; // Reset activity timer on wakeup
+            
         }
 
         vTaskDelay(pdMS_TO_TICKS(100));
@@ -258,6 +331,7 @@ void app_main(void)
 
     g_sensor_buffer_mutex = xSemaphoreCreateMutex();
     g_app_cmd_queue = xQueueCreate(10, sizeof(app_command_t));
+    g_datalogger_cmd_queue = xQueueCreate(5, sizeof(datalogger_command_t));
 
     // Initialize Battery Reader first, as it uses ADC which can conflict if I2C is initialized first
     battery_reader_init(BATTERY_ADC_PIN, BATTERY_PWR_PIN, BATTERY_VOLTAGE_DIVIDER_RATIO);
@@ -285,7 +359,10 @@ void app_main(void)
     time_t rtc_ts = -1;
     if (xSemaphoreTake(g_i2c_bus_mutex, portMAX_DELAY)) {
         if (ds3231_get_time(&g_rtc, &timeinfo) == 0) {
-            rtc_ts = mktime(&timeinfo);
+            // The RTC provides a struct tm in UTC.
+            // Use our custom timegm to convert it to a time_t (seconds since epoch, UTC).
+            // This correctly sets the system's base time to UTC.
+            rtc_ts = timegm_custom(&timeinfo);
         }
         xSemaphoreGive(g_i2c_bus_mutex);
     }

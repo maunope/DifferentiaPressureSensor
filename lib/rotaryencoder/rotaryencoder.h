@@ -29,3 +29,9 @@ void rotaryencoder_init(const rotaryencoder_config_t *cfg);
 void rotaryencoder_start_task(void);
 encoder_direction_t rotaryencoder_get_direction(void);
 encoder_button_state_t rotaryencoder_get_button_state(void);
+void rotaryencoder_enable_wakeup_source(void);
+#ifndef IRAM_ATTR
+#define IRAM_ATTR
+#endif
+void IRAM_ATTR gpio_isr_handler(void *arg);
+QueueHandle_t rotaryencoder_get_queue_handle(void);

@@ -51,5 +51,7 @@ void uiRender_reset_activity_timer(void);
 typedef enum {
     UI_EVENT_CW,
     UI_EVENT_CCW,
-    UI_EVENT_BTN
+    UI_EVENT_BTN,
+    UI_EVENT_PREPARE_SLEEP,
+    UI_EVENT_WAKE_UP
 } ui_event_t;

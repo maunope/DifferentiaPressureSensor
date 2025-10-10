@@ -1,5 +1,16 @@
 #pragma once
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+
+// --- Datalogger command queue ---
+typedef enum {
+    DATALOGGER_CMD_NONE,
+    DATALOGGER_CMD_FORCE_REFRESH,
+} datalogger_command_t;
+
+extern QueueHandle_t g_datalogger_cmd_queue;
+
 /**
  * @brief Task responsible for periodically reading sensor data and logging it to the SD card.
  */
