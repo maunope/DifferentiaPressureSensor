@@ -51,7 +51,7 @@ esp_err_t battery_reader_init(gpio_num_t adc_gpio_num, gpio_num_t pwr_gpio_num, 
     // --- ADC Channel Config ---
     adc_oneshot_chan_cfg_t config = {
         .bitwidth = ADC_BITWIDTH_DEFAULT, // Auto-select
-        .atten = ADC_ATTEN_DB_0, // 0-0.95V range
+        .atten = ADC_ATTEN_DB_2_5, // Use 2.5dB attenuation for a range of ~0-1.25V
     };
     
 #ifdef BATTERY_READER_ADC_CHANNEL
@@ -68,7 +68,7 @@ esp_err_t battery_reader_init(gpio_num_t adc_gpio_num, gpio_num_t pwr_gpio_num, 
     adc_cali_curve_fitting_config_t cali_config = {
         .unit_id = ADC_UNIT_1,
         .chan = s_adc_channel,
-        .atten = ADC_ATTEN_DB_0,
+        .atten = ADC_ATTEN_DB_2_5,
         .bitwidth = ADC_BITWIDTH_DEFAULT,
     };
     esp_err_t ret = adc_cali_create_scheme_curve_fitting(&cali_config, &s_adc_cali_handle);
@@ -110,7 +110,7 @@ float battery_reader_get_voltage(void) {
     }
     int adc_raw_avg = adc_raw_sum / NUM_SAMPLES;
 
-  
+     // ESP_LOGE(TAG, "Raw ADC value: %d", adc_raw_avg);
     int voltage_mv = 0;
     if (s_adc_cali_handle) {
         esp_err_t ret = adc_cali_raw_to_voltage(s_adc_cali_handle, adc_raw_avg, &voltage_mv);
@@ -120,9 +120,9 @@ float battery_reader_get_voltage(void) {
         }
     } else {
         // Fallback if calibration is not available
-        // This is a rough approximation for 0dB attenuation.
-        // The full-scale voltage is ~950mV.
-        voltage_mv = adc_raw_avg * 950 / 4095;
+        // This is a rough approximation for 2.5dB attenuation.
+        // The full-scale voltage is ~1250mV.
+        voltage_mv = adc_raw_avg * 1250 / 4095;
     }
 
     // Account for the voltage divider

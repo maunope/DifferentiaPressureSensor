@@ -240,6 +240,11 @@ void main_task(void *pvParameters)
         }
 
         // --- Power Saving Logic ---
+
+        // If USB is connected and mounted by the host, treat it as continuous activity to prevent sleep.
+        if (spi_sdcard_is_usb_connected()) {
+            last_activity_ms = esp_timer_get_time() / 1000;
+        }
    
         uint64_t current_time_ms = esp_timer_get_time() / 1000;
 
@@ -264,7 +269,7 @@ void main_task(void *pvParameters)
             esp_sleep_enable_timer_wakeup(SLEEP_DURATION_US); // Also re-enable timer wakeup
 
             // 3. Go to sleep
-            esp_light_sleep_start();
+           esp_light_sleep_start();
 
             // --- WAKE UP ---
             // Tell the UI task to wake up and resume normal rendering

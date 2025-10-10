@@ -16,6 +16,7 @@
 #include "tinyusb_default_config.h"
 #include "../buffers.h"
 #include "../ui/time_utils.h"
+#include <stdbool.h>
 
 #include <sys/stat.h>
 #include <dirent.h>
@@ -323,6 +324,15 @@ void spi_sdcard_get_free_space_mb(void) {
     {
         ESP_LOGE(TAG, "Failed to acquire mutex to update sd_card_free_bytes.");
     }
+}
+
+/**
+ * @brief Checks if the USB Mass Storage is connected and ready.
+ * @return true if USB is connected and mounted by the host, false otherwise.
+ */
+bool spi_sdcard_is_usb_connected(void)
+{
+    return tud_ready();
 }
 
 /**

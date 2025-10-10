@@ -444,6 +444,12 @@ void uiRender_task(void *pvParameters)
 {
     ui_event_queue = xQueueCreate(UI_QUEUE_LEN, sizeof(ui_event_msg_t));
     uiRender_reset_activity_timer();
+    
+    uint64_t last_sensor_refresh_ms = 0;
+    const uint32_t sensor_refresh_interval_ms = 5000; // 5 seconds
+
+    uint64_t last_fs_stats_refresh_ms = 0;
+    const uint32_t fs_stats_refresh_interval_ms = 5000; // 5 seconds
 
     while (1)
     {
@@ -521,6 +527,36 @@ void uiRender_task(void *pvParameters)
         else if (s_menu_mode)
         {
             render_menu_callback();
+        }
+        else if (s_current_page == &sensor_page)
+        {
+            uint64_t current_time_ms = esp_timer_get_time() / 1000;
+            if (current_time_ms - last_sensor_refresh_ms >= sensor_refresh_interval_ms) {
+                last_sensor_refresh_ms = current_time_ms;
+                if (g_app_cmd_queue != NULL) {
+                    app_command_t cmd = APP_CMD_REFRESH_SENSOR_DATA;
+                    xQueueSend(g_app_cmd_queue, &cmd, 0);
+                }
+            }
+            if (s_current_page->render) {
+                s_current_page->render();
+            }
+        }
+        else if (s_current_page == &fs_stats_page)
+        {
+            uint64_t current_time_ms = esp_timer_get_time() / 1000;
+            if (current_time_ms - last_fs_stats_refresh_ms >= fs_stats_refresh_interval_ms) {
+                last_fs_stats_refresh_ms = current_time_ms;
+                if (g_app_cmd_queue != NULL) {
+                    app_command_t cmd_file_count = APP_CMD_GET_SD_FILE_COUNT;
+                    xQueueSend(g_app_cmd_queue, &cmd_file_count, 0);
+                    app_command_t cmd_free_space = APP_CMD_GET_SD_FREE_SPACE;
+                    xQueueSend(g_app_cmd_queue, &cmd_free_space, 0);
+                }
+            }
+            if (s_current_page->render) {
+                s_current_page->render();
+            }
         }
         else if (s_current_page && s_current_page->render)
         {
