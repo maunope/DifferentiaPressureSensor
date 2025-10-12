@@ -28,7 +28,6 @@
 #include "datalogger_task.h"
 #include "../lib/lipo-battery/lipo-battery.h"
 
-
 // DO NOT use pins 19 and 20, they are used by the flash memory
 // DO NOT use pins 5 and 6, they are used for LiPo battery measurements
 
@@ -51,36 +50,29 @@
 #define ROTARY_ENCODER_PIN_B GPIO_NUM_42
 #define ROTARY_ENCODER_BUTTON_PIN GPIO_NUM_7
 #define BUTTON_DEBOUNCE_TIME_MS 50
-#define INACTIVITY_TIMEOUT_MS 10000 // 10 seconds
-#define SLEEP_DURATION_US (30 * 1000 * 1000) // 30 seconds
-
+#define INACTIVITY_TIMEOUT_MS 10000          // 10 seconds
+#define SLEEP_DURATION_US (45 * 1000 * 1000) // 45 seconds
 
 // --- Battery ADC Configuration ---
 #define BATTERY_PWR_PIN GPIO_NUM_5
 #define BATTERY_ADC_PIN GPIO_NUM_6
 #define BATTERY_VOLTAGE_DIVIDER_RATIO 4.1428f // (470k + 150k) / 150k, then tuned experimentally
 
-
-
-
 static const char *TAG = "main";
 
 bool rtc_available = false;
 
-ds3231_t g_rtc; // Global RTC device handle
+ds3231_t g_rtc;    // Global RTC device handle
 bmp280_t g_bmp280; // Global BMP280 device handle
 
 TaskHandle_t g_uiRender_task_handle = NULL;
 
-
 static uint64_t last_activity_ms = 0;
 
-
-
-
-
-static void set_rtc_to_build_time(void) {
-    if (!rtc_available) {
+static void set_rtc_to_build_time(void)
+{
+    if (!rtc_available)
+    {
         ESP_LOGE(TAG, "Cannot set time, RTC not available.");
     }
 
@@ -94,15 +86,17 @@ static void set_rtc_to_build_time(void) {
 
     // Parse date and time
     sscanf(time_str, "%d:%d:%d", &build_time.tm_hour, &build_time.tm_min, &build_time.tm_sec);
-    
+
     char month_str[4];
     int year;
     sscanf(date_str, "%s %d %d", month_str, &build_time.tm_mday, &year);
     build_time.tm_year = year - 1900;
 
     const char *months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-    for (int i = 0; i < 12; i++) {
-        if (strcmp(month_str, months[i]) == 0) {
+    for (int i = 0; i < 12; i++)
+    {
+        if (strcmp(month_str, months[i]) == 0)
+        {
             build_time.tm_mon = i;
             break;
         }
@@ -114,17 +108,21 @@ static void set_rtc_to_build_time(void) {
     gmtime_r(&build_ts, &utc_build_time);
 
     int ret = -1;
-    if (xSemaphoreTake(g_i2c_bus_mutex, portMAX_DELAY)) {
+    if (xSemaphoreTake(g_i2c_bus_mutex, portMAX_DELAY))
+    {
         ret = ds3231_set_time(&g_rtc, &utc_build_time);
         xSemaphoreGive(g_i2c_bus_mutex);
     }
 
-    if (ret == 0) {
+    if (ret == 0)
+    {
         ESP_LOGI(TAG, "RTC time set to build time: %s %s", date_str, time_str);
         // Also update system time immediately
         struct timeval tv = {.tv_sec = build_ts};
         settimeofday(&tv, NULL);
-    } else {
+    }
+    else
+    {
         ESP_LOGE(TAG, "Failed to set RTC time.");
     }
 
@@ -133,7 +131,8 @@ static void set_rtc_to_build_time(void) {
     tzset();
 
     // Update the global command status
-    if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY)) {
+    if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY))
+    {
         g_command_status = (ret == 0) ? CMD_STATUS_SUCCESS : CMD_STATUS_FAIL;
         xSemaphoreGive(g_command_status_mutex);
     }
@@ -147,15 +146,18 @@ static void peripherals_deinit(void)
 
 static void resync_time_from_rtc(void)
 {
-    if (!rtc_available) {
+    if (!rtc_available)
+    {
         return;
     }
 
     struct tm timeinfo;
     time_t rtc_ts = -1;
 
-    if (xSemaphoreTake(g_i2c_bus_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        if (ds3231_get_time(&g_rtc, &timeinfo) == 0) {
+    if (xSemaphoreTake(g_i2c_bus_mutex, pdMS_TO_TICKS(100)) == pdTRUE)
+    {
+        if (ds3231_get_time(&g_rtc, &timeinfo) == 0)
+        {
             // The RTC provides a struct tm in UTC.
             // Since system TZ is UTC, mktime works like timegm.
             rtc_ts = mktime(&timeinfo);
@@ -163,7 +165,8 @@ static void resync_time_from_rtc(void)
         xSemaphoreGive(g_i2c_bus_mutex);
     }
 
-    if (rtc_ts != -1) {
+    if (rtc_ts != -1)
+    {
         struct timeval tv = {.tv_sec = rtc_ts};
         settimeofday(&tv, NULL);
         ESP_LOGI(TAG, "System time re-synced from DS3231 RTC.");
@@ -204,74 +207,94 @@ QueueHandle_t g_datalogger_cmd_queue = NULL;
 
 void main_task(void *pvParameters)
 {
-    ESP_LOGI(TAG, "Light sleep configured. Inactivity timeout: %dms, Sleep duration: %llus",
-             INACTIVITY_TIMEOUT_MS, SLEEP_DURATION_US / 1000000);
+    ESP_LOGI(TAG, "Light sleep configured. Inactivity timeout: %dms, Sleep duration: %llus", INACTIVITY_TIMEOUT_MS, SLEEP_DURATION_US / 1000000ULL);
+    time_t last_processed_write_ts = 0;
 
     while (1)
     {
         // --- Process commands from other tasks ---
         app_command_t cmd;
-        if (xQueueReceive(g_app_cmd_queue, &cmd, 0) == pdPASS) {
-        // Any command from the UI means it's active
-        if (eTaskGetState(g_uiRender_task_handle) == eSuspended) {
-             ESP_LOGI(TAG, "Activity detected, waking up UI.");
-             // This will fall through to the activity detected command
-        }
-            switch (cmd) {
-                case APP_CMD_SET_RTC_BUILD_TIME:
-                    ESP_LOGI(TAG, "Received command to set RTC to build time.");
-                    set_rtc_to_build_time();
-                    break;
-                case APP_CMD_GET_SD_FREE_SPACE:
-                    ESP_LOGI(TAG, "Received command to get SD card free space.");
-                    spi_sdcard_get_free_space_mb();
-                    break;
-                case APP_CMD_GET_SD_FILE_COUNT:
-                    ESP_LOGI(TAG, "Received command to get SD card file count.");
-                    spi_sdcard_get_file_count();
-                    break;
-                case APP_CMD_FORMAT_SD_CARD:
-                    ESP_LOGI(TAG, "Received command to format SD card.");
-                    spi_sdcard_format();
-                    // Status is now handled inside spi_sdcard_format
-                    break;
-                case APP_CMD_ACTIVITY_DETECTED:
+        if (xQueueReceive(g_app_cmd_queue, &cmd, 0) == pdPASS)
+        {
+            // Any command from the UI means it's active
+            if (eTaskGetState(g_uiRender_task_handle) == eSuspended)
+            {
+                ESP_LOGI(TAG, "Activity detected, waking up UI.");
+                // This will fall through to the activity detected command
+            }
+            switch (cmd)
+            {
+            case APP_CMD_SET_RTC_BUILD_TIME:
+                ESP_LOGI(TAG, "Received command to set RTC to build time.");
+                set_rtc_to_build_time();
+                break;
+            case APP_CMD_GET_SD_FREE_SPACE:
+                ESP_LOGI(TAG, "Received command to get SD card free space.");
+                spi_sdcard_get_free_space_mb();
+                break;
+            case APP_CMD_GET_SD_FILE_COUNT:
+                ESP_LOGI(TAG, "Received command to get SD card file count.");
+                spi_sdcard_get_file_count();
+                break;
+            case APP_CMD_FORMAT_SD_CARD:
+                ESP_LOGI(TAG, "Received command to format SD card.");
+                spi_sdcard_format();
+                // Status is now handled inside spi_sdcard_format
+                break;
+            case APP_CMD_ACTIVITY_DETECTED:
                 last_activity_ms = esp_timer_get_time() / 1000;
-                if (eTaskGetState(g_uiRender_task_handle) == eSuspended) {
+                if (eTaskGetState(g_uiRender_task_handle) == eSuspended)
+                {
                     ESP_LOGI(TAG, "Waking up UI from suspended state.");
                     // Power on OLED and re-initialize
                     gpio_set_level(OLED_POWER_PIN, 1);
                     vTaskDelay(pdMS_TO_TICKS(50)); // Wait for OLED to stabilize
                     uiRender_init(I2C_OLED_NUM, I2C_OLED_SDA_IO, I2C_OLED_SCL_IO);
-                    
+
                     // Resume the UI task and send a wake-up event
                     vTaskResume(g_uiRender_task_handle);
                     uiRender_send_event(UI_EVENT_WAKE_UP, NULL, 0);
                 }
                 break;
             case APP_CMD_REFRESH_SENSOR_DATA:
-                //ESP_LOGI(TAG, "Received command to refresh sensor data, forwarding to datalogger.");
-                if (g_datalogger_cmd_queue != NULL) {
+                // ESP_LOGI(TAG, "Received command to refresh sensor data, forwarding to datalogger.");
+                if (g_datalogger_cmd_queue != NULL)
+                {
                     datalogger_command_t logger_cmd = DATALOGGER_CMD_FORCE_REFRESH;
                     xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
                 }
-                    break;
-                default:
-                    ESP_LOGW(TAG, "Unknown command received: %d", cmd);
-                    break;
+                break;
+            default:
+                ESP_LOGW(TAG, "Unknown command received: %d", cmd);
+                break;
             }
         }
 
-        // --- Power Saving Logic ---
-
+        // --- Power Saving & UI Inactivity Logic ---
         // If USB is connected and mounted by the host, treat it as continuous activity to prevent sleep.
-        if (spi_sdcard_is_usb_connected()) {
-            last_activity_ms = esp_timer_get_time() / 1000;
+        if (spi_sdcard_is_usb_connected())
+        {
+            last_activity_ms = esp_timer_get_time() / 1000ULL;
         }
-   
-        uint64_t current_time_ms = esp_timer_get_time() / 1000;
 
-        if (current_time_ms - last_activity_ms > INACTIVITY_TIMEOUT_MS) {
+        uint64_t current_time_ms = esp_timer_get_time() / 1000ULL;
+        bool ui_is_inactive = (current_time_ms - last_activity_ms > INACTIVITY_TIMEOUT_MS);
+
+        // --- New Sleep Logic ---
+        time_t current_write_ts = 0;
+        if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)))
+        {
+            current_write_ts = g_sensor_buffer.last_successful_write_ts;
+            xSemaphoreGive(g_sensor_buffer_mutex);
+        }
+
+        bool new_write_occurred = (current_write_ts > 0 && current_write_ts > last_processed_write_ts);
+
+        if (ui_is_inactive && new_write_occurred)
+        {
+            ESP_LOGI(TAG, "UI inactive and new data logged. Initiating sleep.");
+            last_processed_write_ts = current_write_ts; // Mark this write as processed
+
             // --- Prepare for sleep ---
             // 1. Suspend UI task and power down OLED
             uiRender_send_event(UI_EVENT_PREPARE_SLEEP, NULL, 0);
@@ -287,16 +310,19 @@ void main_task(void *pvParameters)
             // 3. Wait for the datalogger to confirm it's paused
             int datalogger_status = 0;
             int wait_cycles = 0;
-            do {
+            do
+            {
                 vTaskDelay(pdMS_TO_TICKS(50));
-                if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50))) {
+                if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)))
+                {
                     datalogger_status = g_sensor_buffer.datalogger_status;
                     xSemaphoreGive(g_sensor_buffer_mutex);
                 }
                 wait_cycles++;
             } while (datalogger_status != DATA_LOGGER_PAUSED && wait_cycles < 60); // Max 3 sec wait
-            ESP_LOGE(TAG, "Datalogger pause wait cycles: %d %d", DATA_LOGGER_PAUSED,datalogger_status);
-            if (datalogger_status != DATA_LOGGER_PAUSED) {
+
+            if (datalogger_status != DATA_LOGGER_PAUSED)
+            {
                 ESP_LOGE(TAG, "Timeout waiting for datalogger to pause. Aborting sleep.");
                 // Reset activity timer and try again later
                 last_activity_ms = esp_timer_get_time() / 1000;
@@ -313,41 +339,34 @@ void main_task(void *pvParameters)
             ESP_LOGI(TAG, "Powering down external devices.");
             gpio_set_level(DEVICES_POWER_PIN, 0);
 
-            ESP_LOGI(TAG, "Inactivity timeout. Entering light sleep.");
+            ESP_LOGI(TAG, "Entering light sleep.");
 
-            // 1. Disable normal ISRs to prepare for sleep
+            // Disable normal ISRs to prepare for sleep
             gpio_isr_handler_remove(ROTARY_ENCODER_PIN_A);
             gpio_isr_handler_remove(ROTARY_ENCODER_PIN_B);
             gpio_isr_handler_remove(ROTARY_ENCODER_BUTTON_PIN);
 
-            ESP_LOGI(TAG, "Wakeup enabled for GPIO: %d (Button)", ROTARY_ENCODER_BUTTON_PIN);
-
-            // 2. Configure and enable GPIO wakeup sources
+            // Configure and enable GPIO wakeup sources
             rotaryencoder_enable_wakeup_source();
             esp_sleep_enable_gpio_wakeup();
-            esp_sleep_enable_timer_wakeup(SLEEP_DURATION_US); // Also re-enable timer wakeup
-
-            // 3. Go to sleep
-           esp_light_sleep_start();
+            esp_sleep_enable_timer_wakeup(SLEEP_DURATION_US);
+            esp_light_sleep_start();
 
             // --- WAKE UP ---
-            // Power up devices and wait for them to stabilize
             gpio_set_level(DEVICES_POWER_PIN, 1);
             vTaskDelay(pdMS_TO_TICKS(100));
             ESP_LOGI(TAG, "Powered up external devices. Re-initializing...");
 
-            // Tell the datalogger to resume writes
-            logger_cmd = DATALOGGER_CMD_RESUME_WRITES;
-            xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
-
             esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
-            if (cause == ESP_SLEEP_WAKEUP_TIMER) {
+            if (cause == ESP_SLEEP_WAKEUP_TIMER)
+            {
                 ESP_LOGI(TAG, "Woke up from light sleep due to timer.");
                 // Keep OLED off and UI task suspended.
                 // Only re-init SD card for datalogger.
                 spi_sdcard_full_init();
-            } 
-            else if (cause == ESP_SLEEP_WAKEUP_GPIO) {
+            }
+            else if (cause == ESP_SLEEP_WAKEUP_GPIO)
+            {
                 ESP_LOGI(TAG, "Woke up from light sleep due to GPIO.");
                 // Power on OLED, re-init, and resume UI task
                 gpio_set_level(OLED_POWER_PIN, 1);
@@ -358,32 +377,41 @@ void main_task(void *pvParameters)
                 uiRender_send_event(UI_EVENT_WAKE_UP, NULL, 0);
 
                 // Debounce after GPIO wakeup to prevent the wake-up press from being processed as a command.
-                // A small delay to allow the button to be released.
                 vTaskDelay(pdMS_TO_TICKS(100));
                 xQueueReset(rotaryencoder_get_queue_handle());
-
-            } else {
+            }
+            else
+            {
                 ESP_LOGI(TAG, "Woke up from light sleep due to other reason (%d)", cause);
             }
 
-            // 4. Re-install normal ISRs for active operation
-            // The ISR handler is now visible via rotaryencoder.h
+            // Tell the datalogger to resume writes
+            logger_cmd = DATALOGGER_CMD_RESUME_WRITES;
+            xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
+
+            // Re-install normal ISRs for active operation
             gpio_isr_handler_add(ROTARY_ENCODER_PIN_A, gpio_isr_handler, (void *)ROTARY_ENCODER_PIN_A);
             gpio_isr_handler_add(ROTARY_ENCODER_PIN_B, gpio_isr_handler, (void *)ROTARY_ENCODER_PIN_B);
             gpio_isr_handler_add(ROTARY_ENCODER_BUTTON_PIN, gpio_isr_handler, (void *)ROTARY_ENCODER_BUTTON_PIN);
 
             gpio_wakeup_disable(ROTARY_ENCODER_BUTTON_PIN); // Disable wakeup to use normal ISR
 
-            resync_time_from_rtc(); // Re-sync system time with external RTC
-            last_activity_ms = esp_timer_get_time() / 1000; // Reset activity timer on wakeup
-            
+            resync_time_from_rtc();                         // Re-sync system time with external RTC
+            last_activity_ms = esp_timer_get_time() / 1000ULL; // Reset activity timer on wakeup
+        }
+        else if (ui_is_inactive && eTaskGetState(g_uiRender_task_handle) != eSuspended)
+        {
+            // UI timeout occurred, but no new write yet. Just turn off the screen.
+            ESP_LOGI(TAG, "UI Inactivity timeout. Suspending UI task and turning off OLED.");
+            vTaskSuspend(g_uiRender_task_handle);
+            gpio_set_level(OLED_POWER_PIN, 0);
         }
 
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
-void app_main(void)
-{
+
+void app_main(void) {
     // --- Initialize Devices Power Pin ---
     gpio_config_t oled_pwr_pin_cfg = {
         .pin_bit_mask = (1ULL << OLED_POWER_PIN),
@@ -408,11 +436,8 @@ void app_main(void)
     gpio_set_level(OLED_POWER_PIN, 1);
     vTaskDelay(pdMS_TO_TICKS(50)); // Wait 50ms after powering up devices
 
-    last_activity_ms = esp_timer_get_time() / 1000;
-
     g_command_status_mutex = xSemaphoreCreateMutex();
     g_i2c_bus_mutex = xSemaphoreCreateMutex();
-    // g_sdcard_mutex is no longer needed with this new logic
 
     g_sensor_buffer_mutex = xSemaphoreCreateMutex();
     g_app_cmd_queue = xQueueCreate(10, sizeof(app_command_t));
@@ -437,26 +462,30 @@ void app_main(void)
         return;
     }
 
-    //TODO make 0x68 a define
-    // --- Initialize and check RTC ---
+    // TODO make 0x68 a define
+    //  --- Initialize and check RTC ---
     ds3231_init(&g_rtc, I2C_NUM_0, 0x68);
     struct tm timeinfo;
     time_t rtc_ts = -1;
-    if (xSemaphoreTake(g_i2c_bus_mutex, portMAX_DELAY)) {
-        if (ds3231_get_time(&g_rtc, &timeinfo) == 0) {
+    if (xSemaphoreTake(g_i2c_bus_mutex, portMAX_DELAY))
+    {
+        if (ds3231_get_time(&g_rtc, &timeinfo) == 0)
+        {
             // Since system TZ is UTC, mktime works like timegm.
             rtc_ts = mktime(&timeinfo);
         }
         xSemaphoreGive(g_i2c_bus_mutex);
     }
 
-    if (rtc_ts != -1) {
+    if (rtc_ts != -1)
+    {
         struct tm build_time;
         sscanf(__DATE__, "%*s %*d %d", &build_time.tm_year);
         build_time.tm_year -= 1900;
 
         // If RTC year is before build year, set the time
-       if (timeinfo.tm_year < build_time.tm_year) {
+        if (timeinfo.tm_year < build_time.tm_year)
+        {
             ESP_LOGW(TAG, "RTC time is invalid. Setting to build time.");
             set_rtc_to_build_time();
         }
@@ -469,12 +498,13 @@ void app_main(void)
         struct timeval tv = {.tv_sec = rtc_ts};
         settimeofday(&tv, NULL);
         ESP_LOGI(TAG, "System time synchronized from DS3231 RTC to UTC.");
-    } else {
+    }
+    else
+    {
         rtc_available = false;
         ESP_LOGW(TAG, "RTC not available, using ESP32 system time.");
     }
 
-   
     // Initialize Rotary Encoder
     rotaryencoder_config_t encoder_cfg = {
         .pin_a = ROTARY_ENCODER_PIN_A,

@@ -267,6 +267,7 @@ void spi_sdcard_write_csv()
     if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
     {
         g_sensor_buffer.writeStatus = 0; // Indicate file write success
+        g_sensor_buffer.last_successful_write_ts = local_buffer.timestamp;
         xSemaphoreGive(g_sensor_buffer_mutex);
         return;
     }

@@ -3,6 +3,7 @@
 #include "freertos/task.h"
 #include "ui_render.h"
 
+#include "../buffers.h" // For g_app_cmd_queue and app_command_t
 static const char *TAG = "ROTARY_ENCODER";
 
 static rotaryencoder_config_t encoder_cfg;
@@ -92,7 +93,11 @@ static void rotary_encoder_task(void *arg)
                     if (gpio_get_level(encoder_cfg.button_pin) == 0)
                     {
                         g_encoder_button_state = ENC_BTN_PRESSED;
-                        uiRender_send_event(UI_EVENT_BTN, NULL, 0);
+                        // Send activity command directly to main task to wake up the system
+                        app_command_t cmd = APP_CMD_ACTIVITY_DETECTED;
+                        xQueueSend(g_app_cmd_queue, &cmd, 0);
+                        // Also send the button press to the UI task for menu navigation
+                        uiRender_send_event(UI_EVENT_BTN, NULL, 0); // This will be processed if UI is awake
                     }
                 }
                 // Re-enable interrupt after processing

@@ -68,7 +68,12 @@ void uiRender_init(i2c_port_t oled_i2c_num, gpio_num_t sda, gpio_num_t scl)
     s_oled_i2c_num = oled_i2c_num;
     s_oled_sda = sda;
     s_oled_scl = scl;
-    i2c_oled_init(s_oled_i2c_num, s_oled_sda, s_oled_scl);
+    // Only install the driver if it hasn't been installed before.
+    // This allows uiRender_init to be called multiple times for re-initialization.
+    if (!s_oled_initialized) {
+        i2c_driver_install(s_oled_i2c_num, I2C_MODE_MASTER, 0, 0, 0);
+    }
+    i2c_oled_init(s_oled_i2c_num, s_oled_sda, s_oled_scl); // This function can be called multiple times
     s_oled_initialized = true;
 }
 
@@ -456,12 +461,7 @@ void uiRender_task(void *pvParameters)
         ui_event_msg_t msg;
         if (xQueueReceive(ui_event_queue, &msg, pdMS_TO_TICKS(100)))
         {
-
-            if (msg.event != UI_EVENT_PREPARE_SLEEP)
-            {
-                uiRender_reset_activity_timer();
-            }
-
+            // The rotary encoder task now sends APP_CMD_ACTIVITY_DETECTED directly.
             if (msg.event == UI_EVENT_PREPARE_SLEEP)
             {
                 s_waking_up = false; // Clear waking up flag if we are going to sleep

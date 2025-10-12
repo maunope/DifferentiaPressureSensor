@@ -15,6 +15,7 @@ typedef struct {
     long pressure_pa;
     float temperature_c;
     time_t timestamp;
+    time_t last_successful_write_ts;
     bool timestamp_from_rtc; 
     float battery_voltage;
     int battery_percentage;
