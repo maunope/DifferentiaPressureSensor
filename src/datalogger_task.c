@@ -66,13 +66,13 @@ static void update_sensor_buffer(void)
 void datalogger_task(void *pvParameters)
 {
     ESP_LOGI(TAG, "Datalogger task started.");
+    static bool is_paused = false;
     uint64_t last_write_ms = 0;
     const uint32_t log_interval_ms = 30000; // 30 seconds
 
     while (1)
     {
         datalogger_command_t cmd;
-        bool force_refresh = false;
 
         // Wait for a command or for 1 second to pass
         if (xQueueReceive(g_datalogger_cmd_queue, &cmd, pdMS_TO_TICKS(1000)) == pdPASS)
@@ -81,13 +81,32 @@ void datalogger_task(void *pvParameters)
             {
                 ESP_LOGI(TAG, "Forcing sensor data refresh due to command.");
                 update_sensor_buffer();
-                force_refresh = true; // Flag that we just refreshed
+                continue;
+            }
+            else if (cmd == DATALOGGER_CMD_PAUSE_WRITES)
+            {
+                ESP_LOGI(TAG, "Pausing writes to SD card.");
+                is_paused = true;
+                if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY)) {
+                    g_sensor_buffer.datalogger_status = DATA_LOGGER_PAUSED;
+                    xSemaphoreGive(g_sensor_buffer_mutex);
+                }
+            }
+            else if (cmd == DATALOGGER_CMD_RESUME_WRITES)
+            {
+                ESP_LOGI(TAG, "Resuming writes to SD card.");
+                is_paused = false;
+                if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY)) {
+                    g_sensor_buffer.datalogger_status = DATA_LOGGER_RUNNING;
+                    xSemaphoreGive(g_sensor_buffer_mutex);
+                }
             }
         }
 
+
         uint64_t current_time_ms = esp_timer_get_time() / 1000;
 
-        if (!force_refresh && (current_time_ms - last_write_ms >= log_interval_ms))
+        if (current_time_ms - last_write_ms >= log_interval_ms && !is_paused)
         {
             last_write_ms = current_time_ms;
 

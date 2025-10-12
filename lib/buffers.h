@@ -1,5 +1,6 @@
 #pragma once
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include <time.h>
@@ -7,6 +8,10 @@
 // Shared sensor data buffer
 typedef struct {
     int writeStatus;
+    enum {
+        DATA_LOGGER_RUNNING,
+        DATA_LOGGER_PAUSED,
+    } datalogger_status;
     long pressure_pa;
     float temperature_c;
     time_t timestamp;

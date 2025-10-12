@@ -135,6 +135,28 @@ void spi_sdcard_full_init()
     }
 }
 
+void spi_sdcard_deinit(void)
+{
+    if (!mounted)
+    {
+        ESP_LOGW(TAG, "SD Card not mounted, skipping de-initialization.");
+        return;
+    }
+
+    ESP_LOGI(TAG, "De-initializing TinyUSB and SD card.");
+    if (s_msc_storage_handle)
+    {
+        tinyusb_msc_delete_storage(s_msc_storage_handle);
+        s_msc_storage_handle = NULL;
+    }
+    tinyusb_driver_uninstall();
+    esp_vfs_fat_sdcard_unmount("/sdcard", s_card);
+    // The SPI bus is not de-initialized here to allow for faster re-init.
+    // If full power savings were needed, spi_bus_free(host.slot) could be called.
+    mounted = false;
+    current_filepath[0] = '\0'; // Reset current file path
+}
+
 // todo refactor to update struct
 void spi_sdcard_write_csv()
 {

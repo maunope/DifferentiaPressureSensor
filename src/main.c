@@ -28,9 +28,12 @@
 #include "datalogger_task.h"
 #include "../lib/lipo-battery/lipo-battery.h"
 
+
 // DO NOT use pins 19 and 20, they are used by the flash memory
 // DO NOT use pins 5 and 6, they are used for LiPo battery measurements
 
+#define DEVICES_POWER_PIN GPIO_NUM_15
+#define OLED_POWER_PIN GPIO_NUM_16
 
 // --- I2C Configuration for peripherals ---
 #define I2C_MASTER_NUM I2C_NUM_0
@@ -66,6 +69,8 @@ bool rtc_available = false;
 
 ds3231_t g_rtc; // Global RTC device handle
 bmp280_t g_bmp280; // Global BMP280 device handle
+
+TaskHandle_t g_uiRender_task_handle = NULL;
 
 
 static uint64_t last_activity_ms = 0;
@@ -134,6 +139,12 @@ static void set_rtc_to_build_time(void) {
     }
 }
 
+static void peripherals_deinit(void)
+{
+    spi_sdcard_deinit();
+    ESP_LOGI(TAG, "Peripherals de-initialized.");
+}
+
 static void resync_time_from_rtc(void)
 {
     if (!rtc_available) {
@@ -189,8 +200,6 @@ SemaphoreHandle_t g_i2c_bus_mutex = NULL;
 volatile command_status_t g_command_status = CMD_STATUS_IDLE;
 QueueHandle_t g_datalogger_cmd_queue = NULL;
 
-TaskHandle_t g_uiRender_task_handle = NULL;
-
 // --- Main Application Entry Point ---
 
 void main_task(void *pvParameters)
@@ -203,6 +212,11 @@ void main_task(void *pvParameters)
         // --- Process commands from other tasks ---
         app_command_t cmd;
         if (xQueueReceive(g_app_cmd_queue, &cmd, 0) == pdPASS) {
+        // Any command from the UI means it's active
+        if (eTaskGetState(g_uiRender_task_handle) == eSuspended) {
+             ESP_LOGI(TAG, "Activity detected, waking up UI.");
+             // This will fall through to the activity detected command
+        }
             switch (cmd) {
                 case APP_CMD_SET_RTC_BUILD_TIME:
                     ESP_LOGI(TAG, "Received command to set RTC to build time.");
@@ -222,16 +236,25 @@ void main_task(void *pvParameters)
                     // Status is now handled inside spi_sdcard_format
                     break;
                 case APP_CMD_ACTIVITY_DETECTED:
-                   // ESP_LOGI(TAG, "Received activity from the UI");
-                    last_activity_ms = esp_timer_get_time() / 1000;
-                   
-                    break;
-                case APP_CMD_REFRESH_SENSOR_DATA:
-                    //ESP_LOGI(TAG, "Received command to refresh sensor data, forwarding to datalogger.");
-                    if (g_datalogger_cmd_queue != NULL) {
-                        datalogger_command_t logger_cmd = DATALOGGER_CMD_FORCE_REFRESH;
-                        xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
-                    }
+                last_activity_ms = esp_timer_get_time() / 1000;
+                if (eTaskGetState(g_uiRender_task_handle) == eSuspended) {
+                    ESP_LOGI(TAG, "Waking up UI from suspended state.");
+                    // Power on OLED and re-initialize
+                    gpio_set_level(OLED_POWER_PIN, 1);
+                    vTaskDelay(pdMS_TO_TICKS(50)); // Wait for OLED to stabilize
+                    uiRender_init(I2C_OLED_NUM, I2C_OLED_SDA_IO, I2C_OLED_SCL_IO);
+                    
+                    // Resume the UI task and send a wake-up event
+                    vTaskResume(g_uiRender_task_handle);
+                    uiRender_send_event(UI_EVENT_WAKE_UP, NULL, 0);
+                }
+                break;
+            case APP_CMD_REFRESH_SENSOR_DATA:
+                //ESP_LOGI(TAG, "Received command to refresh sensor data, forwarding to datalogger.");
+                if (g_datalogger_cmd_queue != NULL) {
+                    datalogger_command_t logger_cmd = DATALOGGER_CMD_FORCE_REFRESH;
+                    xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
+                }
                     break;
                 default:
                     ESP_LOGW(TAG, "Unknown command received: %d", cmd);
@@ -250,9 +273,45 @@ void main_task(void *pvParameters)
 
         if (current_time_ms - last_activity_ms > INACTIVITY_TIMEOUT_MS) {
             // --- Prepare for sleep ---
-            // 1. Tell the UI to show the sleep message
+            // 1. Suspend UI task and power down OLED
             uiRender_send_event(UI_EVENT_PREPARE_SLEEP, NULL, 0);
-            vTaskDelay(pdMS_TO_TICKS(200)); // Give UI time to update display
+            vTaskDelay(pdMS_TO_TICKS(300)); // Give UI time to draw sleep message
+            vTaskSuspend(g_uiRender_task_handle);
+            gpio_set_level(OLED_POWER_PIN, 0);
+
+            // 2. Tell the datalogger to pause writes
+            ESP_LOGI(TAG, "Requesting datalogger to pause...");
+            datalogger_command_t logger_cmd = DATALOGGER_CMD_PAUSE_WRITES;
+            xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
+
+            // 3. Wait for the datalogger to confirm it's paused
+            int datalogger_status = 0;
+            int wait_cycles = 0;
+            do {
+                vTaskDelay(pdMS_TO_TICKS(50));
+                if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50))) {
+                    datalogger_status = g_sensor_buffer.datalogger_status;
+                    xSemaphoreGive(g_sensor_buffer_mutex);
+                }
+                wait_cycles++;
+            } while (datalogger_status != DATA_LOGGER_PAUSED && wait_cycles < 60); // Max 3 sec wait
+            ESP_LOGE(TAG, "Datalogger pause wait cycles: %d %d", DATA_LOGGER_PAUSED,datalogger_status);
+            if (datalogger_status != DATA_LOGGER_PAUSED) {
+                ESP_LOGE(TAG, "Timeout waiting for datalogger to pause. Aborting sleep.");
+                // Reset activity timer and try again later
+                last_activity_ms = esp_timer_get_time() / 1000;
+                // Tell UI to wake up again
+                uiRender_send_event(UI_EVENT_WAKE_UP, NULL, 0);
+                continue;
+            }
+
+            ESP_LOGI(TAG, "Datalogger paused. Preparing to sleep.");
+
+            ESP_LOGI(TAG, "De-initializing peripherals before sleep.");
+            peripherals_deinit();
+
+            ESP_LOGI(TAG, "Powering down external devices.");
+            gpio_set_level(DEVICES_POWER_PIN, 0);
 
             ESP_LOGI(TAG, "Inactivity timeout. Entering light sleep.");
 
@@ -272,20 +331,35 @@ void main_task(void *pvParameters)
            esp_light_sleep_start();
 
             // --- WAKE UP ---
-            // Tell the UI task to wake up and resume normal rendering
-            uiRender_send_event(UI_EVENT_WAKE_UP, NULL, 0);
+            // Power up devices and wait for them to stabilize
+            gpio_set_level(DEVICES_POWER_PIN, 1);
+            vTaskDelay(pdMS_TO_TICKS(100));
+            ESP_LOGI(TAG, "Powered up external devices. Re-initializing...");
+
+            // Tell the datalogger to resume writes
+            logger_cmd = DATALOGGER_CMD_RESUME_WRITES;
+            xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
 
             esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
             if (cause == ESP_SLEEP_WAKEUP_TIMER) {
                 ESP_LOGI(TAG, "Woke up from light sleep due to timer.");
+                // Keep OLED off and UI task suspended.
+                // Only re-init SD card for datalogger.
+                spi_sdcard_full_init();
             } 
             else if (cause == ESP_SLEEP_WAKEUP_GPIO) {
                 ESP_LOGI(TAG, "Woke up from light sleep due to GPIO.");
+                // Power on OLED, re-init, and resume UI task
+                gpio_set_level(OLED_POWER_PIN, 1);
+                vTaskDelay(pdMS_TO_TICKS(50)); // Wait for OLED to stabilize
+                uiRender_init(I2C_OLED_NUM, I2C_OLED_SDA_IO, I2C_OLED_SCL_IO);
+                spi_sdcard_full_init(); // Also re-init SD card
+                vTaskResume(g_uiRender_task_handle);
+                uiRender_send_event(UI_EVENT_WAKE_UP, NULL, 0);
+
                 // Debounce after GPIO wakeup to prevent the wake-up press from being processed as a command.
                 // A small delay to allow the button to be released.
                 vTaskDelay(pdMS_TO_TICKS(100));
-                // Flush any pending GPIO events that might have been queued during the wake-up transition.
-                // This is crucial to prevent the wake-up press from being processed as a UI command.
                 xQueueReset(rotaryencoder_get_queue_handle());
 
             } else {
@@ -310,10 +384,35 @@ void main_task(void *pvParameters)
 }
 void app_main(void)
 {
+    // --- Initialize Devices Power Pin ---
+    gpio_config_t oled_pwr_pin_cfg = {
+        .pin_bit_mask = (1ULL << OLED_POWER_PIN),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&oled_pwr_pin_cfg);
+   
+
+    gpio_config_t pwr_pin_cfg ={
+        .pin_bit_mask = (1ULL << DEVICES_POWER_PIN),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&pwr_pin_cfg);
+
+    gpio_set_level(DEVICES_POWER_PIN, 1);
+    gpio_set_level(OLED_POWER_PIN, 1);
+    vTaskDelay(pdMS_TO_TICKS(50)); // Wait 50ms after powering up devices
+
     last_activity_ms = esp_timer_get_time() / 1000;
 
     g_command_status_mutex = xSemaphoreCreateMutex();
     g_i2c_bus_mutex = xSemaphoreCreateMutex();
+    // g_sdcard_mutex is no longer needed with this new logic
 
     g_sensor_buffer_mutex = xSemaphoreCreateMutex();
     g_app_cmd_queue = xQueueCreate(10, sizeof(app_command_t));
@@ -392,12 +491,10 @@ void app_main(void)
     i2c_oled_clear(I2C_OLED_NUM);
     i2c_oled_write_text(I2C_OLED_NUM, 1, 0, "Booting...");
 
-    spi_sdcard_full_init(); // Call once at startup
-
-    i2c_oled_clear(I2C_OLED_NUM);
+    spi_sdcard_full_init();
     ESP_LOGI(TAG, "Starting  sensor readings and Encoder monitoring...");
 
-    xTaskCreate(uiRender_task, "uiRender", 4096, NULL, 5, NULL);
+    xTaskCreate(uiRender_task, "uiRender", 4096, NULL, 5, &g_uiRender_task_handle);
 
     xTaskCreate(datalogger_task, "datalogger", 4096, NULL, 5, NULL); // Datalogger at priority 5
 

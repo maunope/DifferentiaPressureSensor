@@ -10,6 +10,7 @@
 
 
 void spi_sdcard_full_init();
+void spi_sdcard_deinit(void);
 void spi_sdcard_write_csv();
 void spi_sdcard_format(void);
 
