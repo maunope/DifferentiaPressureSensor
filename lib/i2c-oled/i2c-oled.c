@@ -19,7 +19,7 @@ static esp_err_t oled_data(i2c_port_t i2c_num, const uint8_t *data, size_t len) 
     return i2c_master_write_to_device(i2c_num, OLED_I2C_ADDR, buf, len + 1, 1000 / portTICK_PERIOD_MS);
 }
 
-void i2c_oled_init(i2c_port_t i2c_num, gpio_num_t sda, gpio_num_t scl) {
+void i2c_oled_bus_init(i2c_port_t i2c_num, gpio_num_t sda, gpio_num_t scl) {
     i2c_config_t conf = {
         .mode = I2C_MODE_MASTER,
         .sda_io_num = sda,
@@ -30,7 +30,10 @@ void i2c_oled_init(i2c_port_t i2c_num, gpio_num_t sda, gpio_num_t scl) {
     };
     i2c_param_config(i2c_num, &conf);
     i2c_driver_install(i2c_num, conf.mode, 0, 0, 0);
+    i2c_oled_send_init_commands(i2c_num);
+}
 
+void i2c_oled_send_init_commands(i2c_port_t i2c_num) {
     // SSD1306 init sequence
     oled_cmd(i2c_num, 0xAE); // Display off
     oled_cmd(i2c_num, 0x20); oled_cmd(i2c_num, 0x00); // Horizontal addressing

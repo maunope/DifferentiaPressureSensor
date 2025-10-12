@@ -111,7 +111,8 @@ static const uint8_t font5x7[96][5] = {
     {0x44,0x64,0x54,0x4C,0x44}  // 'z'
 };
 
-void i2c_oled_init(i2c_port_t i2c_num, gpio_num_t sda, gpio_num_t scl);
+void i2c_oled_bus_init(i2c_port_t i2c_num, gpio_num_t sda, gpio_num_t scl);
+void i2c_oled_send_init_commands(i2c_port_t i2c_num);
 void i2c_oled_clear(i2c_port_t i2c_num);
 void i2c_oled_write_text(i2c_port_t i2c_num, uint8_t row, uint8_t col, const char *text);
 void i2c_oled_set_invert(i2c_port_t i2c_num, bool invert);

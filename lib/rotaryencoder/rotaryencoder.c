@@ -118,6 +118,8 @@ static void rotary_encoder_task(void *arg)
                         last_rotation_time = current_time; // Update time on valid rotation
                         if (direction == 1) { // Clockwise
                             encoder_position++;
+                            app_command_t cmd = APP_CMD_ACTIVITY_DETECTED;
+                            xQueueSend(g_app_cmd_queue, &cmd, 0);
                             g_encoder_direction = ENC_DIR_CW;
                             // Send event only on even positions (full step)
                             if ((encoder_position % 2) == 0) {
@@ -125,6 +127,8 @@ static void rotary_encoder_task(void *arg)
                             }
                         } else { // Counter-Clockwise (direction == -1)
                             encoder_position--;
+                            app_command_t cmd = APP_CMD_ACTIVITY_DETECTED;
+                            xQueueSend(g_app_cmd_queue, &cmd, 0);
                             g_encoder_direction = ENC_DIR_CCW;
                             // Send event only on even positions (full step)
                             if ((encoder_position % 2) == 0) {
