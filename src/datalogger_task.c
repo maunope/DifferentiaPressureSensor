@@ -68,7 +68,7 @@ void datalogger_task(void *pvParameters)
     ESP_LOGI(TAG, "Datalogger task started.");
     static bool is_paused = false;
     uint64_t last_write_ms = 0;
-    const uint32_t log_interval_ms = 30000; // 30 seconds
+    const uint32_t log_interval_ms = 60000; // 30 seconds
 
     while (1)
     {

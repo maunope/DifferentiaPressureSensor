@@ -50,8 +50,9 @@
 #define ROTARY_ENCODER_PIN_B GPIO_NUM_42
 #define ROTARY_ENCODER_BUTTON_PIN GPIO_NUM_7
 #define BUTTON_DEBOUNCE_TIME_MS 50
-#define INACTIVITY_TIMEOUT_MS 10000          // 10 seconds
-#define SLEEP_DURATION_US (45 * 1000 * 1000) // 45 seconds
+#define SELF_WAKEUP_TIMEOUT_MS 5000
+#define INACTIVITY_TIMEOUT_MS 30000          // 10 seconds
+#define SLEEP_DURATION_US (59 * 1000 * 1000) // 45 seconds
 
 // --- Battery ADC Configuration ---
 #define BATTERY_PWR_PIN GPIO_NUM_5
@@ -68,6 +69,7 @@ bmp280_t g_bmp280; // Global BMP280 device handle
 TaskHandle_t g_uiRender_task_handle = NULL;
 
 static uint64_t last_activity_ms = 0;
+static uint64_t last_self_wakeup_ms = 0;
 
 static void set_rtc_to_build_time(void)
 {
@@ -138,12 +140,31 @@ static void set_rtc_to_build_time(void)
     }
 }
 
-static void peripherals_deinit(void)
+static void oled_power_off(void)
 {
-    spi_sdcard_deinit();
-    ESP_LOGI(TAG, "Peripherals de-initialized.");
+    if (eTaskGetState(g_uiRender_task_handle) != eSuspended)
+    {
+        ESP_LOGI(TAG, "Powering off OLED.");
+        uiRender_send_event(UI_EVENT_PREPARE_SLEEP, NULL, 0);
+        vTaskDelay(pdMS_TO_TICKS(200)); // Give UI time to draw sleep message
+        vTaskSuspend(g_uiRender_task_handle);
+        // i2c_driver_delete(I2C_OLED_NUM);
+        gpio_set_level(OLED_POWER_PIN, 0);
+    }
 }
 
+static void oled_power_on(void)
+{
+    if (eTaskGetState(g_uiRender_task_handle) == eSuspended)
+    {
+        ESP_LOGI(TAG, "Powering on OLED.");
+        gpio_set_level(OLED_POWER_PIN, 1);
+        vTaskDelay(pdMS_TO_TICKS(50)); // Wait for OLED to stabilize
+        uiRender_init(I2C_OLED_NUM, I2C_OLED_SDA_IO, I2C_OLED_SCL_IO);
+        vTaskResume(g_uiRender_task_handle);
+        uiRender_send_event(UI_EVENT_WAKE_UP, NULL, 0);
+    }
+}
 static void resync_time_from_rtc(void)
 {
     if (!rtc_available)
@@ -243,18 +264,7 @@ void main_task(void *pvParameters)
                 break;
             case APP_CMD_ACTIVITY_DETECTED:
                 last_activity_ms = esp_timer_get_time() / 1000;
-                if (eTaskGetState(g_uiRender_task_handle) == eSuspended)
-                {
-                    ESP_LOGI(TAG, "Waking up UI from suspended state.");
-                    // Power on OLED and re-initialize
-                    gpio_set_level(OLED_POWER_PIN, 1);
-                    vTaskDelay(pdMS_TO_TICKS(50)); // Wait for OLED to stabilize
-                    uiRender_init(I2C_OLED_NUM, I2C_OLED_SDA_IO, I2C_OLED_SCL_IO);
-
-                    // Resume the UI task and send a wake-up event
-                    vTaskResume(g_uiRender_task_handle);
-                    uiRender_send_event(UI_EVENT_WAKE_UP, NULL, 0);
-                }
+                oled_power_on();
                 break;
             case APP_CMD_REFRESH_SENSOR_DATA:
                 // ESP_LOGI(TAG, "Received command to refresh sensor data, forwarding to datalogger.");
@@ -289,18 +299,25 @@ void main_task(void *pvParameters)
         }
 
         bool new_write_occurred = (current_write_ts > 0 && current_write_ts > last_processed_write_ts);
+        bool self_wakeup_timeout = (current_time_ms - last_self_wakeup_ms > SELF_WAKEUP_TIMEOUT_MS);
 
-        if (ui_is_inactive && new_write_occurred)
+       // ESP_LOGI("main", "Inactivity: %llums, Since last self-wakeup: %llums, New write: %d, UI inactive: %d", current_time_ms - last_activity_ms, current_time_ms - last_self_wakeup_ms, new_write_occurred, ui_is_inactive);
+        if (ui_is_inactive && (new_write_occurred || (self_wakeup_timeout && current_write_ts > 0)))
         {
-            ESP_LOGI(TAG, "UI inactive and new data logged. Initiating sleep.");
+            if (self_wakeup_timeout)
+            {
+                ESP_LOGI(TAG, "UI inactive and self-wakeup timeout reached. Initiating sleep.");
+                last_self_wakeup_ms = current_time_ms; // Reset self-wakeup timer
+            }
+            else
+            {
+                ESP_LOGI(TAG, "UI inactive and new data logged. Initiating sleep.");
+            }
             last_processed_write_ts = current_write_ts; // Mark this write as processed
 
             // --- Prepare for sleep ---
             // 1. Suspend UI task and power down OLED
-            uiRender_send_event(UI_EVENT_PREPARE_SLEEP, NULL, 0);
-            vTaskDelay(pdMS_TO_TICKS(300)); // Give UI time to draw sleep message
-            vTaskSuspend(g_uiRender_task_handle);
-            gpio_set_level(OLED_POWER_PIN, 0);
+            oled_power_off();               // This will suspend the task and power down the OLED
 
             // 2. Tell the datalogger to pause writes
             ESP_LOGI(TAG, "Requesting datalogger to pause...");
@@ -334,7 +351,8 @@ void main_task(void *pvParameters)
             ESP_LOGI(TAG, "Datalogger paused. Preparing to sleep.");
 
             ESP_LOGI(TAG, "De-initializing peripherals before sleep.");
-            peripherals_deinit();
+            spi_sdcard_deinit(); // Inlined from peripherals_deinit
+            // OLED I2C driver is already deleted by oled_power_off()
 
             ESP_LOGI(TAG, "Powering down external devices.");
             gpio_set_level(DEVICES_POWER_PIN, 0);
@@ -361,6 +379,7 @@ void main_task(void *pvParameters)
             if (cause == ESP_SLEEP_WAKEUP_TIMER)
             {
                 ESP_LOGI(TAG, "Woke up from light sleep due to timer.");
+                last_self_wakeup_ms = esp_timer_get_time() / 1000ULL;
                 // Keep OLED off and UI task suspended.
                 // Only re-init SD card for datalogger.
                 spi_sdcard_full_init();
@@ -369,16 +388,14 @@ void main_task(void *pvParameters)
             {
                 ESP_LOGI(TAG, "Woke up from light sleep due to GPIO.");
                 // Power on OLED, re-init, and resume UI task
-                gpio_set_level(OLED_POWER_PIN, 1);
-                vTaskDelay(pdMS_TO_TICKS(50)); // Wait for OLED to stabilize
-                uiRender_init(I2C_OLED_NUM, I2C_OLED_SDA_IO, I2C_OLED_SCL_IO);
+                oled_power_on();
                 spi_sdcard_full_init(); // Also re-init SD card
-                vTaskResume(g_uiRender_task_handle);
-                uiRender_send_event(UI_EVENT_WAKE_UP, NULL, 0);
 
                 // Debounce after GPIO wakeup to prevent the wake-up press from being processed as a command.
                 vTaskDelay(pdMS_TO_TICKS(100));
                 xQueueReset(rotaryencoder_get_queue_handle());
+                last_activity_ms = esp_timer_get_time() / 1000ULL;    // Reset activity timer on wakeup
+                last_self_wakeup_ms = esp_timer_get_time() / 1000ULL; // Reset self-wakeup timer on wakeup
             }
             else
             {
@@ -396,22 +413,23 @@ void main_task(void *pvParameters)
 
             gpio_wakeup_disable(ROTARY_ENCODER_BUTTON_PIN); // Disable wakeup to use normal ISR
 
-            resync_time_from_rtc();                         // Re-sync system time with external RTC
-            last_activity_ms = esp_timer_get_time() / 1000ULL; // Reset activity timer on wakeup
+            resync_time_from_rtc(); // Re-sync system time with external RTC
+            // last_activity_ms = esp_timer_get_time() / 1000ULL; // Reset activity timer on wakeup
         }
         else if (ui_is_inactive && eTaskGetState(g_uiRender_task_handle) != eSuspended)
         {
+            uiRender_send_event(UI_EVENT_PREPARE_SLEEP, NULL, 0);
+            vTaskDelay(pdMS_TO_TICKS(300)); // Give UI time to draw sleep message
             // UI timeout occurred, but no new write yet. Just turn off the screen.
-            ESP_LOGI(TAG, "UI Inactivity timeout. Suspending UI task and turning off OLED.");
-            vTaskSuspend(g_uiRender_task_handle);
-            gpio_set_level(OLED_POWER_PIN, 0);
+            oled_power_off();
         }
 
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 
-void app_main(void) {
+void app_main(void)
+{
     // --- Initialize Devices Power Pin ---
     gpio_config_t oled_pwr_pin_cfg = {
         .pin_bit_mask = (1ULL << OLED_POWER_PIN),
@@ -421,9 +439,8 @@ void app_main(void) {
         .intr_type = GPIO_INTR_DISABLE,
     };
     gpio_config(&oled_pwr_pin_cfg);
-   
 
-    gpio_config_t pwr_pin_cfg ={
+    gpio_config_t pwr_pin_cfg = {
         .pin_bit_mask = (1ULL << DEVICES_POWER_PIN),
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
