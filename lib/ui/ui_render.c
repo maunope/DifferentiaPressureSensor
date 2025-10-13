@@ -12,6 +12,8 @@
 #include "time_utils.h"
 #include "../buffers.h"
 
+static const char *TAG = "ui_render";
+
 #define UI_QUEUE_LEN 8
 #define UI_MENU_STACK_DEPTH 8
 #define UI_MENU_VISIBLE_ROWS 6
@@ -56,11 +58,6 @@ static uint32_t s_cmd_timeout_ms = 5000; // Default timeout
 static post_cmd_action_t s_post_cmd_action = POST_ACTION_NONE;
 
 // Data for rendering
-static void on_encoder_rotate_cw(void);
-static void on_encoder_rotate_ccw(void);
-static void on_encoder_button_press(void);
-
-
 static float last_values[8] = {0};
 static int last_value_count = 0;
 
@@ -76,21 +73,6 @@ void uiRender_init(i2c_port_t oled_i2c_num, gpio_num_t sda, gpio_num_t scl, uint
     s_oled_scl = scl;
     i2c_oled_bus_init(s_oled_i2c_num, s_oled_sda, s_oled_scl, oled_i2c_addr);
     s_oled_initialized = true;
-}
-
-static void on_encoder_rotate_cw(void)
-{
-    uiRender_send_event(UI_EVENT_CW, NULL, 0);
-}
-
-static void on_encoder_rotate_ccw(void)
-{
-    uiRender_send_event(UI_EVENT_CCW, NULL, 0);
-}
-
-static void on_encoder_button_press(void)
-{
-    uiRender_send_event(UI_EVENT_BTN, NULL, 0);
 }
 
 
@@ -239,7 +221,7 @@ void render_sensor_callback(void)
         strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &local_tm);
 
         // new_lines[1] is intentionally left blank
-        snprintf(new_lines[0], sizeof(new_lines[0]), "Stato Letture");
+        snprintf(new_lines[0], sizeof(new_lines[0]), "Sensors Data");
         snprintf(new_lines[2], sizeof(new_lines[2]), "%s", time_str);
         snprintf(new_lines[3], sizeof(new_lines[3]), "T: %.2f C", local_buffer.temperature_c);
         snprintf(new_lines[4], sizeof(new_lines[4]), "P: %ld Pa", local_buffer.pressure_pa);
@@ -591,7 +573,7 @@ void menu_sensor_on_btn(void)
     }
     else
     {
-        ESP_LOGE("UI", "App command queue not initialized!");
+        ESP_LOGE(TAG, "App command queue not initialized!");
     }
     
     s_current_page = &sensor_page;
@@ -638,7 +620,7 @@ void menu_format_sd_confirm_on_btn(void)
     }
     else
     {
-        ESP_LOGE("UI", "App command queue not initialized!");
+        ESP_LOGE(TAG, "App command queue not initialized!");
     }
 }
 
@@ -660,7 +642,7 @@ void menu_set_time_on_btn(void)
     }
     else
     {
-        ESP_LOGE("UI", "App command queue not initialized!");
+        ESP_LOGE(TAG, "App command queue not initialized!");
     }
 }
 void page_about_on_btn(void)

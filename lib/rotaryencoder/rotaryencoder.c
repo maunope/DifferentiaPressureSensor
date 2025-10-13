@@ -16,6 +16,12 @@ static volatile uint8_t g_encoder_state = 0;
 // static makes it private to this file. const places it in flash.
 static const int8_t KNOB_STATES[] = {0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0};
 
+/**
+ * @brief GPIO ISR handler that sends the triggered GPIO number to a queue.
+ *
+ * This function is marked with IRAM_ATTR to be placed in IRAM for faster execution.
+ * @param arg The GPIO number that triggered the interrupt.
+ */
 void IRAM_ATTR gpio_isr_handler(void *arg)
 {
     // This is an optional but recommended FreeRTOS feature.
@@ -27,6 +33,13 @@ void IRAM_ATTR gpio_isr_handler(void *arg)
     xQueueSendFromISR(gpio_evt_queue, &gpio_num, &xHigherPriorityTaskWoken);
 }
 
+/**
+ * @brief Initializes the rotary encoder GPIOs and ISR.
+ *
+ * Configures the GPIO pins for the encoder and its button, and sets up the
+ * interrupt service routine to handle rotation and press events.
+ * @param cfg Pointer to the rotary encoder configuration struct.
+ */
 void rotaryencoder_init(const rotaryencoder_config_t *cfg)
 {
     g_encoder_cfg = *cfg; // Copy config
@@ -52,6 +65,11 @@ void rotaryencoder_init(const rotaryencoder_config_t *cfg)
     gpio_isr_handler_add(g_encoder_cfg.button_pin, gpio_isr_handler, (void *)g_encoder_cfg.button_pin);
 }
 
+/**
+ * @brief Configures the rotary encoder's button pin as a wake-up source.
+ *
+ * This is called before entering light sleep.
+ */
 void rotaryencoder_enable_wakeup_source(void)
 {
     // --- Configure wake-up sources ---
@@ -61,6 +79,13 @@ void rotaryencoder_enable_wakeup_source(void)
     if (err != ESP_OK) ESP_LOGE(TAG, "Failed to enable wakeup for button pin: %s", esp_err_to_name(err));
 }
 
+/**
+ * @brief The main task for processing rotary encoder events.
+ *
+ * This task waits for events from the ISR queue, debounces them, decodes rotation,
+ * and calls the appropriate callbacks.
+ * @param arg Unused.
+ */
 static void rotary_encoder_task(void *arg)
 {
     uint32_t gpio_num;
@@ -139,11 +164,19 @@ static void rotary_encoder_task(void *arg)
     }
 }
 
+/**
+ * @brief Starts the rotary encoder processing task.
+ */
 void rotaryencoder_start_task(void)
 {
     xTaskCreate(&rotary_encoder_task, "rotary_encoder_task", 2048, NULL, 5, NULL);
 }
 
+/**
+ * @brief Gets the last detected rotation direction and resets it.
+ *
+ * @return encoder_direction_t The direction of the last rotation (CW, CCW, or NONE).
+ */
 encoder_direction_t rotaryencoder_get_direction(void)
 {
     encoder_direction_t dir = g_encoder_direction;
@@ -151,6 +184,11 @@ encoder_direction_t rotaryencoder_get_direction(void)
     return dir;
 }
 
+/**
+ * @brief Gets the last detected button state and resets it.
+ *
+ * @return encoder_button_state_t The state of the button (PRESSED or IDLE).
+ */
 encoder_button_state_t rotaryencoder_get_button_state(void)
 {
     encoder_button_state_t state = g_encoder_button_state;
@@ -158,6 +196,11 @@ encoder_button_state_t rotaryencoder_get_button_state(void)
     return state;
 }
 
+/**
+ * @brief Gets the handle of the internal GPIO event queue.
+ *
+ * @return QueueHandle_t The queue handle.
+ */
 QueueHandle_t rotaryencoder_get_queue_handle(void)
 {
     return gpio_evt_queue;

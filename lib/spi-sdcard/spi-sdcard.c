@@ -49,6 +49,11 @@ static esp_vfs_fat_sdmmc_mount_config_t mount_config = {
     .allocation_unit_size = 16 * 1024};
 
 // Configure CS pin with pull-up for SPI mode
+/**
+ * @brief Initializes the GPIO pin used for the SD card Chip Select (CS).
+ *
+ * Configures the pin as an output with pull-up enabled.
+ */
 static void init_gpio_cs()
 {
     gpio_config_t io_conf = {
@@ -71,6 +76,13 @@ static void init_gpio_cs()
  }
  */
 
+/**
+ * @brief Initializes the SPI bus, mounts the SD card, and sets up TinyUSB for MSC.
+ *
+ * This function performs the full initialization sequence for the SD card,
+ * including setting up the SPI bus, mounting the FAT filesystem, and configuring
+ * the USB Mass Storage Class driver.
+ */
 void spi_sdcard_full_init()
 {
     ESP_LOGI(TAG, "Starting full TinyUSB and SD card initialization (v2.0.0).");
@@ -139,6 +151,12 @@ void spi_sdcard_full_init()
     }
 }
 
+/**
+ * @brief De-initializes the SD card and TinyUSB MSC.
+ *
+ * Unmounts the filesystem, deletes the MSC storage handle, and uninstalls
+ * the TinyUSB driver to prepare for sleep.
+ */
 void spi_sdcard_deinit(void)
 {
     if (!mounted)
@@ -161,6 +179,14 @@ void spi_sdcard_deinit(void)
     current_filepath[0] = '\0'; // Reset current file path
 }
 
+/**
+ * @brief Writes a line of text to the current log file on the SD card.
+ *
+ * This function handles file rotation based on a maximum file size. If the
+ * current log file exceeds `MAX_FILE_SIZE_BYTES`, a new file is created.
+ * @param line The null-terminated string to write to the file.
+ * @return esp_err_t `ESP_OK` on success, or an error code on failure.
+ */
 esp_err_t spi_sdcard_write_line(const char* line)
 {
     //TODO make all erro codes defines
@@ -227,6 +253,11 @@ esp_err_t spi_sdcard_write_line(const char* line)
     return ESP_OK;
 }
 
+/**
+ * @brief Counts the number of files in the root directory of the SD card.
+ *
+ * The result is stored in the global sensor buffer.
+ */
 void spi_sdcard_get_file_count(void)
 {
     int file_count = -1; // Default to -1 for error cases
@@ -263,6 +294,11 @@ void spi_sdcard_get_file_count(void)
     }
 }
 
+/**
+ * @brief Gets the free space on the SD card in megabytes (MB).
+ *
+ * The result is stored in the global sensor buffer.
+ */
 void spi_sdcard_get_free_space_mb(void) {
     int free_space_mb = -1; // Default to -1 for error
 
@@ -297,10 +333,6 @@ void spi_sdcard_get_free_space_mb(void) {
     }
 }
 
-/**
- * @brief Checks if the USB Mass Storage is connected and ready.
- * @return true if USB is connected and mounted by the host, false otherwise.
- */
 bool spi_sdcard_is_usb_connected(void)
 {
     return tud_ready();
@@ -308,10 +340,10 @@ bool spi_sdcard_is_usb_connected(void)
 
 /**
  * @brief Formats the SD card. All data on the card will be erased.
+ *
  * @note This function handles the unmounting, formatting, and remounting of the card
  * in a single, robust operation. It prevents race conditions and ensures the
  * file system is in a clean state after formatting.
- * @return esp_err_t ESP_OK on success, or an error code on failure.
  */
 void spi_sdcard_format(void)
 {

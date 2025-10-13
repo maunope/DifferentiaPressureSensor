@@ -9,13 +9,26 @@ extern const uint8_t font5x7[96][5];
 // Store the address for the single OLED device this library manages.
 static uint8_t s_oled_addr = 0;
 
-// Send command to OLED
+/**
+ * @brief Sends a command byte to the OLED controller.
+ *
+ * @param i2c_num The I2C port number.
+ * @param cmd The command byte to send.
+ * @return esp_err_t `ESP_OK` on success, or an I2C error code on failure.
+ */
 static esp_err_t oled_cmd(i2c_port_t i2c_num, uint8_t cmd) {
     uint8_t buf[2] = {0x00, cmd};
     return i2c_master_write_to_device(i2c_num, s_oled_addr, buf, 2, 1000 / portTICK_PERIOD_MS);
 }
 
-// Send data to OLED
+/**
+ * @brief Sends a buffer of data bytes to the OLED GDDRAM.
+ *
+ * @param i2c_num The I2C port number.
+ * @param data Pointer to the data buffer to send.
+ * @param len The number of bytes to send.
+ * @return esp_err_t `ESP_OK` on success, or an I2C error code on failure.
+ */
 static esp_err_t oled_data(i2c_port_t i2c_num, const uint8_t *data, size_t len) {
     uint8_t buf[len + 1];
     buf[0] = 0x40;
@@ -23,6 +36,16 @@ static esp_err_t oled_data(i2c_port_t i2c_num, const uint8_t *data, size_t len) 
     return i2c_master_write_to_device(i2c_num, s_oled_addr, buf, len + 1, 1000 / portTICK_PERIOD_MS);
 }
 
+/**
+ * @brief Initializes the I2C bus for the OLED display.
+ *
+ * Configures and installs the I2C driver for the specified port and pins,
+ * then sends the initialization sequence to the OLED controller.
+ * @param i2c_num The I2C port number to use.
+ * @param sda The GPIO number for the SDA line.
+ * @param scl The GPIO number for the SCL line.
+ * @param i2c_addr The I2C address of the OLED display.
+ */
 void i2c_oled_bus_init(i2c_port_t i2c_num, gpio_num_t sda, gpio_num_t scl, uint8_t i2c_addr) {
     i2c_config_t conf = {
         .mode = I2C_MODE_MASTER,
@@ -38,6 +61,11 @@ void i2c_oled_bus_init(i2c_port_t i2c_num, gpio_num_t sda, gpio_num_t scl, uint8
     i2c_oled_send_init_commands(i2c_num);
 }
 
+/**
+ * @brief Sends the initialization command sequence to the SSD1306 controller.
+ *
+ * @param i2c_num The I2C port number.
+ */
 void i2c_oled_send_init_commands(i2c_port_t i2c_num) {
     // SSD1306 init sequence
     oled_cmd(i2c_num, 0xAE); // Display off
@@ -59,6 +87,11 @@ void i2c_oled_send_init_commands(i2c_port_t i2c_num) {
     oled_cmd(i2c_num, 0xAF); // Display on
 }
 
+/**
+ * @brief Clears the entire OLED display RAM.
+ *
+ * @param i2c_num The I2C port number.
+ */
 void i2c_oled_clear(i2c_port_t i2c_num) {
     for (uint8_t page = 0; page < 8; page++) {
         oled_cmd(i2c_num, 0xB0 | page);
@@ -69,6 +102,14 @@ void i2c_oled_clear(i2c_port_t i2c_num) {
     }
 }
 
+/**
+ * @brief Writes a string of text to the OLED display.
+ *
+ * @param i2c_num The I2C port number.
+ * @param row The row (page) to write to (0-7).
+ * @param col The column to start writing at (0-20).
+ * @param text The null-terminated string to write.
+ */
 void i2c_oled_write_text(i2c_port_t i2c_num, uint8_t row, uint8_t col, const char *text) {
     oled_cmd(i2c_num, 0xB0 | row); // Set page address
     oled_cmd(i2c_num, 0x00 | (col * 6 & 0x0F)); // Set lower column
@@ -86,11 +127,26 @@ void i2c_oled_write_text(i2c_port_t i2c_num, uint8_t row, uint8_t col, const cha
     }
 }
 
+/**
+ * @brief Sets the display to normal or inverted mode.
+ *
+ * @param i2c_num The I2C port number.
+ * @param invert `true` for inverted display (white on black), `false` for normal (black on white).
+ */
 void i2c_oled_set_invert(i2c_port_t i2c_num, bool invert) {
     // 0xA6 is normal, 0xA7 is inverted
     oled_cmd(i2c_num, invert ? 0xA7 : 0xA6);
 }
 
+/**
+ * @brief Writes a full line of inverted text (e.g., for a title bar).
+ *
+ * This function creates a full-width inverted bar and "cuts out" the text characters.
+ * @param i2c_num The I2C port number.
+ * @param row The row (page) to write to (0-7).
+ * @param col The starting column (typically 0).
+ * @param text The null-terminated string to write.
+ */
 void i2c_oled_write_inverted_text(i2c_port_t i2c_num, uint8_t row, uint8_t col, const char *text) {
     uint8_t line_buffer[128];
     memset(line_buffer, 0xFF, sizeof(line_buffer)); // Fill with 1s for a lit background

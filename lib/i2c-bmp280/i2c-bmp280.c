@@ -15,6 +15,14 @@
 static const char *TAG = "BMP280";
 static int32_t t_fine;
 
+/**
+ * @brief Writes a single byte to a register on the BMP280.
+ *
+ * @param dev Pointer to the BMP280 device descriptor.
+ * @param reg_addr The register address to write to.
+ * @param data The byte of data to write.
+ * @return esp_err_t `ESP_OK` on success, or an error code on failure.
+ */
 static esp_err_t bmp280_i2c_write_byte(const bmp280_t *dev, uint8_t reg_addr, uint8_t data)
 {
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
@@ -32,6 +40,15 @@ static esp_err_t bmp280_i2c_write_byte(const bmp280_t *dev, uint8_t reg_addr, ui
     return ret;
 }
 
+/**
+ * @brief Reads a sequence of bytes from a starting register on the BMP280.
+ *
+ * @param dev Pointer to the BMP280 device descriptor.
+ * @param reg_addr The starting register address to read from.
+ * @param data Pointer to the buffer to store the read data.
+ * @param len The number of bytes to read.
+ * @return esp_err_t `ESP_OK` on success, or an error code on failure.
+ */
 static esp_err_t bmp280_i2c_read_bytes(const bmp280_t *dev, uint8_t reg_addr, uint8_t *data, size_t len)
 {
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
@@ -55,6 +72,12 @@ static esp_err_t bmp280_i2c_read_bytes(const bmp280_t *dev, uint8_t reg_addr, ui
     return ret;
 }
 
+/**
+ * @brief Reads the factory-programmed calibration data from the BMP280.
+ *
+ * @param dev Pointer to the BMP280 device descriptor.
+ * @return esp_err_t `ESP_OK` on success, or an error code on failure.
+ */
 static esp_err_t bmp280_read_calibration_data(bmp280_t *dev)
 {
     uint8_t calib_data_raw[24];
@@ -85,6 +108,16 @@ static esp_err_t bmp280_read_calibration_data(bmp280_t *dev)
     return ESP_OK;
 }
 
+/**
+ * @brief Initializes the BMP280 sensor.
+ *
+ * This function checks the chip ID, reads calibration data, and configures the
+ * sensor for normal operation with default oversampling and filter settings.
+ * @param dev Pointer to the BMP280 device descriptor to initialize.
+ * @param port The I2C port number to use.
+ * @param i2c_addr The I2C address of the sensor.
+ * @return esp_err_t `ESP_OK` on success, or an error code on failure.
+ */
 esp_err_t bmp280_init(bmp280_t *dev, i2c_port_t port, uint8_t i2c_addr)
 {
     dev->i2c_port = port;
@@ -131,6 +164,12 @@ esp_err_t bmp280_init(bmp280_t *dev, i2c_port_t port, uint8_t i2c_addr)
     return ESP_OK;
 }
 
+/**
+ * @brief Reads the raw, uncompensated temperature value from the sensor.
+ *
+ * @param dev Pointer to the BMP280 device descriptor.
+ * @return int32_t The raw ADC value for temperature. Returns 0 on read failure.
+ */
 int32_t bmp280_read_raw_temp(bmp280_t *dev)
 {
     uint8_t raw_data[3];
@@ -140,6 +179,12 @@ int32_t bmp280_read_raw_temp(bmp280_t *dev)
     return (int32_t)((raw_data[0] << 12) | (raw_data[1] << 4) | (raw_data[2] >> 4));
 }
 
+/**
+ * @brief Reads the raw, uncompensated pressure value from the sensor.
+ *
+ * @param dev Pointer to the BMP280 device descriptor.
+ * @return int32_t The raw ADC value for pressure. Returns 0 on read failure.
+ */
 int32_t bmp280_read_raw_pressure(bmp280_t *dev)
 {
     uint8_t raw_data[3];
@@ -149,6 +194,15 @@ int32_t bmp280_read_raw_pressure(bmp280_t *dev)
     return (int32_t)((raw_data[0] << 12) | (raw_data[1] << 4) | (raw_data[2] >> 4));
 }
 
+/**
+ * @brief Compensates the raw temperature ADC value to get a temperature in degrees Celsius.
+ *
+ * This function uses the calibration data read during initialization. It also
+ * calculates the `t_fine` value required for pressure compensation.
+ * @param dev Pointer to the BMP280 device descriptor.
+ * @param adc_T The raw temperature ADC value from `bmp280_read_raw_temp`.
+ * @return float The compensated temperature in degrees Celsius.
+ */
 float bmp280_compensate_temperature(bmp280_t *dev, int32_t adc_T)
 {
     int32_t var1, var2;
@@ -159,6 +213,15 @@ float bmp280_compensate_temperature(bmp280_t *dev, int32_t adc_T)
     return T / 100.0;
 }
 
+/**
+ * @brief Compensates the raw pressure ADC value to get a pressure in Pascals.
+ *
+ * This function uses the calibration data and the `t_fine` value calculated
+ * by `bmp280_compensate_temperature`.
+ * @param dev Pointer to the BMP280 device descriptor.
+ * @param adc_P The raw pressure ADC value from `bmp280_read_raw_pressure`.
+ * @return long The compensated pressure in Pascals (Pa).
+ */
 long bmp280_compensate_pressure(bmp280_t *dev, int32_t adc_P)
 {
     int32_t var1, var2;

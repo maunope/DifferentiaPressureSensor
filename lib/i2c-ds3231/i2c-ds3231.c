@@ -7,9 +7,27 @@
 #define DS3231_ADDR 0x68
 static const char* TAG = "ds3231";
 
+/**
+ * @brief Converts a BCD (Binary-Coded Decimal) value to a decimal value.
+ * @param val The BCD value to convert.
+ * @return uint8_t The decimal equivalent.
+ */
 static uint8_t bcd2dec(uint8_t val) { return ((val >> 4) * 10 + (val & 0x0F)); }
+
+/**
+ * @brief Converts a decimal value to a BCD (Binary-Coded Decimal) value.
+ * @param val The decimal value to convert.
+ * @return uint8_t The BCD equivalent.
+ */
 static uint8_t dec2bcd(uint8_t val) { return ((val / 10) << 4) | (val % 10); }
 
+/**
+ * @brief Initializes the DS3231 device descriptor.
+ * @param rtc Pointer to the DS3231 device descriptor to initialize.
+ * @param i2c_num The I2C port number to use.
+ * @param address The I2C address of the DS3231.
+ * @return esp_err_t `ESP_OK` on success, `ESP_ERR_INVALID_ARG` if rtc is NULL.
+ */
 esp_err_t ds3231_init(ds3231_t *rtc, i2c_port_t i2c_num, uint8_t address) {
     if (!rtc) {
         return ESP_ERR_INVALID_ARG;
@@ -19,6 +37,14 @@ esp_err_t ds3231_init(ds3231_t *rtc, i2c_port_t i2c_num, uint8_t address) {
     return ESP_OK;
 }
 
+/**
+ * @brief Gets the current time from the DS3231 RTC.
+ *
+ * Reads the time registers from the RTC and populates a `struct tm`.
+ * @param rtc Pointer to the initialized DS3231 device descriptor.
+ * @param timeinfo Pointer to a `struct tm` to store the retrieved time (in UTC).
+ * @return esp_err_t `ESP_OK` on success, or an I2C communication error code on failure.
+ */
 esp_err_t ds3231_get_time(ds3231_t *rtc, struct tm *timeinfo) {
     uint8_t data[7];
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
@@ -55,6 +81,14 @@ esp_err_t ds3231_get_time(ds3231_t *rtc, struct tm *timeinfo) {
     return ESP_OK;
 }
 
+/**
+ * @brief Sets the time on the DS3231 RTC.
+ *
+ * Writes the time from a `struct tm` to the RTC's time registers.
+ * @param rtc Pointer to the initialized DS3231 device descriptor.
+ * @param timeinfo Pointer to a `struct tm` containing the time to set (in UTC).
+ * @return esp_err_t `ESP_OK` on success, or an I2C communication error code on failure.
+ */
 esp_err_t ds3231_set_time(ds3231_t *rtc, const struct tm *timeinfo) {
     uint8_t data[7];
     data[0] = dec2bcd(timeinfo->tm_sec);
@@ -87,6 +121,14 @@ esp_err_t ds3231_set_time(ds3231_t *rtc, const struct tm *timeinfo) {
     return ret;
 }
 
+/**
+ * @brief Sets the time on the DS3231 RTC from a `time_t` timestamp.
+ *
+ * Converts a `time_t` (seconds since epoch) into a `struct tm` and sets the RTC.
+ * @param rtc Pointer to the initialized DS3231 device descriptor.
+ * @param timestamp The `time_t` timestamp (in UTC) to set.
+ * @return esp_err_t `ESP_OK` on success, or an error code on failure.
+ */
 esp_err_t ds3231_set_time_t(ds3231_t *rtc, time_t timestamp) {
     struct tm timeinfo;
     // The timestamp is UTC (seconds since epoch).
@@ -95,6 +137,15 @@ esp_err_t ds3231_set_time_t(ds3231_t *rtc, time_t timestamp) {
     return ds3231_set_time(rtc, &timeinfo);
 }
 
+/**
+ * @brief Sets the RTC time to the application's build time.
+ *
+ * This function parses the `__DATE__` and `__TIME__` macros to determine the
+ * build timestamp, sets the RTC to this time (in UTC), and updates the system time.
+ * It handles timezone conversion from the local build environment to UTC.
+ * @param rtc Pointer to the DS3231 device descriptor.
+ * @return `ESP_OK` on success, or an error code on failure.
+ */
 esp_err_t ds3231_set_time_to_build_time(ds3231_t *rtc)
 {
     if (!rtc) {
