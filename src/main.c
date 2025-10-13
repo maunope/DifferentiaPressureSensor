@@ -140,6 +140,25 @@ static void set_rtc_to_build_time(void)
     }
 }
 
+static void bmp280_reinit(void)
+{
+    ESP_LOGI(TAG, "Re-initializing BMP280 sensor.");
+    if (xSemaphoreTake(g_i2c_bus_mutex, portMAX_DELAY))
+    {
+        esp_err_t err = bmp280_init(&g_bmp280, I2C_MASTER_NUM, BMP280_SENSOR_ADDR);
+        if (err != ESP_OK)
+        {
+            ESP_LOGE(TAG, "BMP280 sensor re-initialization failed.");
+        }
+        xSemaphoreGive(g_i2c_bus_mutex);
+    }
+    else
+    {
+        ESP_LOGE(TAG, "Failed to acquire I2C mutex for BMP280 re-init.");
+    }
+}
+
+
 static void oled_power_off(void)
 {
     if (eTaskGetState(g_uiRender_task_handle) != eSuspended)
@@ -402,6 +421,7 @@ void main_task(void *pvParameters)
                 ESP_LOGI(TAG, "Woke up from light sleep due to other reason (%d)", cause);
             }
 
+            bmp280_reinit(); // Re-initialize BMP280 sensor
             // Tell the datalogger to resume writes
             logger_cmd = DATALOGGER_CMD_RESUME_WRITES;
             xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
