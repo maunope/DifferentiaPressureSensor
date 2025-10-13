@@ -17,12 +17,18 @@ typedef enum
     ENC_BTN_PRESSED
 } encoder_button_state_t;
 
+typedef void (*rotary_encoder_callback_t)(void);
+
 typedef struct
 {
     gpio_num_t pin_a;
     gpio_num_t pin_b;
     gpio_num_t button_pin;
     uint32_t button_debounce_ms;
+    // Callbacks for events
+    rotary_encoder_callback_t on_rotate_cw;
+    rotary_encoder_callback_t on_rotate_ccw;
+    rotary_encoder_callback_t on_button_press;
 } rotaryencoder_config_t;
 
 void rotaryencoder_init(const rotaryencoder_config_t *cfg);

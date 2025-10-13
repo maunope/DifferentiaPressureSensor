@@ -128,8 +128,23 @@ void datalogger_task(void *pvParameters)
 
                 // Log to console
                 ESP_LOGI(TAG, "TS: %s, Temp: %.2fC, Press: %ldPa, Batt: %d%% (%.2fV), Charging: %d, WriteSD: %d", local_time_str, local_buffer.temperature_c, local_buffer.pressure_pa, local_buffer.battery_percentage, local_buffer.battery_voltage, local_buffer.battery_externally_powered, local_buffer.writeStatus);
-                // Write to SD card (this is a potentially slow operation)
-                spi_sdcard_write_csv();
+                
+                // Format the data into a CSV string
+                char csv_line[200];
+                snprintf(csv_line, sizeof(csv_line), "%lld,%s,%.2f,%ld,%.2f,%d,%d",
+                         (long long)local_buffer.timestamp,
+                         local_time_str,
+                         local_buffer.temperature_c,
+                         local_buffer.pressure_pa,
+                         local_buffer.battery_voltage,
+                         local_buffer.battery_percentage,
+                         local_buffer.battery_externally_powered);
+
+                // Write the formatted string to the SD card
+                esp_err_t write_err = spi_sdcard_write_line(csv_line);
+                
+                g_sensor_buffer.writeStatus = (write_err == ESP_OK) ? 0 : -1; // Update status based on result
+                if (write_err == ESP_OK) g_sensor_buffer.last_successful_write_ts = local_buffer.timestamp;
             }
         }
     }

@@ -1,5 +1,6 @@
 #include "spi-sdcard.h"
 #include "tinyusb.h"
+#include "esp_err.h"
 #include "sdkconfig.h"
 #include <stdio.h>
 #include <string.h>
@@ -13,15 +14,18 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "tinyusb_msc.h"
-#include "tinyusb_default_config.h"
-#include "../buffers.h"
 #include "../ui/time_utils.h"
 #include <stdbool.h>
 
 #include <sys/stat.h>
 #include <dirent.h>
 
+#include "../buffers.h"
 static const char *TAG = "SPI_SDCARD_V2";
+
+// Forward declaration for MSC storage callback
+void tud_msc_set_spidrv(long drv);
+
 static bool mounted = false;
 static sdmmc_card_t *s_card = NULL;
 static tinyusb_msc_storage_handle_t s_msc_storage_handle = NULL;
@@ -157,58 +161,30 @@ void spi_sdcard_deinit(void)
     current_filepath[0] = '\0'; // Reset current file path
 }
 
-// todo refactor to update struct
-void spi_sdcard_write_csv()
+esp_err_t spi_sdcard_write_line(const char* line)
 {
     //TODO make all erro codes defines
 
     if (tud_ready())
     {
         ESP_LOGI(TAG, "TinyUSB is connected and mounted, cannot write to SD card directly.");
-        if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
-        {
-            g_sensor_buffer.writeStatus = -6; // Indicate USB is connected
-            xSemaphoreGive(g_sensor_buffer_mutex);
-        }
-        else
-        {
-            ESP_LOGE(TAG, "Failed to acquire mutex to update writeStatus.");
-        }
-        return;
+        return ESP_ERR_INVALID_STATE;
     }
 
     if (!mounted) {
         ESP_LOGE(TAG, "SD card not mounted, cannot write.");
-         if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-            g_sensor_buffer.writeStatus = -1; // Indicate mount failure
-            xSemaphoreGive(g_sensor_buffer_mutex);
-        }
-        return;
-    }
-
-    sensor_buffer_t local_buffer;
-
-    // Acquire mutex and copy buffer
-    if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
-    {
-        local_buffer = g_sensor_buffer;
-        xSemaphoreGive(g_sensor_buffer_mutex);
-    }
-    else
-    {
-        ESP_LOGE(TAG, "Failed to acquire mutex to read sensor buffer.");
-        return;
+        return ESP_ERR_INVALID_STATE;
     }
 
     // --- File Rotation Logic ---
     struct stat st;
-    if (current_filepath[0] == '\0') {
+    if (current_filepath[0] == '\0') { // If no file is currently open
         // First run, find the latest file
         DIR *dir = opendir("/sdcard");
         if (dir) {
             struct dirent *ent;
             long long latest_ts = 0;
-            char latest_file[sizeof(current_filepath)] = "";
+            char latest_file[264] = "";
 
             while ((ent = readdir(dir)) != NULL) {
                 long long ts;
@@ -233,8 +209,8 @@ void spi_sdcard_write_csv()
 
     if (current_filepath[0] == '\0' || (stat(current_filepath, &st) == 0 && st.st_size >= MAX_FILE_SIZE_BYTES))
     {
-        // Create a new filename based on the current timestamp
-        snprintf(current_filepath, sizeof(current_filepath), "/sdcard/data_%lld.csv", (long long)local_buffer.timestamp);
+        // Create a new filename based on the current system time
+        snprintf(current_filepath, sizeof(current_filepath), "/sdcard/data_%lld.csv", (long long)time(NULL));
         ESP_LOGI(TAG, "Starting new log file: %s", current_filepath);
     }
 
@@ -242,41 +218,13 @@ void spi_sdcard_write_csv()
     if (f == NULL)
     {
         ESP_LOGE(TAG, "Failed to open file for writing: %s", current_filepath);
-        if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
-        {
-            g_sensor_buffer.writeStatus = -3; // Indicate file open failure
-            xSemaphoreGive(g_sensor_buffer_mutex);
-            return;
-        }
-        else
-        {
-            ESP_LOGE(TAG, "Failed to acquire mutex to update writeStatus.");
-            return;
-        }
+        return ESP_ERR_NOT_FOUND;
     }
 
-    struct tm local_tm;
-    convert_gmt_to_cet(local_buffer.timestamp, &local_tm);
-    char time_str[20];
-    //todo make timestamp format a centralized var
-    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &local_tm); // Format as YYYY-MM-DD HH:MM:SS
-    fprintf(f, "%lld,%s,%.2f,%ld,%.2f,%d,%d\n", (long long)local_buffer.timestamp, time_str, local_buffer.temperature_c, local_buffer.pressure_pa, local_buffer.battery_voltage, local_buffer.battery_percentage, local_buffer.battery_externally_powered);
+    fprintf(f, "%s\n", line);
     fflush(f);
     fclose(f);
-
-    if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
-    {
-        g_sensor_buffer.writeStatus = 0; // Indicate file write success
-        g_sensor_buffer.last_successful_write_ts = local_buffer.timestamp;
-        xSemaphoreGive(g_sensor_buffer_mutex);
-        return;
-    }
-    else
-    {
-        ESP_LOGE(TAG, "Failed to acquire mutex to update writeStatus.");
-        return;
-    }
-
+    return ESP_OK;
 }
 
 void spi_sdcard_get_file_count(void)

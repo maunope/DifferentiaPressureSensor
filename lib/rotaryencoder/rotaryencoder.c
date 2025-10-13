@@ -2,8 +2,6 @@
 #include "esp_log.h"
 #include "freertos/task.h"
 #include "ui_render.h"
-
-#include "../buffers.h" // For g_app_cmd_queue and app_command_t
 static const char *TAG = "ROTARY_ENCODER";
 
 static rotaryencoder_config_t encoder_cfg;
@@ -32,13 +30,13 @@ void IRAM_ATTR gpio_isr_handler(void *arg)
 
 void rotaryencoder_init(const rotaryencoder_config_t *cfg)
 {
-    encoder_cfg = *cfg;
+    encoder_cfg = *cfg; // Copy config
 
     // Configure encoder pins A and B
     gpio_config_t io_conf = {};
     io_conf.intr_type = GPIO_INTR_ANYEDGE;
     io_conf.pin_bit_mask = (1ULL << encoder_cfg.pin_a) | (1ULL << encoder_cfg.pin_b);
-    io_conf.mode = GPIO_MODE_INPUT;
+    io_conf.mode = GPIO_MODE_INPUT; 
     io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
     gpio_config(&io_conf);
 
@@ -93,11 +91,11 @@ static void rotary_encoder_task(void *arg)
                     if (gpio_get_level(encoder_cfg.button_pin) == 0)
                     {
                         g_encoder_button_state = ENC_BTN_PRESSED;
-                        // Send activity command directly to main task to wake up the system
-                        app_command_t cmd = APP_CMD_ACTIVITY_DETECTED;
-                        xQueueSend(g_app_cmd_queue, &cmd, 0);
-                        // Also send the button press to the UI task for menu navigation
-                        uiRender_send_event(UI_EVENT_BTN, NULL, 0); // This will be processed if UI is awake
+                        // Use callback to notify application
+                        if (encoder_cfg.on_button_press)
+                        {
+                            encoder_cfg.on_button_press();
+                        }
                     }
                 }
                 // Re-enable interrupt after processing
@@ -118,21 +116,19 @@ static void rotary_encoder_task(void *arg)
                         last_rotation_time = current_time; // Update time on valid rotation
                         if (direction == 1) { // Clockwise
                             encoder_position++;
-                            app_command_t cmd = APP_CMD_ACTIVITY_DETECTED;
-                            xQueueSend(g_app_cmd_queue, &cmd, 0);
                             g_encoder_direction = ENC_DIR_CW;
-                            // Send event only on even positions (full step)
-                            if ((encoder_position % 2) == 0) {
-                                uiRender_send_event(UI_EVENT_CW, NULL, 0);
+                            if (encoder_cfg.on_rotate_cw)
+                            {
+                                // Send event only on even positions (full step)
+                                if ((encoder_position % 2) == 0) encoder_cfg.on_rotate_cw();
                             }
                         } else { // Counter-Clockwise (direction == -1)
                             encoder_position--;
-                            app_command_t cmd = APP_CMD_ACTIVITY_DETECTED;
-                            xQueueSend(g_app_cmd_queue, &cmd, 0);
                             g_encoder_direction = ENC_DIR_CCW;
-                            // Send event only on even positions (full step)
-                            if ((encoder_position % 2) == 0) {
-                                uiRender_send_event(UI_EVENT_CCW, NULL, 0);
+                            if (encoder_cfg.on_rotate_ccw)
+                            {
+                                // Send event only on even positions (full step)
+                                if ((encoder_position % 2) == 0) encoder_cfg.on_rotate_ccw();
                             }
                         }
                     }

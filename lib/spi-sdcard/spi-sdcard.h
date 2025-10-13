@@ -1,18 +1,24 @@
 #pragma once
 
 #include <stdint.h>
+#include "esp_err.h"
 #include <stdbool.h>
-
 
 #define SPI_CARD_ERROR_NOT_MOUNTED -1
 #define SPI_CARD_ERROR_FILE_OPEN   -2
 #define SPI_CARD_OK                 0
 
-
-void spi_sdcard_full_init();
+void spi_sdcard_full_init(void);
 void spi_sdcard_deinit(void);
-void spi_sdcard_write_csv();
 void spi_sdcard_format(void);
+
+/**
+ * @brief Writes a line of text to the current log file on the SD card.
+ *
+ * Handles file creation and rotation automatically.
+ * @param line The null-terminated string to write to the file.
+ */
+esp_err_t spi_sdcard_write_line(const char* line);
 
 /**
  * @brief Counts the number of files on the SD card and updates the shared buffer.
