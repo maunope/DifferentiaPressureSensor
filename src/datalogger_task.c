@@ -16,15 +16,14 @@
 
 static const char *TAG = "DataloggerTask";
 
-extern bmp280_t g_bmp280; // Use the global BMP280 handle
-
 /**
  * @brief Reads all relevant sensors and updates the global sensor buffer.
  *
  * This function is thread-safe and uses mutexes to protect access to the
  * I2C bus and the shared sensor buffer.
+ * @param bmp280_dev Pointer to the initialized BMP280 device descriptor.
  */
-static void update_sensor_buffer(void)
+static void update_sensor_buffer(bmp280_t *bmp280_dev)
 {
     ESP_LOGD(TAG, "Updating sensor buffer...");
 
@@ -34,11 +33,11 @@ static void update_sensor_buffer(void)
 
     if (xSemaphoreTake(g_i2c_bus_mutex, pdMS_TO_TICKS(1000)) == pdTRUE)
     {
-        int32_t uncomp_temp = bmp280_read_raw_temp(&g_bmp280);
-        temperature_c = bmp280_compensate_temperature(&g_bmp280, uncomp_temp);
+        int32_t uncomp_temp = bmp280_read_raw_temp(bmp280_dev);
+        temperature_c = bmp280_compensate_temperature(bmp280_dev, uncomp_temp);
 
-        int32_t uncomp_press = bmp280_read_raw_pressure(&g_bmp280);
-        pressure_pa = bmp280_compensate_pressure(&g_bmp280, uncomp_press);
+        int32_t uncomp_press = bmp280_read_raw_pressure(bmp280_dev);
+        pressure_pa = bmp280_compensate_pressure(bmp280_dev, uncomp_press);
         xSemaphoreGive(g_i2c_bus_mutex);
     }
     else
@@ -65,6 +64,9 @@ static void update_sensor_buffer(void)
 
 void datalogger_task(void *pvParameters)
 {
+    // The BMP280 device handle is passed as the task parameter.
+    bmp280_t *bmp280_dev = (bmp280_t *)pvParameters;
+
     ESP_LOGI(TAG, "Datalogger task started.");
     static bool is_paused = false;
     uint64_t last_write_ms = 0;
@@ -80,7 +82,7 @@ void datalogger_task(void *pvParameters)
             if (cmd == DATALOGGER_CMD_FORCE_REFRESH)
             {
                 ESP_LOGI(TAG, "Forcing sensor data refresh due to command.");
-                update_sensor_buffer();
+                update_sensor_buffer(bmp280_dev);
                 continue;
             }
             else if (cmd == DATALOGGER_CMD_PAUSE_WRITES)
@@ -111,7 +113,7 @@ void datalogger_task(void *pvParameters)
             last_write_ms = current_time_ms;
 
             // Update all sensor values in the shared buffer
-            update_sensor_buffer();
+            update_sensor_buffer(bmp280_dev);
 
             // Create a local copy of the buffer for logging and writing to SD
             sensor_buffer_t local_buffer;

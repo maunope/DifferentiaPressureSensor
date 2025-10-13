@@ -605,6 +605,6 @@ void app_main(void)
     rotaryencoder_start_task();
 
     xTaskCreate(uiRender_task, "uiRender", 4096, NULL, 5, &g_uiRender_task_handle);
-    xTaskCreate(datalogger_task, "datalogger", 4096, NULL, 5, NULL); // Datalogger at priority 5
+    xTaskCreate(datalogger_task, "datalogger", 4096, &g_bmp280, 5, NULL); // Pass BMP280 handle to the task
     xTaskCreate(main_task, "main_task", 4096, NULL, 6, NULL); // Main command processing task at priority 6
 }

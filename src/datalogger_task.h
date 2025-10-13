@@ -15,5 +15,7 @@ extern QueueHandle_t g_datalogger_cmd_queue;
 
 /**
  * @brief Task responsible for periodically reading sensor data and logging it to the SD card.
+ *
+ * @param pvParameters A pointer to the initialized bmp280_t device handle.
  */
 void datalogger_task(void *pvParameters);
