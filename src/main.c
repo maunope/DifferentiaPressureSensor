@@ -45,6 +45,7 @@
 #define I2C_OLED_NUM I2C_NUM_1
 #define I2C_OLED_SCL_IO GPIO_NUM_39
 #define I2C_OLED_SDA_IO GPIO_NUM_40
+#define OLED_I2C_ADDR 0x3C
 
 // --- Rotary Encoder Configuration ---
 #define ROTARY_ENCODER_PIN_A GPIO_NUM_41
@@ -81,6 +82,30 @@ TaskHandle_t g_uiRender_task_handle = NULL;
 
 static uint64_t last_activity_ms = 0;
 static uint64_t last_self_wakeup_ms = 0;
+
+/**
+ * @brief Callback for clockwise rotation from the rotary encoder.
+ */
+static void on_encoder_rotate_cw(void) {
+    uiRender_send_event(UI_EVENT_CW, NULL, 0);
+    uiRender_reset_activity_timer();
+}
+
+/**
+ * @brief Callback for counter-clockwise rotation from the rotary encoder.
+ */
+static void on_encoder_rotate_ccw(void) {
+    uiRender_send_event(UI_EVENT_CCW, NULL, 0);
+    uiRender_reset_activity_timer();
+}
+
+/**
+ * @brief Callback for button press from the rotary encoder.
+ */
+static void on_encoder_button_press(void) {
+    uiRender_send_event(UI_EVENT_BTN, NULL, 0);
+    uiRender_reset_activity_timer();
+}
 
 /**
  * @brief Sets the DS3231 RTC to the application's build time.
@@ -170,8 +195,8 @@ static void oled_power_on(void)
     {
         ESP_LOGI(TAG, "Powering on OLED.");
         gpio_set_level(OLED_POWER_PIN, 1);
-        vTaskDelay(pdMS_TO_TICKS(50)); // Wait for OLED to stabilize
-        uiRender_init(I2C_OLED_NUM, I2C_OLED_SDA_IO, I2C_OLED_SCL_IO);
+        vTaskDelay(pdMS_TO_TICKS(100)); // Wait for OLED to stabilize
+        i2c_oled_send_init_commands(I2C_OLED_NUM);
         vTaskResume(g_uiRender_task_handle);
         uiRender_send_event(UI_EVENT_WAKE_UP, NULL, 0);
     }
@@ -233,33 +258,6 @@ static esp_err_t i2c_master_init(void)
     i2c_param_config(i2c_master_port, &conf);
 
     return i2c_driver_install(i2c_master_port, conf.mode, 0, 0, 0);
-}
-
-/**
- * @brief Callback for clockwise rotation from the rotary encoder.
- *
- * This function is called from the rotary encoder's ISR context (via a task)
- * and sends a corresponding event to the UI task.
- */
-static void on_encoder_rotate_cw(void) {
-    uiRender_send_event(UI_EVENT_CW, NULL, 0);
-    uiRender_reset_activity_timer();
-}
-
-/**
- * @brief Callback for counter-clockwise rotation from the rotary encoder.
- */
-static void on_encoder_rotate_ccw(void) {
-    uiRender_send_event(UI_EVENT_CCW, NULL, 0);
-    uiRender_reset_activity_timer();
-}
-
-/**
- * @brief Callback for button press from the rotary encoder.
- */
-static void on_encoder_button_press(void) {
-    uiRender_send_event(UI_EVENT_BTN, NULL, 0);
-    uiRender_reset_activity_timer();
 }
 
 
@@ -594,8 +592,9 @@ void app_main(void)
     rotaryencoder_init(&encoder_cfg);
 
     // --- Step 6: Initialize UI and SD card ---
-    // Initialize UI renderer which will handle its own I2C bus and OLED init
-    uiRender_init(I2C_OLED_NUM, I2C_OLED_SDA_IO, I2C_OLED_SCL_IO);
+    // Initialize UI renderer which will handle its own I2C bus, OLED, and rotary encoder.
+    uiRender_init(I2C_OLED_NUM, I2C_OLED_SDA_IO, I2C_OLED_SCL_IO, OLED_I2C_ADDR);
+
     i2c_oled_clear(I2C_OLED_NUM);
     i2c_oled_write_text(I2C_OLED_NUM, 1, 0, "Booting...");
 

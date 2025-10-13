@@ -31,6 +31,8 @@ typedef struct
     rotary_encoder_callback_t on_button_press;
 } rotaryencoder_config_t;
 
+extern rotaryencoder_config_t g_encoder_cfg;
+
 void rotaryencoder_init(const rotaryencoder_config_t *cfg);
 void rotaryencoder_start_task(void);
 encoder_direction_t rotaryencoder_get_direction(void);

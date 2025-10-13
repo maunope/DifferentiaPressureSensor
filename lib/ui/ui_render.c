@@ -1,5 +1,6 @@
 #include "ui_render.h"
 #include "i2c-oled.h"
+#include "rotaryencoder.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -55,22 +56,43 @@ static uint32_t s_cmd_timeout_ms = 5000; // Default timeout
 static post_cmd_action_t s_post_cmd_action = POST_ACTION_NONE;
 
 // Data for rendering
+static void on_encoder_rotate_cw(void);
+static void on_encoder_rotate_ccw(void);
+static void on_encoder_button_press(void);
+
+
 static float last_values[8] = {0};
 static int last_value_count = 0;
 
 // Menu navigation state
-static uint8_t current_page = 0;
-static uint8_t current_item = 0;
+static int8_t current_page = 0;
+static int8_t current_item = 0;
 
 // --- Initialization and event send ---
-void uiRender_init(i2c_port_t oled_i2c_num, gpio_num_t sda, gpio_num_t scl)
+void uiRender_init(i2c_port_t oled_i2c_num, gpio_num_t sda, gpio_num_t scl, uint8_t oled_i2c_addr)
 {
     s_oled_i2c_num = oled_i2c_num;
     s_oled_sda = sda;
     s_oled_scl = scl;
-    i2c_oled_bus_init(s_oled_i2c_num, s_oled_sda, s_oled_scl);
+    i2c_oled_bus_init(s_oled_i2c_num, s_oled_sda, s_oled_scl, oled_i2c_addr);
     s_oled_initialized = true;
 }
+
+static void on_encoder_rotate_cw(void)
+{
+    uiRender_send_event(UI_EVENT_CW, NULL, 0);
+}
+
+static void on_encoder_rotate_ccw(void)
+{
+    uiRender_send_event(UI_EVENT_CCW, NULL, 0);
+}
+
+static void on_encoder_button_press(void)
+{
+    uiRender_send_event(UI_EVENT_BTN, NULL, 0);
+}
+
 
 void uiRender_send_event(int event, float *values, int value_count)
 {
@@ -121,8 +143,6 @@ void render_menu_callback(void)
     // Clamp current_item to valid range
     if (current_item >= total)
         current_item = total - 1;
-    if (current_item < 0)
-        current_item = 0;
 
     // Calculate window start so current_item is centered if possible
     if (total > win)
@@ -306,8 +326,6 @@ void menu_on_ccw(void)
     {
         current_item--;
     }
-    if (current_item < 0)
-        current_item = 0;
 }
 
 void menu_on_btn(void)
@@ -329,8 +347,6 @@ void menu_on_btn(void)
         const ui_menu_page_t *page = &ui_menu_tree[current_page];
         if (current_item >= page->item_count)
             current_item = page->item_count - 1;
-        if (current_item < 0)
-            current_item = 0;
     }
     else if (item->on_btn)
     {
@@ -349,8 +365,6 @@ void menu_cancel_on_btn(void)
         const ui_menu_page_t *page = &ui_menu_tree[current_page];
         if (current_item >= page->item_count)
             current_item = page->item_count - 1;
-        if (current_item < 0)
-            current_item = 0;
     }
     s_menu_mode = true;
     s_current_page = NULL;

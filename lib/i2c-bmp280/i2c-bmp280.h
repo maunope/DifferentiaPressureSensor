@@ -30,7 +30,14 @@ typedef struct {
 } bmp280_t;
 
 // Function prototypes
-esp_err_t bmp280_init(bmp280_t *dev, i2c_port_t port, uint8_t addr);
+esp_err_t bmp280_init(bmp280_t *dev, i2c_port_t port, uint8_t i2c_addr);
+
+/**
+ * @brief Initializes the BMP280 sensor with the default I2C address (0x76).
+ * This is a convenience macro that calls bmp280_init with the default address.
+ */
+#define bmp280_init_default(dev, port) bmp280_init(dev, port, BMP280_SENSOR_ADDR)
+
 int32_t bmp280_read_raw_temp(bmp280_t *dev);
 int32_t bmp280_read_raw_pressure(bmp280_t *dev);
 float bmp280_compensate_temperature(bmp280_t *dev, int32_t adc_T);

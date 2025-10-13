@@ -1,14 +1,18 @@
 #include "i2c-oled.h"
 #include <string.h>
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
 
 // Use font5x7 from header
 extern const uint8_t font5x7[96][5];
 
+// Store the address for the single OLED device this library manages.
+static uint8_t s_oled_addr = 0;
+
 // Send command to OLED
 static esp_err_t oled_cmd(i2c_port_t i2c_num, uint8_t cmd) {
     uint8_t buf[2] = {0x00, cmd};
-    return i2c_master_write_to_device(i2c_num, OLED_I2C_ADDR, buf, 2, 1000 / portTICK_PERIOD_MS);
+    return i2c_master_write_to_device(i2c_num, s_oled_addr, buf, 2, 1000 / portTICK_PERIOD_MS);
 }
 
 // Send data to OLED
@@ -16,10 +20,10 @@ static esp_err_t oled_data(i2c_port_t i2c_num, const uint8_t *data, size_t len) 
     uint8_t buf[len + 1];
     buf[0] = 0x40;
     memcpy(&buf[1], data, len);
-    return i2c_master_write_to_device(i2c_num, OLED_I2C_ADDR, buf, len + 1, 1000 / portTICK_PERIOD_MS);
+    return i2c_master_write_to_device(i2c_num, s_oled_addr, buf, len + 1, 1000 / portTICK_PERIOD_MS);
 }
 
-void i2c_oled_bus_init(i2c_port_t i2c_num, gpio_num_t sda, gpio_num_t scl) {
+void i2c_oled_bus_init(i2c_port_t i2c_num, gpio_num_t sda, gpio_num_t scl, uint8_t i2c_addr) {
     i2c_config_t conf = {
         .mode = I2C_MODE_MASTER,
         .sda_io_num = sda,
@@ -29,6 +33,7 @@ void i2c_oled_bus_init(i2c_port_t i2c_num, gpio_num_t sda, gpio_num_t scl) {
         .master.clk_speed = 400000
     };
     i2c_param_config(i2c_num, &conf);
+    s_oled_addr = i2c_addr;
     i2c_driver_install(i2c_num, conf.mode, 0, 0, 0);
     i2c_oled_send_init_commands(i2c_num);
 }
@@ -36,8 +41,6 @@ void i2c_oled_bus_init(i2c_port_t i2c_num, gpio_num_t sda, gpio_num_t scl) {
 void i2c_oled_send_init_commands(i2c_port_t i2c_num) {
     // SSD1306 init sequence
     oled_cmd(i2c_num, 0xAE); // Display off
-    oled_cmd(i2c_num, 0x20); oled_cmd(i2c_num, 0x00); // Horizontal addressing
-    oled_cmd(i2c_num, 0xB0); // Page 0
     oled_cmd(i2c_num, 0xC8); // COM scan direction
     oled_cmd(i2c_num, 0x00); // Low column
     oled_cmd(i2c_num, 0x10); // High column

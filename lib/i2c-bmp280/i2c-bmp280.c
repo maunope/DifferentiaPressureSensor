@@ -85,10 +85,10 @@ static esp_err_t bmp280_read_calibration_data(bmp280_t *dev)
     return ESP_OK;
 }
 
-esp_err_t bmp280_init(bmp280_t *dev, i2c_port_t port, uint8_t addr)
+esp_err_t bmp280_init(bmp280_t *dev, i2c_port_t port, uint8_t i2c_addr)
 {
     dev->i2c_port = port;
-    dev->i2c_addr = addr;
+    dev->i2c_addr = i2c_addr;
 
     esp_err_t ret;
     uint8_t chip_id;

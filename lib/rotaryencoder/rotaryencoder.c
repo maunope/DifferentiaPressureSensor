@@ -1,10 +1,9 @@
 #include "rotaryencoder.h"
 #include "esp_log.h"
 #include "freertos/task.h"
-#include "ui_render.h"
 static const char *TAG = "ROTARY_ENCODER";
 
-static rotaryencoder_config_t encoder_cfg;
+rotaryencoder_config_t g_encoder_cfg;
 static QueueHandle_t gpio_evt_queue = NULL;
 static volatile encoder_direction_t g_encoder_direction = ENC_DIR_NONE;
 static volatile encoder_button_state_t g_encoder_button_state = ENC_BTN_IDLE;
@@ -30,27 +29,27 @@ void IRAM_ATTR gpio_isr_handler(void *arg)
 
 void rotaryencoder_init(const rotaryencoder_config_t *cfg)
 {
-    encoder_cfg = *cfg; // Copy config
+    g_encoder_cfg = *cfg; // Copy config
 
     // Configure encoder pins A and B
     gpio_config_t io_conf = {};
     io_conf.intr_type = GPIO_INTR_ANYEDGE;
-    io_conf.pin_bit_mask = (1ULL << encoder_cfg.pin_a) | (1ULL << encoder_cfg.pin_b);
+    io_conf.pin_bit_mask = (1ULL << g_encoder_cfg.pin_a) | (1ULL << g_encoder_cfg.pin_b);
     io_conf.mode = GPIO_MODE_INPUT; 
     io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
     gpio_config(&io_conf);
 
     // Configure button pin
-    io_conf.intr_type = GPIO_INTR_NEGEDGE; // Trigger only on press (falling edge)
-    io_conf.pin_bit_mask = (1ULL << encoder_cfg.button_pin);
+    io_conf.intr_type = GPIO_INTR_NEGEDGE;
+    io_conf.pin_bit_mask = (1ULL << g_encoder_cfg.button_pin);
     // mode and pull_up_en are already set from before
     gpio_config(&io_conf);
 
     gpio_evt_queue = xQueueCreate(16, sizeof(uint32_t));
     gpio_install_isr_service(0);
-    gpio_isr_handler_add(encoder_cfg.pin_a, gpio_isr_handler, (void *)encoder_cfg.pin_a);
-    gpio_isr_handler_add(encoder_cfg.pin_b, gpio_isr_handler, (void *)encoder_cfg.pin_b);
-    gpio_isr_handler_add(encoder_cfg.button_pin, gpio_isr_handler, (void *)encoder_cfg.button_pin);
+    gpio_isr_handler_add(g_encoder_cfg.pin_a, gpio_isr_handler, (void *)g_encoder_cfg.pin_a);
+    gpio_isr_handler_add(g_encoder_cfg.pin_b, gpio_isr_handler, (void *)g_encoder_cfg.pin_b);
+    gpio_isr_handler_add(g_encoder_cfg.button_pin, gpio_isr_handler, (void *)g_encoder_cfg.button_pin);
 }
 
 void rotaryencoder_enable_wakeup_source(void)
@@ -58,7 +57,7 @@ void rotaryencoder_enable_wakeup_source(void)
     // --- Configure wake-up sources ---
     // Wake on button press (HIGH to LOW). This is the only reliable GPIO wakeup source
     // on non-RTC pins.
-    esp_err_t err = gpio_wakeup_enable(encoder_cfg.button_pin, GPIO_INTR_LOW_LEVEL);
+    esp_err_t err = gpio_wakeup_enable(g_encoder_cfg.button_pin, GPIO_INTR_LOW_LEVEL);
     if (err != ESP_OK) ESP_LOGE(TAG, "Failed to enable wakeup for button pin: %s", esp_err_to_name(err));
 }
 
@@ -77,37 +76,37 @@ static void rotary_encoder_task(void *arg)
          // OR, figure some clever way to log in a more memory-efficient manner.
         if (xQueueReceive(gpio_evt_queue, &gpio_num, portMAX_DELAY) )
         {
-            if (gpio_num == encoder_cfg.button_pin)
+            if (gpio_num == g_encoder_cfg.button_pin)
             {
                 // Disable interrupt to prevent bouncing
-                gpio_intr_disable(encoder_cfg.button_pin);
+                gpio_intr_disable(g_encoder_cfg.button_pin);
 
                 TickType_t current_time = xTaskGetTickCount();
-                if ((current_time - last_button_press_time) * portTICK_PERIOD_MS > encoder_cfg.button_debounce_ms)
+                if ((current_time - last_button_press_time) * portTICK_PERIOD_MS > g_encoder_cfg.button_debounce_ms)
                 {
                     last_button_press_time = current_time;
                     // Add a small delay to ensure the button state is stable
                     vTaskDelay(pdMS_TO_TICKS(20)); 
-                    if (gpio_get_level(encoder_cfg.button_pin) == 0)
+                    if (gpio_get_level(g_encoder_cfg.button_pin) == 0)
                     {
                         g_encoder_button_state = ENC_BTN_PRESSED;
                         // Use callback to notify application
-                        if (encoder_cfg.on_button_press)
+                        if (g_encoder_cfg.on_button_press)
                         {
-                            encoder_cfg.on_button_press();
+                            g_encoder_cfg.on_button_press();
                         }
                     }
                 }
                 // Re-enable interrupt after processing
-                gpio_intr_enable(encoder_cfg.button_pin);
+                gpio_intr_enable(g_encoder_cfg.button_pin);
             }
-            else if (gpio_num == encoder_cfg.pin_a || gpio_num == encoder_cfg.pin_b)
+            else if (gpio_num == g_encoder_cfg.pin_a || gpio_num == g_encoder_cfg.pin_b)
             {
                 TickType_t current_time = xTaskGetTickCount();
                 if ((current_time - last_rotation_time) * portTICK_PERIOD_MS > 2) // 2ms debounce
                 {
                     // Read the new state of the encoder pins
-                    uint8_t new_state = (gpio_get_level(encoder_cfg.pin_a) << 1) | gpio_get_level(encoder_cfg.pin_b);
+                    uint8_t new_state = (gpio_get_level(g_encoder_cfg.pin_a) << 1) | gpio_get_level(g_encoder_cfg.pin_b);
                     
                     // Use the state table to find the direction
                     int8_t direction = KNOB_STATES[(g_encoder_state << 2) | new_state];
@@ -117,18 +116,18 @@ static void rotary_encoder_task(void *arg)
                         if (direction == 1) { // Clockwise
                             encoder_position++;
                             g_encoder_direction = ENC_DIR_CW;
-                            if (encoder_cfg.on_rotate_cw)
+                            if (g_encoder_cfg.on_rotate_cw)
                             {
                                 // Send event only on even positions (full step)
-                                if ((encoder_position % 2) == 0) encoder_cfg.on_rotate_cw();
+                                if ((encoder_position % 2) == 0) g_encoder_cfg.on_rotate_cw();
                             }
                         } else { // Counter-Clockwise (direction == -1)
                             encoder_position--;
                             g_encoder_direction = ENC_DIR_CCW;
-                            if (encoder_cfg.on_rotate_ccw)
+                            if (g_encoder_cfg.on_rotate_ccw)
                             {
                                 // Send event only on even positions (full step)
-                                if ((encoder_position % 2) == 0) encoder_cfg.on_rotate_ccw();
+                                if ((encoder_position % 2) == 0) g_encoder_cfg.on_rotate_ccw();
                             }
                         }
                     }
