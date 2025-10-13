@@ -41,5 +41,5 @@ void rotaryencoder_enable_wakeup_source(void);
 #ifndef IRAM_ATTR
 #define IRAM_ATTR
 #endif
-void IRAM_ATTR gpio_isr_handler(void *arg);
+void gpio_isr_handler(void *arg);
 QueueHandle_t rotaryencoder_get_queue_handle(void);
