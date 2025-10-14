@@ -30,7 +30,10 @@
 #include "../lib/lipo-battery/lipo-battery.h"
 
 // DO NOT use pins 19 and 20, they are used by the flash memory
-// DO NOT use pins 5 and 6, they are used for LiPo battery measurements
+// DO NOT use pins 5 and 6, they are used for LiPo battery measurements unless you change the config
+
+#define UNKNOWN_FILE_WRITE_STATUS 2
+
 
 #define DEVICES_POWER_PIN GPIO_NUM_15
 #define OLED_POWER_PIN GPIO_NUM_16
@@ -62,7 +65,7 @@
 #define BATTERY_VOLTAGE_DIVIDER_RATIO 4.1428f // (470k + 150k) / 150k, then tuned experimentally
 
 // --- Global buffer and mutex definition ---
-sensor_buffer_t g_sensor_buffer = {0};
+sensor_buffer_t g_sensor_buffer = {.writeStatus = WRITE_STATUS_UNKNOWN};
 SemaphoreHandle_t g_sensor_buffer_mutex = NULL;
 QueueHandle_t g_app_cmd_queue = NULL;
 SemaphoreHandle_t g_command_status_mutex = NULL;
@@ -70,23 +73,25 @@ SemaphoreHandle_t g_i2c_bus_mutex = NULL;
 volatile command_status_t g_command_status = CMD_STATUS_IDLE;
 QueueHandle_t g_datalogger_cmd_queue = NULL;
 
-
 static const char *TAG = "main";
 
 bool rtc_available = false;
 
 ds3231_t g_rtc;    // Global RTC device handle
 bmp280_t g_bmp280; // Global BMP280 device handle
+d6fph_t g_d6fph;   // Global D6F-PH device handle
 
 TaskHandle_t g_uiRender_task_handle = NULL;
 
 static uint64_t last_activity_ms = 0;
 static uint64_t last_self_wakeup_ms = 0;
+static bool is_usb_connected_state = false;
 
 /**
  * @brief Callback for clockwise rotation from the rotary encoder.
  */
-static void on_encoder_rotate_cw(void) {
+static void on_encoder_rotate_cw(void)
+{
     uiRender_send_event(UI_EVENT_CW, NULL, 0);
     uiRender_reset_activity_timer();
 }
@@ -94,7 +99,8 @@ static void on_encoder_rotate_cw(void) {
 /**
  * @brief Callback for counter-clockwise rotation from the rotary encoder.
  */
-static void on_encoder_rotate_ccw(void) {
+static void on_encoder_rotate_ccw(void)
+{
     uiRender_send_event(UI_EVENT_CCW, NULL, 0);
     uiRender_reset_activity_timer();
 }
@@ -102,7 +108,8 @@ static void on_encoder_rotate_ccw(void) {
 /**
  * @brief Callback for button press from the rotary encoder.
  */
-static void on_encoder_button_press(void) {
+static void on_encoder_button_press(void)
+{
     uiRender_send_event(UI_EVENT_BTN, NULL, 0);
     uiRender_reset_activity_timer();
 }
@@ -260,7 +267,6 @@ static esp_err_t i2c_master_init(void)
     return i2c_driver_install(i2c_master_port, conf.mode, 0, 0, 0);
 }
 
-
 // --- Main Application Entry Point ---
 
 void main_task(void *pvParameters)
@@ -319,12 +325,6 @@ void main_task(void *pvParameters)
 
         // --- Main Sleep/Wake Logic ---
         // --- Power Saving & UI Inactivity Logic ---
-        // If USB is connected and mounted by the host, treat it as continuous activity to prevent sleep.
-        if (spi_sdcard_is_usb_connected())
-        {
-            last_activity_ms = esp_timer_get_time() / 1000ULL;
-        }
-
         uint64_t current_time_ms = esp_timer_get_time() / 1000ULL;
         bool ui_is_inactive = (current_time_ms - last_activity_ms > INACTIVITY_TIMEOUT_MS);
 
@@ -336,6 +336,32 @@ void main_task(void *pvParameters)
             xSemaphoreGive(g_sensor_buffer_mutex);
         }
 
+        // --- USB Connection Logic ---
+        bool is_externally_powered = battery_is_externally_powered();
+        if (is_externally_powered && !is_usb_connected_state)
+        {
+            // USB was just connected
+            ESP_LOGI(TAG, "USB connected. Re-initializing for MSC.");
+            // De-init SD card first to release resources
+            spi_sdcard_deinit();
+            // Now, do a full init which includes TinyUSB
+            spi_sdcard_full_init();
+            is_usb_connected_state = true;
+        }
+        else if (!is_externally_powered && is_usb_connected_state)
+        {
+            // USB was just disconnected. We keep the TinyUSB stack running
+            // in case it's plugged back in. It will be de-initialized before sleep.
+            ESP_LOGI(TAG, "USB disconnected. TinyUSB stack remains active until sleep.");
+            is_usb_connected_state = false;
+        }
+
+        // If USB is mounted by a host, treat it as continuous activity to prevent sleep.
+        if (spi_sdcard_is_usb_connected())
+        {
+            last_activity_ms = current_time_ms;
+        }
+
         // Determine if it's time to sleep. Conditions are:
         // 1. The UI has been inactive for the timeout period.
         // 2. EITHER a new data log has occurred OR a self-wakeup timeout has been reached
@@ -343,7 +369,7 @@ void main_task(void *pvParameters)
         bool new_write_occurred = (current_write_ts > 0 && current_write_ts > last_processed_write_ts);
         bool self_wakeup_timeout = (current_time_ms - last_self_wakeup_ms > SELF_WAKEUP_TIMEOUT_MS);
 
-       // ESP_LOGI("main", "Inactivity: %llums, Since last self-wakeup: %llums, New write: %d, UI inactive: %d", current_time_ms - last_activity_ms, current_time_ms - last_self_wakeup_ms, new_write_occurred, ui_is_inactive);
+        // ESP_LOGI("main", "Inactivity: %llums, Since last self-wakeup: %llums, New write: %d, UI inactive: %d", current_time_ms - last_activity_ms, current_time_ms - last_self_wakeup_ms, new_write_occurred, ui_is_inactive);
         // --- Enter Sleep ---
         // If the UI is inactive and a new log has been written, initiate the sleep sequence.
         if (ui_is_inactive && (new_write_occurred || (self_wakeup_timeout && current_write_ts > 0)))
@@ -361,7 +387,7 @@ void main_task(void *pvParameters)
 
             // --- Step 1: Prepare UI and Peripherals for Sleep ---
             // Suspend UI task and power down OLED to save power.
-            oled_power_off();               // This will suspend the task and power down the OLED
+            oled_power_off(); // This will suspend the task and power down the OLED
 
             // Tell the datalogger task to pause writes to the SD card.
             ESP_LOGI(TAG, "Requesting datalogger to pause...");
@@ -374,14 +400,14 @@ void main_task(void *pvParameters)
             // Wait for the datalogger to update its status to PAUSED.
             do
             {
-                vTaskDelay(pdMS_TO_TICKS(50));
+                vTaskDelay(pdMS_TO_TICKS(20));
                 if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)))
                 {
                     datalogger_status = g_sensor_buffer.datalogger_status;
                     xSemaphoreGive(g_sensor_buffer_mutex);
                 }
                 wait_cycles++;
-            } while (datalogger_status != DATA_LOGGER_PAUSED && wait_cycles < 60); // Max 3 sec wait
+            } while (datalogger_status != DATA_LOGGER_PAUSED && wait_cycles < 120); // Max 3 sec wait
 
             if (datalogger_status != DATA_LOGGER_PAUSED)
             {
@@ -431,7 +457,7 @@ void main_task(void *pvParameters)
                 last_self_wakeup_ms = esp_timer_get_time() / 1000ULL;
                 // Keep OLED off and UI task suspended.
                 // Only re-init SD card for datalogger.
-                spi_sdcard_full_init();
+                spi_sdcard_init_sd_only();
             }
             else if (cause == ESP_SLEEP_WAKEUP_GPIO)
             // Woke up by GPIO (user interaction).
@@ -439,7 +465,7 @@ void main_task(void *pvParameters)
                 ESP_LOGI(TAG, "Woke up from light sleep due to GPIO.");
                 // Power on OLED, re-init SD card, and resume UI task.
                 oled_power_on();
-                spi_sdcard_full_init(); // Also re-init SD card
+                spi_sdcard_init_sd_only(); // Re-init SD card only, USB will be handled by the main loop
 
                 // Debounce after GPIO wakeup to prevent the wake-up press from being processed as a command.
                 vTaskDelay(pdMS_TO_TICKS(100));
@@ -476,7 +502,7 @@ void main_task(void *pvParameters)
             oled_power_off();
         }
 
-        vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
@@ -532,6 +558,13 @@ void app_main(void)
         ESP_LOGE(TAG, "BMP280 sensor initialization failed, stopping.");
         return;
     }
+/*
+    // Initialize D6F-PH Sensor.
+    err = d6fph_init(&g_d6fph, I2C_MASTER_NUM, D6FPH_I2C_ADDR_DEFAULT, D6FPH_MODEL_0025AD1);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "D6F-PH sensor initialization failed, stopping.");
+    }*/
 
     // --- Step 4: Initialize and validate the external Real-Time Clock (RTC) ---
     // TODO make 0x68 a define
@@ -604,7 +637,13 @@ void app_main(void)
     ESP_LOGI(TAG, "Starting  sensor readings and Encoder monitoring...");
     rotaryencoder_start_task();
 
+    // Prepare parameters for the datalogger task
+    datalogger_task_params_t datalogger_params = {
+        .bmp280_dev = &g_bmp280,
+        .d6fph_dev = &g_d6fph
+    };
+
     xTaskCreate(uiRender_task, "uiRender", 4096, NULL, 5, &g_uiRender_task_handle);
-    xTaskCreate(datalogger_task, "datalogger", 4096, &g_bmp280, 5, NULL); // Pass BMP280 handle to the task
-    xTaskCreate(main_task, "main_task", 4096, NULL, 6, NULL); // Main command processing task at priority 6
+    xTaskCreate(datalogger_task, "datalogger", 4096, &datalogger_params, 5, NULL); // Pass params struct
+    xTaskCreate(main_task, "main_task", 4096, NULL, 6, NULL);             // Main command processing task at priority 6
 }

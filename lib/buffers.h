@@ -4,6 +4,13 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include <time.h>
+#include <stdbool.h>
+
+typedef enum {
+    WRITE_STATUS_OK,
+    WRITE_STATUS_FAIL,
+    WRITE_STATUS_UNKNOWN
+} write_status_t;
 
 // Shared sensor data buffer
 typedef struct {
@@ -14,6 +21,7 @@ typedef struct {
     } datalogger_status;
     long pressure_pa;
     float temperature_c;
+    float diff_pressure_pa;
     time_t timestamp;
     time_t last_successful_write_ts;
     bool timestamp_from_rtc; 

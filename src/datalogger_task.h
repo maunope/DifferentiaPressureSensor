@@ -2,6 +2,8 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "../lib/i2c-bmp280/i2c-bmp280.h"
+#include "../lib/i2c-d6fph/i2c-d6fph.h"
 
 // --- Datalogger command queue ---
 typedef enum {
@@ -13,9 +15,14 @@ typedef enum {
 
 extern QueueHandle_t g_datalogger_cmd_queue;
 
+typedef struct {
+    bmp280_t *bmp280_dev;
+    d6fph_t *d6fph_dev;
+} datalogger_task_params_t;
+
 /**
  * @brief Task responsible for periodically reading sensor data and logging it to the SD card.
  *
- * @param pvParameters A pointer to the initialized bmp280_t device handle.
+ * @param pvParameters A pointer to an initialized datalogger_task_params_t struct.
  */
 void datalogger_task(void *pvParameters);

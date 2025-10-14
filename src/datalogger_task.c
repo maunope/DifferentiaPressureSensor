@@ -5,6 +5,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include <time.h>
+#include <math.h>
 
 #include "../lib/i2c-bmp280/i2c-bmp280.h"
 #include "../lib/spi-sdcard/spi-sdcard.h"
@@ -12,6 +13,8 @@
 #include "../lib/ui/time_utils.h"
 
 #include "../lib/lipo-battery/lipo-battery.h"
+
+#include "../lib/i2c-d6fph/i2c-d6fph.h"
 
 
 static const char *TAG = "DataloggerTask";
@@ -23,13 +26,14 @@ static const char *TAG = "DataloggerTask";
  * I2C bus and the shared sensor buffer.
  * @param bmp280_dev Pointer to the initialized BMP280 device descriptor.
  */
-static void update_sensor_buffer(bmp280_t *bmp280_dev)
+static void update_sensor_buffer(bmp280_t *bmp280_dev, d6fph_t *d6fph_dev)
 {
     ESP_LOGD(TAG, "Updating sensor buffer...");
 
     // --- Read all sensor values first ---
     float temperature_c = 0.0f;
     long pressure_pa = 0;
+    float diff_pressure_pa = NAN;
 
     if (xSemaphoreTake(g_i2c_bus_mutex, pdMS_TO_TICKS(1000)) == pdTRUE)
     {
@@ -38,6 +42,11 @@ static void update_sensor_buffer(bmp280_t *bmp280_dev)
 
         int32_t uncomp_press = bmp280_read_raw_pressure(bmp280_dev);
         pressure_pa = bmp280_compensate_pressure(bmp280_dev, uncomp_press);
+
+        if (d6fph_dev)
+        {
+            d6fph_read_pressure(d6fph_dev, &diff_pressure_pa);
+        }
         xSemaphoreGive(g_i2c_bus_mutex);
     }
     else
@@ -50,6 +59,7 @@ static void update_sensor_buffer(bmp280_t *bmp280_dev)
     {
         g_sensor_buffer.temperature_c = temperature_c;
         g_sensor_buffer.pressure_pa = pressure_pa;
+        g_sensor_buffer.diff_pressure_pa = diff_pressure_pa;
         g_sensor_buffer.timestamp = time(NULL);
         g_sensor_buffer.battery_voltage = battery_reader_get_voltage();
         g_sensor_buffer.battery_percentage = battery_reader_get_percentage();
@@ -65,12 +75,13 @@ static void update_sensor_buffer(bmp280_t *bmp280_dev)
 void datalogger_task(void *pvParameters)
 {
     // The BMP280 device handle is passed as the task parameter.
-    bmp280_t *bmp280_dev = (bmp280_t *)pvParameters;
+    datalogger_task_params_t *params = (datalogger_task_params_t *)pvParameters;
+    bmp280_t *bmp280_dev = params->bmp280_dev;
 
     ESP_LOGI(TAG, "Datalogger task started.");
     static bool is_paused = false;
     uint64_t last_write_ms = 0;
-    const uint32_t log_interval_ms = 60000; // 30 seconds
+    const uint32_t log_interval_ms = 58000; // making this slightly shorted to ensure quickest recording after sleep
 
     while (1)
     {
@@ -82,7 +93,7 @@ void datalogger_task(void *pvParameters)
             if (cmd == DATALOGGER_CMD_FORCE_REFRESH)
             {
                 ESP_LOGI(TAG, "Forcing sensor data refresh due to command.");
-                update_sensor_buffer(bmp280_dev);
+                update_sensor_buffer(bmp280_dev, params->d6fph_dev);
                 continue;
             }
             else if (cmd == DATALOGGER_CMD_PAUSE_WRITES)
@@ -113,7 +124,7 @@ void datalogger_task(void *pvParameters)
             last_write_ms = current_time_ms;
 
             // Update all sensor values in the shared buffer
-            update_sensor_buffer(bmp280_dev);
+            update_sensor_buffer(bmp280_dev, params->d6fph_dev);
 
             // Create a local copy of the buffer for logging and writing to SD
             sensor_buffer_t local_buffer;
@@ -133,21 +144,23 @@ void datalogger_task(void *pvParameters)
                 
                 // Format the data into a CSV string
                 char csv_line[200];
-                snprintf(csv_line, sizeof(csv_line), "%lld,%s,%.2f,%ld,%.2f,%d,%d",
+                snprintf(csv_line, sizeof(csv_line), "%lld,%s,%.2f,%ld,%.2f,%.2f,%d",
                          (long long)local_buffer.timestamp,
                          local_time_str,
                          local_buffer.temperature_c,
                          local_buffer.pressure_pa,
+                         local_buffer.diff_pressure_pa,
                          local_buffer.battery_voltage,
-                         local_buffer.battery_percentage,
-                         local_buffer.battery_externally_powered);
+                         local_buffer.battery_percentage);
 
                 // Write the formatted string to the SD card
                 esp_err_t write_err = spi_sdcard_write_line(csv_line);
                 
-                g_sensor_buffer.writeStatus = (write_err == ESP_OK) ? 0 : -1; // Update status based on result
+                g_sensor_buffer.writeStatus = (write_err == ESP_OK) ? WRITE_STATUS_OK : WRITE_STATUS_FAIL; // Update status based on result
                 if (write_err == ESP_OK) g_sensor_buffer.last_successful_write_ts = local_buffer.timestamp;
             }
         }
+
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }

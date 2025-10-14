@@ -24,7 +24,7 @@
 static const char *TAG = "SPI_SDCARD_V2";
 
 // Forward declaration for MSC storage callback
-void tud_msc_set_spidrv(long drv);
+// void tud_msc_set_spidrv(long drv);
 
 static bool mounted = false;
 static sdmmc_card_t *s_card = NULL;
@@ -32,6 +32,7 @@ static tinyusb_msc_storage_handle_t s_msc_storage_handle = NULL;
 static char current_filepath[264] = ""; // 8 for "/sdcard/" + 255 for d_name + 1 for null
 #define MAX_FILE_SIZE_BYTES (10 * 1024 * 1024) // 10 MB
 
+static bool s_tinyusb_is_initialized = false;
 
 // Global host and mount configuration
 static sdmmc_host_t host = SDSPI_HOST_DEFAULT();
@@ -76,25 +77,11 @@ static void init_gpio_cs()
  }
  */
 
-/**
- * @brief Initializes the SPI bus, mounts the SD card, and sets up TinyUSB for MSC.
- *
- * This function performs the full initialization sequence for the SD card,
- * including setting up the SPI bus, mounting the FAT filesystem, and configuring
- * the USB Mass Storage Class driver.
- */
-void spi_sdcard_full_init()
+void spi_sdcard_init_sd_only(void)
 {
-    ESP_LOGI(TAG, "Starting full TinyUSB and SD card initialization (v2.0.0).");
-
-    if (mounted)
-    {
-        ESP_LOGW(TAG, "SD Card already mounted, skipping initialization.");
-        return;
-    }
-
+    ESP_LOGI(TAG, "Starting SD card only initialization.");
+    spi_sdcard_deinit(); // Ensure clean state
     init_gpio_cs();
-
     host.slot = SPI2_HOST;
     host.max_freq_khz = SDMMC_FREQ_DEFAULT;
     spi_bus_config_t bus_cfg = {
@@ -103,51 +90,44 @@ void spi_sdcard_full_init()
         .sclk_io_num = GPIO_NUM_11,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
-        .max_transfer_sz = 16384 // Increased DMA transfer size to 16384 bytes for better performance with large files
+        .max_transfer_sz = 16384,
     };
-
     esp_err_t ret = spi_bus_initialize(host.slot, &bus_cfg, SDSPI_DEFAULT_DMA);
-    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE)
-    {
+    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "Failed to initialize SPI bus: %s", esp_err_to_name(ret));
         return;
     }
-
     ret = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_config, &mount_config, &s_card);
-    if (ret != ESP_OK)
-    {
+    if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to mount SD card: %s", esp_err_to_name(ret));
-    }
-    else
-    {
+    } else {
         ESP_LOGI(TAG, "SD card mounted.");
         mounted = true;
+    }
+}
 
+void spi_sdcard_full_init()
+{
+    ESP_LOGI(TAG, "Starting full TinyUSB and SD card initialization.");
+    spi_sdcard_init_sd_only();
+    if (mounted)
+    {
         ESP_LOGI(TAG, "Configuring and installing TinyUSB for MSC.");
-
-        // Step 1: Install the general TinyUSB driver with a valid task config.
         const tinyusb_config_t tusb_cfg = {
             .task.size = 16384 * 2,
             .task.priority = 2,
             .task.xCoreID = 0
-
         };
-
-        // const tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG(device_event_handler);
-
         ESP_ERROR_CHECK(tinyusb_driver_install(&tusb_cfg));
 
-        // Step 2: Create a handle for the SD card storage using the new API
         tinyusb_msc_storage_config_t sd_storage_config = {
             .medium = {
                 .wl_handle = (long)s_card,
             },
-
         };
-
         ESP_ERROR_CHECK(tinyusb_msc_new_storage_sdmmc(&sd_storage_config, &s_msc_storage_handle));
-
-        ESP_LOGI(TAG, "TinyUSB and MSC storage initialized.");
+        s_tinyusb_is_initialized = true;
+        ESP_LOGI(TAG, "TinyUSB MSC storage initialized.");
     }
 }
 
@@ -171,11 +151,15 @@ void spi_sdcard_deinit(void)
         tinyusb_msc_delete_storage(s_msc_storage_handle);
         s_msc_storage_handle = NULL;
     }
-    tinyusb_driver_uninstall();
+    if (s_tinyusb_is_initialized) {
+        tinyusb_driver_uninstall();
+        s_tinyusb_is_initialized = false;
+    }
     esp_vfs_fat_sdcard_unmount("/sdcard", s_card);
     // The SPI bus is not de-initialized here to allow for faster re-init.
     // If full power savings were needed, spi_bus_free(host.slot) could be called.
     mounted = false;
+    s_card = NULL;
     current_filepath[0] = '\0'; // Reset current file path
 }
 
@@ -190,8 +174,7 @@ void spi_sdcard_deinit(void)
 esp_err_t spi_sdcard_write_line(const char* line)
 {
     //TODO make all erro codes defines
-
-    if (tud_ready())
+    if (spi_sdcard_is_usb_connected())
     {
         ESP_LOGI(TAG, "TinyUSB is connected and mounted, cannot write to SD card directly.");
         return ESP_ERR_INVALID_STATE;
@@ -350,7 +333,7 @@ void spi_sdcard_format(void)
     ESP_LOGI(TAG, "Attempting to format SD card.");
     esp_err_t ret = ESP_FAIL;
 
-    if (tud_ready())
+    if (spi_sdcard_is_usb_connected())
     {
         ESP_LOGE(TAG, "Cannot format: SD card is mounted as USB Mass Storage.");
     }

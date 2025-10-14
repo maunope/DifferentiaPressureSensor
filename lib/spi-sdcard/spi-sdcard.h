@@ -9,6 +9,7 @@
 #define SPI_CARD_OK                 0
 
 void spi_sdcard_full_init(void);
+void spi_sdcard_init_sd_only(void);
 void spi_sdcard_deinit(void);
 void spi_sdcard_format(void);
 

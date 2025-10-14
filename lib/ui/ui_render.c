@@ -225,7 +225,17 @@ void render_sensor_callback(void)
         snprintf(new_lines[2], sizeof(new_lines[2]), "%s", time_str);
         snprintf(new_lines[3], sizeof(new_lines[3]), "T: %.2f C", local_buffer.temperature_c);
         snprintf(new_lines[4], sizeof(new_lines[4]), "P: %ld Pa", local_buffer.pressure_pa);
-        snprintf(new_lines[5], sizeof(new_lines[5]), "File write: %s", local_buffer.writeStatus == 0 ? "OK" : "KO");
+
+        char write_status_str[4];
+        if (local_buffer.writeStatus == WRITE_STATUS_OK) {
+            strcpy(write_status_str, "OK");
+        } else if (local_buffer.writeStatus == WRITE_STATUS_FAIL) {
+            strcpy(write_status_str, "KO");
+        } else { // WRITE_STATUS_UNKNOWN
+            strcpy(write_status_str, "?");
+        }
+        snprintf(new_lines[5], sizeof(new_lines[5]), "Last file write: %s", write_status_str);
+
         snprintf(new_lines[6], sizeof(new_lines[6]), "Batt: %.2fV-%d%% %s", local_buffer.battery_voltage, local_buffer.battery_percentage, local_buffer.battery_externally_powered == 1 ? "(C)" : "");
     }
     else
@@ -245,15 +255,20 @@ void page_fs_stats_render_callback(void)
 {
     char new_lines[8][21] = {{0}}; // Initialize all lines to empty
     snprintf(new_lines[0], sizeof(new_lines[0]), "File System Stats");
-
+    
     int file_count = -2; // Default to loading state
     int free_space_mb = -2;
+    time_t last_write_ts = 0;
+
     if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
     {
         file_count = g_sensor_buffer.sd_card_file_count;
         free_space_mb = g_sensor_buffer.sd_card_free_bytes;
+        last_write_ts = g_sensor_buffer.last_successful_write_ts;
         xSemaphoreGive(g_sensor_buffer_mutex);
     }
+
+    // Line 1 is blank
 
     if (file_count == -2)
     {
@@ -283,6 +298,18 @@ void page_fs_stats_render_callback(void)
     {
         snprintf(new_lines[3], sizeof(new_lines[3]), "Free: Error");
     }
+
+    // Display last successful write timestamp
+    snprintf(new_lines[5], sizeof(new_lines[5]), "Last OK write:");
+    if (last_write_ts > 0) {
+        struct tm local_tm;
+        convert_gmt_to_cet(last_write_ts, &local_tm);
+        // Format as YYYY-MM-DD HH:MM
+        strftime(new_lines[6], sizeof(new_lines[6]), "%Y-%m-%d %H:%M", &local_tm);
+    } else {
+        snprintf(new_lines[6], sizeof(new_lines[6]), "None");
+    }
+
 
     write_inverted_line(0, new_lines[0]);
     for (uint8_t row = 1; row < 8; ++row)
