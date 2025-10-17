@@ -489,6 +489,7 @@ void uiRender_task(void *pvParameters)
             else if (msg.event == UI_EVENT_WAKE_UP)
             {
                 s_sleeping_mode = false;
+                i2c_oled_clear(s_oled_i2c_num);
                 s_waking_up = true;             // Set the waking up flag
                 i2c_oled_clear(s_oled_i2c_num); // Clear the screen on wake up
             }

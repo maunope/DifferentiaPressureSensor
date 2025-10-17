@@ -11,10 +11,12 @@
 #include "esp_log.h"
 #include "driver/i2c.h"
 #include "driver/gpio.h"
+#include "driver/rtc_io.h"
 #include "sdkconfig.h"
 #include "esp_rom_sys.h"
 #include "esp_timer.h" // Required for esp_timer_get_time()
 #include <time.h>
+#include "esp_ota_ops.h"
 #include <sys/time.h>
 #include "esp_sleep.h"
 
@@ -73,6 +75,12 @@ SemaphoreHandle_t g_i2c_bus_mutex = NULL;
 volatile command_status_t g_command_status = CMD_STATUS_IDLE;
 QueueHandle_t g_datalogger_cmd_queue = NULL;
 
+// --- RTC Memory for State Persistence ---
+// These variables retain their values across deep sleep cycles.
+static RTC_DATA_ATTR uint64_t rtc_last_write_ms = 0;
+static RTC_DATA_ATTR write_status_t rtc_last_write_status = WRITE_STATUS_UNKNOWN;
+static RTC_DATA_ATTR time_t rtc_last_successful_write_ts = 0;
+
 static const char *TAG = "main";
 
 bool rtc_available = false;
@@ -84,7 +92,6 @@ d6fph_t g_d6fph;   // Global D6F-PH device handle
 TaskHandle_t g_uiRender_task_handle = NULL;
 
 static uint64_t last_activity_ms = 0;
-static uint64_t last_self_wakeup_ms = 0;
 static bool is_usb_connected_state = false;
 
 /**
@@ -156,30 +163,6 @@ static void handle_set_rtc_to_build_time(void)
 }
 
 /**
- * @brief Re-initializes the BMP280 sensor.
- *
- * This function is called after waking from sleep to ensure the sensor
- * is responsive. It takes the I2C bus mutex before re-initializing the sensor.
- */
-static void bmp280_reinit(void)
-{
-    ESP_LOGI(TAG, "Re-initializing BMP280 sensor.");
-    if (xSemaphoreTake(g_i2c_bus_mutex, portMAX_DELAY))
-    {
-        esp_err_t err = bmp280_init(&g_bmp280, I2C_MASTER_NUM, BMP280_SENSOR_ADDR);
-        if (err != ESP_OK)
-        {
-            ESP_LOGE(TAG, "BMP280 sensor re-initialization failed.");
-        }
-        xSemaphoreGive(g_i2c_bus_mutex);
-    }
-    else
-    {
-        ESP_LOGE(TAG, "Failed to acquire I2C mutex for BMP280 re-init.");
-    }
-}
-
-/**
  * @brief Powers off the OLED display and suspends the UI rendering task.
  *
  * This function sends a "prepare for sleep" event to the UI, waits for it
@@ -218,40 +201,48 @@ static void oled_power_on(void)
     }
 }
 
-/**
- * @brief Reads the current time from the DS3231 RTC and updates the system time.
- *
- * This is used to synchronize the ESP32's internal system clock with the more
- * accurate external RTC, especially after waking from sleep.
- */
-static void resync_time_from_rtc(void)
-{
-    if (!rtc_available)
-    {
-        return;
+static void go_to_deep_sleep(void) {
+    ESP_LOGI(TAG, "Entering deep sleep.");
+
+    // --- Persist State to RTC Memory ---
+    // Save the current datalogger state before sleeping.
+    if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(100))) {
+        rtc_last_write_ms = g_sensor_buffer.last_write_ms;
+        rtc_last_write_status = g_sensor_buffer.writeStatus;
+        rtc_last_successful_write_ts = g_sensor_buffer.last_successful_write_ts;
+        xSemaphoreGive(g_sensor_buffer_mutex);
+        ESP_LOGI(TAG, "Saved last write time (%llu) and status (%d) to RTC memory.", rtc_last_write_ms, rtc_last_write_status);
+    } else {
+        ESP_LOGE(TAG, "Failed to acquire buffer mutex to save state. State will not be persisted.");
     }
 
-    struct tm timeinfo;
-    time_t rtc_ts = -1;
+    // Configure the rotary encoder button pin as the wakeup source.
+    // This uses the RTC peripheral, which is required for deep sleep.
+    rotaryencoder_enable_wakeup_source();
+    esp_sleep_enable_timer_wakeup(SLEEP_DURATION_US);
 
-    if (xSemaphoreTake(g_i2c_bus_mutex, pdMS_TO_TICKS(100)) == pdTRUE)
-    {
-        if (ds3231_get_time(&g_rtc, &timeinfo) == ESP_OK)
-        {
-            // The RTC provides a struct tm in UTC.
-            // Since system TZ is UTC, mktime works like timegm.
-            rtc_ts = mktime(&timeinfo);
-        }
-        xSemaphoreGive(g_i2c_bus_mutex);
-    }
+    // IMPORTANT: Ensure the wakeup pin has a pull-up enabled to prevent floating.
+    // This is critical to prevent immediate wake-up if the pin is not externally pulled up.
+    // Use rtc_gpio functions as digital GPIO pads are powered down in deep sleep.
+    rtc_gpio_pullup_en(ROTARY_ENCODER_BUTTON_PIN);
+    rtc_gpio_pulldown_dis(ROTARY_ENCODER_BUTTON_PIN);
 
-    if (rtc_ts != -1)
-    {
-        struct timeval tv = {.tv_sec = rtc_ts};
-        settimeofday(&tv, NULL);
-        ESP_LOGI(TAG, "System time re-synced from DS3231 RTC.");
-    }
+    // Disable pull-ups on non-RTC encoder pins to prevent current leakage.
+    // These pins are not RTC-capable, so we use standard GPIO functions.
+    gpio_pullup_dis(ROTARY_ENCODER_PIN_A);
+    gpio_pullup_dis(ROTARY_ENCODER_PIN_B);
+
+    // Hold the state of non-RTC GPIOs during deep sleep to prevent leakage.
+    gpio_hold_en(ROTARY_ENCODER_PIN_A);
+    gpio_hold_en(ROTARY_ENCODER_PIN_B);
+    gpio_deep_sleep_hold_en();
+
+
+    ESP_LOGI(TAG, "Entering deep sleep now.");
+    esp_deep_sleep_start();
+    // --- Execution stops here, device will restart on wakeup ---
 }
+
 /**
  * @brief i2c master initialization
  *
@@ -280,8 +271,14 @@ static esp_err_t i2c_master_init(void)
 
 void main_task(void *pvParameters)
 {
-    ESP_LOGI(TAG, "Light sleep configured. Inactivity timeout: %dms, Sleep duration: %llus", INACTIVITY_TIMEOUT_MS, SLEEP_DURATION_US / 1000000ULL);
+    ESP_LOGI(TAG, "Deep sleep configured. Inactivity timeout: %dms, Sleep duration: %llus", INACTIVITY_TIMEOUT_MS, SLEEP_DURATION_US / 1000000ULL);
     time_t last_processed_write_ts = 0;
+
+    // On a timer-based wakeup, the UI task is not created. We need to handle this.
+    bool is_ui_suspended = (g_uiRender_task_handle == NULL);
+    if (!is_ui_suspended) {
+        is_ui_suspended = (eTaskGetState(g_uiRender_task_handle) == eSuspended);
+    }
 
     while (1)
     {
@@ -290,7 +287,7 @@ void main_task(void *pvParameters)
         if (xQueueReceive(g_app_cmd_queue, &cmd, 0) == pdPASS)
         {
             // Any command from the UI means it's active
-            if (eTaskGetState(g_uiRender_task_handle) == eSuspended)
+            if (g_uiRender_task_handle != NULL && eTaskGetState(g_uiRender_task_handle) == eSuspended)
             {
                 ESP_LOGI(TAG, "Activity detected, waking up UI.");
                 // This will fall through to the activity detected command
@@ -317,6 +314,7 @@ void main_task(void *pvParameters)
             case APP_CMD_ACTIVITY_DETECTED:
                 last_activity_ms = esp_timer_get_time() / 1000;
                 oled_power_on();
+                is_ui_suspended = false;
                 break;
             case APP_CMD_REFRESH_SENSOR_DATA:
                 // ESP_LOGI(TAG, "Received command to refresh sensor data, forwarding to datalogger.");
@@ -334,7 +332,7 @@ void main_task(void *pvParameters)
 
         // --- Main Sleep/Wake Logic ---
         // --- Power Saving & UI Inactivity Logic ---
-        uint64_t current_time_ms = esp_timer_get_time() / 1000ULL;
+        uint64_t current_time_ms = esp_timer_get_time() / 1000ULL;        
         bool ui_is_inactive = (current_time_ms - last_activity_ms > INACTIVITY_TIMEOUT_MS);
 
         // Check if a new data entry has been successfully written to the SD card.
@@ -376,22 +374,13 @@ void main_task(void *pvParameters)
         // 2. EITHER a new data log has occurred OR a self-wakeup timeout has been reached
         //    (to ensure the device sleeps even if SD card writes are failing).
         bool new_write_occurred = (current_write_ts > 0 && current_write_ts > last_processed_write_ts);
-        bool self_wakeup_timeout = (current_time_ms - last_self_wakeup_ms > SELF_WAKEUP_TIMEOUT_MS);
-
-        // ESP_LOGI("main", "Inactivity: %llums, Since last self-wakeup: %llums, New write: %d, UI inactive: %d", current_time_ms - last_activity_ms, current_time_ms - last_self_wakeup_ms, new_write_occurred, ui_is_inactive);
-        // --- Enter Sleep ---
-        // If the UI is inactive and a new log has been written, initiate the sleep sequence.
-        if (ui_is_inactive && (new_write_occurred || (self_wakeup_timeout && current_write_ts > 0)))
+        // If the UI is inactive, not in the middle of waking up, and a new log has been written (or a timeout occurred),
+        // then initiate the sleep sequence.
+        if (ui_is_inactive && new_write_occurred)
         {
-            if (self_wakeup_timeout)
-            {
-                ESP_LOGI(TAG, "UI inactive and self-wakeup timeout reached. Initiating sleep.");
-                last_self_wakeup_ms = current_time_ms; // Reset self-wakeup timer
-            }
-            else
-            {
-                ESP_LOGI(TAG, "UI inactive and new data logged. Initiating sleep.");
-            }
+            ESP_LOGI(TAG, "UI inactive and new data log detected. Initiating sleep.");
+
+            
             last_processed_write_ts = current_write_ts; // Mark this write as processed
 
             // --- Step 1: Prepare UI and Peripherals for Sleep ---
@@ -439,79 +428,14 @@ void main_task(void *pvParameters)
             ESP_LOGI(TAG, "Powering down external devices.");
             gpio_set_level(DEVICES_POWER_PIN, 0);
 
-            ESP_LOGI(TAG, "Entering light sleep.");
-
-            // Disable normal ISRs to prepare for sleep
-            gpio_isr_handler_remove(ROTARY_ENCODER_PIN_A);
-            gpio_isr_handler_remove(ROTARY_ENCODER_PIN_B);
-            gpio_isr_handler_remove(ROTARY_ENCODER_BUTTON_PIN);
-
-            // Configure and enable GPIO wakeup sources
-            rotaryencoder_enable_wakeup_source();
-            esp_sleep_enable_gpio_wakeup();
-            esp_sleep_enable_timer_wakeup(SLEEP_DURATION_US);
-            esp_light_sleep_start();
-
-            // --- WAKE UP SEQUENCE ---
-            // Restore power to peripherals immediately after waking up.
-            gpio_set_level(DEVICES_POWER_PIN, 1);
-            vTaskDelay(pdMS_TO_TICKS(30)); // Increased delay for power stabilization
-            // Re-initialize the main I2C bus for sensors
-           // ESP_ERROR_CHECK(i2c_master_init());
-
-            ESP_LOGI(TAG, "Powered up external devices. Re-initializing...");
-
-            esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
-            if (cause == ESP_SLEEP_WAKEUP_TIMER)
-            // Woke up by timer, meaning no user interaction.
-            {
-                ESP_LOGI(TAG, "Woke up from light sleep due to timer.");
-                last_self_wakeup_ms = esp_timer_get_time() / 1000ULL;
-                // Keep OLED off and UI task suspended.
-                // Only re-init SD card for datalogger.
-                spi_sdcard_init_sd_only();
-            }
-            else if (cause == ESP_SLEEP_WAKEUP_GPIO)
-            // Woke up by GPIO (user interaction).
-            {
-                ESP_LOGI(TAG, "Woke up from light sleep due to GPIO.");
-                // Power on OLED, re-init SD card, and resume UI task.
-                // This also sends the UI_EVENT_WAKE_UP event.
-                oled_power_on();
-                spi_sdcard_init_sd_only(); // Re-init SD card only, USB will be handled by the main loop
-
-                // The UI task has its own wake-up debounce delay. Here, we just need to
-                // clear any button press event that was queued by the ISR during wake-up.
-                xQueueReset(rotaryencoder_get_queue_handle());
-                last_activity_ms = esp_timer_get_time() / 1000ULL;    // Reset activity timer on wakeup
-                last_self_wakeup_ms = esp_timer_get_time() / 1000ULL; // Reset self-wakeup timer on wakeup
-            }
-            else
-            {
-                ESP_LOGI(TAG, "Woke up from light sleep due to other reason (%d)", cause);
-            }
-
-            // Re-initialize the BMP280 sensor as it may have lost its state.
-            bmp280_reinit(); // Re-initialize BMP280 sensor
-            // Tell the datalogger task to resume writing data to the SD card.
-            logger_cmd = DATALOGGER_CMD_RESUME_WRITES;
-            xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
-
-            // Re-install normal ISRs for the rotary encoder for active operation.
-            gpio_isr_handler_add(ROTARY_ENCODER_PIN_A, gpio_isr_handler, (void *)ROTARY_ENCODER_PIN_A);
-            gpio_isr_handler_add(ROTARY_ENCODER_PIN_B, gpio_isr_handler, (void *)ROTARY_ENCODER_PIN_B);
-            gpio_isr_handler_add(ROTARY_ENCODER_BUTTON_PIN, gpio_isr_handler, (void *)ROTARY_ENCODER_BUTTON_PIN);
-
-            gpio_wakeup_disable(ROTARY_ENCODER_BUTTON_PIN); // Disable wakeup to use normal ISR
-
-            // Re-sync system time with the external RTC.
-            resync_time_from_rtc(); // Re-sync system time with external RTC
+            go_to_deep_sleep();
         }
         else if (ui_is_inactive && eTaskGetState(g_uiRender_task_handle) != eSuspended)
-        {
+        {   
+            is_ui_suspended = true;
             uiRender_send_event(UI_EVENT_PREPARE_SLEEP, NULL, 0);
             vTaskDelay(pdMS_TO_TICKS(300)); // Give UI time to draw sleep message
-            // UI timeout occurred, but no new write yet. Just turn off the screen.
+            // UI timeout occurred, but no new write yet. Just turn off the screen.            
             oled_power_off();
         }
 
@@ -519,8 +443,41 @@ void main_task(void *pvParameters)
     }
 }
 
+static void log_wakeup_reason(esp_sleep_wakeup_cause_t cause)
+{
+    switch (cause)
+    {
+    case ESP_SLEEP_WAKEUP_UNDEFINED:
+        ESP_LOGI(TAG, "Wakeup reason: Reset or power-on");
+        break;
+    case ESP_SLEEP_WAKEUP_TIMER:
+        ESP_LOGI(TAG, "Wakeup reason: Timer");
+        break;
+    case ESP_SLEEP_WAKEUP_GPIO:
+        ESP_LOGI(TAG, "Wakeup reason: GPIO");
+        break;
+    case ESP_SLEEP_WAKEUP_EXT0:
+    case ESP_SLEEP_WAKEUP_EXT1:
+        ESP_LOGI(TAG, "Wakeup reason: External GPIO");
+        break;
+    case ESP_SLEEP_WAKEUP_UART:
+        ESP_LOGI(TAG, "Wakeup reason: UART");
+        break;
+    default:
+        ESP_LOGI(TAG, "Wakeup reason: Other (%d)", cause);
+        break;
+    }
+}
+
 void app_main(void)
 {
+    // Get wakeup cause
+    esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+    log_wakeup_reason(cause);
+
+    // Disable all wakeup sources after waking up to prevent immediate re-triggering.
+    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+
     // --- Step 1: Initialize GPIO for power control ---
     gpio_config_t oled_pwr_pin_cfg = {
         .pin_bit_mask = (1ULL << OLED_POWER_PIN),
@@ -541,9 +498,13 @@ void app_main(void)
     gpio_config(&pwr_pin_cfg);
 
     // Turn on power for all peripherals.
-    gpio_set_level(DEVICES_POWER_PIN, 1);
-    gpio_set_level(OLED_POWER_PIN, 1);
-    vTaskDelay(pdMS_TO_TICKS(50)); // Wait 50ms after powering up devices
+    gpio_set_level(DEVICES_POWER_PIN, 1); // Always power sensors
+    if (cause != ESP_SLEEP_WAKEUP_TIMER) {
+        // Only power OLED if not a timer wakeup
+        gpio_set_level(OLED_POWER_PIN, 1);
+    }
+    vTaskDelay(pdMS_TO_TICKS(50)); // Wait for power to stabilize
+
 
     // --- Step 2: Initialize RTOS objects (Mutexes and Queues) ---
     g_command_status_mutex = xSemaphoreCreateMutex();
@@ -551,6 +512,23 @@ void app_main(void)
     g_sensor_buffer_mutex = xSemaphoreCreateMutex();
     g_app_cmd_queue = xQueueCreate(10, sizeof(app_command_t));
     g_datalogger_cmd_queue = xQueueCreate(5, sizeof(datalogger_command_t));
+
+    // --- Step 2.5: Restore State from RTC Memory ---
+    if (cause == ESP_SLEEP_WAKEUP_UNDEFINED) {
+        // This is a cold boot, not a wakeup from sleep. Initialize RTC variables.
+        ESP_LOGI(TAG, "First boot, initializing RTC state.");
+        rtc_last_write_ms = 0; // Ensures first log happens immediately
+        rtc_last_write_status = WRITE_STATUS_UNKNOWN;
+        rtc_last_successful_write_ts = 0;
+    }
+
+    // Restore the persisted state into the global buffer.
+    if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY)) {
+        g_sensor_buffer.last_write_ms = rtc_last_write_ms;
+        g_sensor_buffer.writeStatus = rtc_last_write_status;
+        g_sensor_buffer.last_successful_write_ts = rtc_last_successful_write_ts;
+        xSemaphoreGive(g_sensor_buffer_mutex);
+    }
 
     // --- Step 3: Initialize hardware drivers and peripherals ---
     // Initialize Battery Reader first, as it uses ADC which can conflict if I2C is initialized first
@@ -638,12 +616,27 @@ void app_main(void)
     };
     rotaryencoder_init(&encoder_cfg);
 
-    // --- Step 6: Initialize UI and SD card ---
-    // Initialize UI renderer which will handle its own I2C bus, OLED, and rotary encoder.
-    uiRender_init(I2C_OLED_NUM, I2C_OLED_SDA_IO, I2C_OLED_SCL_IO, OLED_I2C_ADDR);
+    // --- Step 6: Initialize UI (if needed) and SD card ---
+    if (cause != ESP_SLEEP_WAKEUP_TIMER) {
+        // Initialize UI renderer which will handle its own I2C bus, OLED, and rotary encoder.
+        uiRender_init(I2C_OLED_NUM, I2C_OLED_SDA_IO, I2C_OLED_SCL_IO, OLED_I2C_ADDR);
+        i2c_oled_clear(I2C_OLED_NUM);
+        // Buffer for display messages, 20 chars + null terminator
+        char display_str[21];
+        memset(display_str, 0, sizeof(display_str)); // Ensure the buffer is clean
 
-    i2c_oled_clear(I2C_OLED_NUM);
-    i2c_oled_write_text(I2C_OLED_NUM, 1, 0, "Booting...");
+        if (cause == ESP_SLEEP_WAKEUP_EXT0) {
+            // Pad the string to 20 characters to clear the line
+            snprintf(display_str, sizeof(display_str), "%-20s", "Waking up...");
+            i2c_oled_write_text(I2C_OLED_NUM, 1, 0, display_str);
+        } else {
+            // Pad the string to 20 characters to clear the line
+            snprintf(display_str, sizeof(display_str), "%-20s", "Booting...");
+            i2c_oled_write_text(I2C_OLED_NUM, 1, 0, display_str);
+        }
+    } else {
+        ESP_LOGI(TAG, "Timer wakeup, skipping UI initialization.");
+    }
 
     spi_sdcard_full_init();
 
@@ -657,7 +650,11 @@ void app_main(void)
         .d6fph_dev = &g_d6fph
     };
 
-    xTaskCreate(uiRender_task, "uiRender", 4096, NULL, 5, &g_uiRender_task_handle);
+    if (cause != ESP_SLEEP_WAKEUP_TIMER) {
+        xTaskCreate(uiRender_task, "uiRender", 4096, NULL, 5, &g_uiRender_task_handle);
+    } else {
+        g_uiRender_task_handle = NULL; // Ensure handle is null if task is not created
+    }
     xTaskCreate(datalogger_task, "datalogger", 4096, &datalogger_params, 5, NULL); // Pass params struct
     xTaskCreate(main_task, "main_task", 4096, NULL, 6, NULL);             // Main command processing task at priority 6
 }

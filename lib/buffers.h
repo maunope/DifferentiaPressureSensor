@@ -14,7 +14,7 @@ typedef enum {
 
 // Shared sensor data buffer
 typedef struct {
-    int writeStatus;
+    write_status_t writeStatus;
     enum {
         DATA_LOGGER_RUNNING,
         DATA_LOGGER_PAUSED,
@@ -22,6 +22,7 @@ typedef struct {
     long pressure_pa;
     float temperature_c;
     float diff_pressure_pa;
+    uint64_t last_write_ms; // Timestamp of the last write attempt (from esp_timer)
     time_t timestamp;
     time_t last_successful_write_ts;
     bool timestamp_from_rtc; 

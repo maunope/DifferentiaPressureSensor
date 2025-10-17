@@ -1,6 +1,7 @@
 #include "rotaryencoder.h"
 #include "esp_log.h"
 #include "freertos/task.h"
+#include "esp_sleep.h"
 static const char *TAG = "ROTARY_ENCODER";
 
 rotaryencoder_config_t g_encoder_cfg;
@@ -54,7 +55,7 @@ void rotaryencoder_init(const rotaryencoder_config_t *cfg)
     gpio_config(&io_conf);
 
     // Configure button pin
-    io_conf.intr_type = GPIO_INTR_NEGEDGE;
+    io_conf.intr_type = GPIO_INTR_ANYEDGE; // Trigger on both press and release
     io_conf.pin_bit_mask = (1ULL << g_encoder_cfg.button_pin);
     // mode and pull_up_en are already set from before
     gpio_config(&io_conf);
@@ -73,11 +74,11 @@ void rotaryencoder_init(const rotaryencoder_config_t *cfg)
  */
 void rotaryencoder_enable_wakeup_source(void)
 {
-    // --- Configure wake-up sources ---
-    // Wake on button press (HIGH to LOW). This is the only reliable GPIO wakeup source
-    // on non-RTC pins.
-    esp_err_t err = gpio_wakeup_enable(g_encoder_cfg.button_pin, GPIO_INTR_LOW_LEVEL);
-    if (err != ESP_OK) ESP_LOGE(TAG, "Failed to enable wakeup for button pin: %s", esp_err_to_name(err));
+    ESP_LOGI(TAG, "Enabling deep sleep wakeup on GPIO %d", g_encoder_cfg.button_pin);
+    // Use ext0 wakeup for deep sleep. It can only use one pin.
+    // The pin must be an RTC GPIO. Wake on low level (0).
+    esp_err_t err = esp_sleep_enable_ext0_wakeup(g_encoder_cfg.button_pin, 0);
+    if (err != ESP_OK) ESP_LOGE(TAG, "Failed to enable ext0 wakeup for button pin: %s", esp_err_to_name(err));
 }
 
 /**
@@ -92,48 +93,40 @@ static void rotary_encoder_task(void *arg)
     uint32_t gpio_num;
     TickType_t last_button_press_time = 0;
     TickType_t last_rotation_time = 0;
+    TickType_t button_down_time = 0; // Time when button was pressed
+    bool long_press_fired = false;   // Flag to prevent short press after a long press
     int32_t encoder_position = 0; // Track absolute position
 
     while (1)
     {
-        
-         // DO NOT log  in this loop, unless it's for debug
-         // ESP_LOGI is stack-heavy and can stack overflow this task when many events come in.
-         // OR, figure some clever way to log in a more memory-efficient manner.
-        if (xQueueReceive(gpio_evt_queue, &gpio_num, portMAX_DELAY) )
+        // Wait for a GPIO event or timeout after 200ms to check for long press
+        if (xQueueReceive(gpio_evt_queue, &gpio_num, pdMS_TO_TICKS(200)))
         {
             if (gpio_num == g_encoder_cfg.button_pin)
             {
                 TickType_t current_time = xTaskGetTickCount();
-                if ((current_time - last_button_press_time) * portTICK_PERIOD_MS > g_encoder_cfg.button_debounce_ms)
+                if ((current_time - last_button_press_time) * portTICK_PERIOD_MS < g_encoder_cfg.button_debounce_ms)
                 {
-                    last_button_press_time = current_time;
-                    vTaskDelay(pdMS_TO_TICKS(20)); // Debounce delay
-
-                    uint32_t press_duration_ms = 0;
-                    while (gpio_get_level(g_encoder_cfg.button_pin) == 0)
-                    {
-                        vTaskDelay(pdMS_TO_TICKS(50));
-                        press_duration_ms += 50;
-                        if (press_duration_ms >= LONG_PRESS_DURATION_MS)
-                        {
-                            // --- Long Press Detected ---
-                            if (g_encoder_cfg.on_button_long_press)
-                            {
-                                g_encoder_cfg.on_button_long_press();
-                            }
-                            // Wait for release before continuing to avoid re-triggering
-                            while (gpio_get_level(g_encoder_cfg.button_pin) == 0) {
-                                vTaskDelay(pdMS_TO_TICKS(10));
-                            }
-                            goto button_event_handled; // Skip short press logic
-                        }
-                    }
-                    // --- Short Press Detected ---
-                    // If the while loop finished before the long press duration, it was a short press.
-                    if (g_encoder_cfg.on_button_press) g_encoder_cfg.on_button_press();
+                    continue; // Ignore bounce
                 }
-            button_event_handled:;
+                last_button_press_time = current_time;
+
+                if (gpio_get_level(g_encoder_cfg.button_pin) == 0)
+                {
+                    // --- Button is PRESSED (falling edge) ---
+                    button_down_time = current_time;
+                    long_press_fired = false; // Reset flag on new press
+                }
+                else
+                {
+                    // --- Button is RELEASED (rising edge) ---
+                    // Only fire short press if a long press hasn't already been fired
+                    if (button_down_time > 0 && !long_press_fired)
+                    {
+                        if (g_encoder_cfg.on_button_press) g_encoder_cfg.on_button_press();
+                    }
+                    button_down_time = 0; // Reset press time
+                }
             }
             else if (gpio_num == g_encoder_cfg.pin_a || gpio_num == g_encoder_cfg.pin_b)
             {
@@ -168,6 +161,19 @@ static void rotary_encoder_task(void *arg)
                     }
                     // Update the state for the next transition
                     g_encoder_state = new_state;
+                }
+            }
+        }
+        else
+        {
+            // --- Queue receive timed out, check for long press ---
+            if (button_down_time > 0 && !long_press_fired)
+            {
+                TickType_t current_time = xTaskGetTickCount();
+                if ((current_time - button_down_time) * portTICK_PERIOD_MS >= LONG_PRESS_DURATION_MS)
+                {
+                    if (g_encoder_cfg.on_button_long_press) g_encoder_cfg.on_button_long_press();
+                    long_press_fired = true; // Mark that long press has been handled
                 }
             }
         }

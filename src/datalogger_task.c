@@ -3,6 +3,7 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "esp_log.h"
+#include "esp_sleep.h"
 #include "esp_timer.h"
 #include <time.h>
 #include <math.h>
@@ -18,6 +19,7 @@
 
 
 static const char *TAG = "DataloggerTask";
+
 
 /**
  * @brief Reads all relevant sensors and updates the global sensor buffer.
@@ -78,11 +80,10 @@ void datalogger_task(void *pvParameters)
 {
     // The BMP280 device handle is passed as the task parameter.
     datalogger_task_params_t *params = (datalogger_task_params_t *)pvParameters;
-    bmp280_t *bmp280_dev = params->bmp280_dev;
+    bmp280_t *bmp280_dev = params->bmp280_dev;    
 
     ESP_LOGI(TAG, "Datalogger task started.");
     static bool is_paused = false;
-    uint64_t last_write_ms = 0;
     const uint32_t log_interval_ms = 58000; // making this slightly shorted to ensure quickest recording after sleep
 
     while (1)
@@ -145,20 +146,24 @@ void datalogger_task(void *pvParameters)
 
 
         uint64_t current_time_ms = esp_timer_get_time() / 1000;
+        uint64_t last_write_ms = 0;
+
+        // Get the last write time from the shared buffer
+        if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50))) {
+            last_write_ms = g_sensor_buffer.last_write_ms;
+            xSemaphoreGive(g_sensor_buffer_mutex);
+        }
 
         if (current_time_ms - last_write_ms >= log_interval_ms && !is_paused)
         {
-            last_write_ms = current_time_ms;
-
             // Update all sensor values in the shared buffer
             update_sensor_buffer(bmp280_dev, params->d6fph_dev);
 
             // Create a local copy of the buffer for logging and writing to SD
             sensor_buffer_t local_buffer;
-            if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
+            if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY) == pdTRUE)
             {
                 local_buffer = g_sensor_buffer;
-                xSemaphoreGive(g_sensor_buffer_mutex);
 
                 // Format timestamp for logging
                 char local_time_str[32];
@@ -183,8 +188,15 @@ void datalogger_task(void *pvParameters)
                 // Write the formatted string to the SD card
                 esp_err_t write_err = spi_sdcard_write_line(csv_line);
                 
-                g_sensor_buffer.writeStatus = (write_err == ESP_OK) ? WRITE_STATUS_OK : WRITE_STATUS_FAIL; // Update status based on result
-                if (write_err == ESP_OK) g_sensor_buffer.last_successful_write_ts = local_buffer.timestamp;
+                // Update the shared buffer with the new status and timestamps
+                g_sensor_buffer.last_write_ms = current_time_ms;
+                g_sensor_buffer.writeStatus = (write_err == ESP_OK) ? WRITE_STATUS_OK : WRITE_STATUS_FAIL;
+                if (write_err == ESP_OK) {
+                    // Use time(NULL) to get a fresh timestamp for the write event,
+                    // ensuring it's different from the sensor reading timestamp.
+                    g_sensor_buffer.last_successful_write_ts = time(NULL);
+                }
+                xSemaphoreGive(g_sensor_buffer_mutex);
             }
         }
 
