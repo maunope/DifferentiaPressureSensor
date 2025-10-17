@@ -29,7 +29,7 @@ static const char *TAG = "SPI_SDCARD_V2";
 static bool mounted = false;
 static sdmmc_card_t *s_card = NULL;
 static tinyusb_msc_storage_handle_t s_msc_storage_handle = NULL;
-static char current_filepath[264] = ""; // 8 for "/sdcard/" + 255 for d_name + 1 for null
+static char current_filepath[264] = "";        // 8 for "/sdcard/" + 255 for d_name + 1 for null
 #define MAX_FILE_SIZE_BYTES (10 * 1024 * 1024) // 10 MB
 
 static bool s_tinyusb_is_initialized = false;
@@ -49,39 +49,20 @@ static esp_vfs_fat_sdmmc_mount_config_t mount_config = {
     .max_files = 5,
     .allocation_unit_size = 16 * 1024};
 
-// Configure CS pin with pull-up for SPI mode
-/**
- * @brief Initializes the GPIO pin used for the SD card Chip Select (CS).
- *
- * Configures the pin as an output with pull-up enabled.
- */
-static void init_gpio_cs()
-{
-    gpio_config_t io_conf = {
-        .pin_bit_mask = (1ULL << GPIO_NUM_13),
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_ENABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE};
-    gpio_config(&io_conf);
-} /*
-   static void device_event_handler(tinyusb_event_t *event, void *arg) {
-     switch (event->id) {
-     case TINYUSB_EVENT_ATTACHED:
-     ESP_LOGI(TAG, "TinyUSB MSC is now mounted on the host.");
-     case TINYUSB_EVENT_DETACHED:
-     ESP_LOGI(TAG, "TinyUSB MSC is now detached from the host.");
-     default:
-         break;
-     }
- }
- */
 
 void spi_sdcard_init_sd_only(void)
 {
     ESP_LOGI(TAG, "Starting SD card only initialization.");
     spi_sdcard_deinit(); // Ensure clean state
-    init_gpio_cs();
+
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << GPIO_NUM_13),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_ENABLE,
+        .intr_type = GPIO_INTR_DISABLE};
+    gpio_config(&io_conf);
+
     host.slot = SPI2_HOST;
     host.max_freq_khz = SDMMC_FREQ_DEFAULT;
     spi_bus_config_t bus_cfg = {
@@ -93,14 +74,18 @@ void spi_sdcard_init_sd_only(void)
         .max_transfer_sz = 16384,
     };
     esp_err_t ret = spi_bus_initialize(host.slot, &bus_cfg, SDSPI_DEFAULT_DMA);
-    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE)
+    {
         ESP_LOGE(TAG, "Failed to initialize SPI bus: %s", esp_err_to_name(ret));
         return;
     }
     ret = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_config, &mount_config, &s_card);
-    if (ret != ESP_OK) {
+    if (ret != ESP_OK)
+    {
         ESP_LOGE(TAG, "Failed to mount SD card: %s", esp_err_to_name(ret));
-    } else {
+    }
+    else
+    {
         ESP_LOGI(TAG, "SD card mounted.");
         mounted = true;
     }
@@ -116,8 +101,7 @@ void spi_sdcard_full_init()
         const tinyusb_config_t tusb_cfg = {
             .task.size = 16384 * 2,
             .task.priority = 2,
-            .task.xCoreID = 0
-        };
+            .task.xCoreID = 0};
         ESP_ERROR_CHECK(tinyusb_driver_install(&tusb_cfg));
 
         tinyusb_msc_storage_config_t sd_storage_config = {
@@ -151,7 +135,8 @@ void spi_sdcard_deinit(void)
         tinyusb_msc_delete_storage(s_msc_storage_handle);
         s_msc_storage_handle = NULL;
     }
-    if (s_tinyusb_is_initialized) {
+    if (s_tinyusb_is_initialized)
+    {
         tinyusb_driver_uninstall();
         s_tinyusb_is_initialized = false;
     }
@@ -171,34 +156,40 @@ void spi_sdcard_deinit(void)
  * @param line The null-terminated string to write to the file.
  * @return esp_err_t `ESP_OK` on success, or an error code on failure.
  */
-esp_err_t spi_sdcard_write_line(const char* line)
+esp_err_t spi_sdcard_write_line(const char *line)
 {
-    //TODO make all erro codes defines
+    // TODO make all erro codes defines
     if (spi_sdcard_is_usb_connected())
     {
         ESP_LOGI(TAG, "TinyUSB is connected and mounted, cannot write to SD card directly.");
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (!mounted) {
+    if (!mounted)
+    {
         ESP_LOGE(TAG, "SD card not mounted, cannot write.");
         return ESP_ERR_INVALID_STATE;
     }
 
     // --- File Rotation Logic ---
     struct stat st;
-    if (current_filepath[0] == '\0') { // If no file is currently open
+    if (current_filepath[0] == '\0')
+    { // If no file is currently open
         // First run, find the latest file
         DIR *dir = opendir("/sdcard");
-        if (dir) {
+        if (dir)
+        {
             struct dirent *ent;
             long long latest_ts = 0;
             char latest_file[264] = "";
 
-            while ((ent = readdir(dir)) != NULL) {
+            while ((ent = readdir(dir)) != NULL)
+            {
                 long long ts;
-                if (sscanf(ent->d_name, "data_%lld.csv", &ts) == 1) {
-                    if (ts > latest_ts) {
+                if (sscanf(ent->d_name, "data_%lld.csv", &ts) == 1)
+                {
+                    if (ts > latest_ts)
+                    {
                         latest_ts = ts;
                         snprintf(latest_file, sizeof(latest_file), "/sdcard/%.255s", ent->d_name);
                     }
@@ -206,9 +197,11 @@ esp_err_t spi_sdcard_write_line(const char* line)
             }
             closedir(dir);
 
-            if (latest_ts > 0) {
+            if (latest_ts > 0)
+            {
                 // Found a previous file, check its size
-                if (stat(latest_file, &st) == 0 && st.st_size < MAX_FILE_SIZE_BYTES) {
+                if (stat(latest_file, &st) == 0 && st.st_size < MAX_FILE_SIZE_BYTES)
+                {
                     ESP_LOGI(TAG, "Continuing with existing log file: %s", latest_file);
                     strncpy(current_filepath, latest_file, sizeof(current_filepath));
                 }
@@ -245,22 +238,30 @@ void spi_sdcard_get_file_count(void)
 {
     int file_count = -1; // Default to -1 for error cases
 
-    if (!mounted) {
+    if (!mounted)
+    {
         ESP_LOGE(TAG, "SD card not mounted, cannot count files.");
-    } else {
+    }
+    else
+    {
         int count = 0;
         DIR *dir = opendir("/sdcard");
-        if (dir) {
+        if (dir)
+        {
             struct dirent *ent;
-            while ((ent = readdir(dir)) != NULL) {
+            while ((ent = readdir(dir)) != NULL)
+            {
                 // Count only regular files, ignore directories
-                if (ent->d_type == DT_REG) {
+                if (ent->d_type == DT_REG)
+                {
                     count++;
                 }
             }
             closedir(dir);
             file_count = count;
-        } else {
+        }
+        else
+        {
             ESP_LOGE(TAG, "Failed to open /sdcard directory to count files.");
         }
     }
@@ -282,24 +283,31 @@ void spi_sdcard_get_file_count(void)
  *
  * The result is stored in the global sensor buffer.
  */
-void spi_sdcard_get_free_space_mb(void) {
+void spi_sdcard_get_free_space_mb(void)
+{
     int free_space_mb = -1; // Default to -1 for error
 
-    if (!mounted) {
+    if (!mounted)
+    {
         ESP_LOGE(TAG, "SD card not mounted, cannot get free space.");
-    } else {
+    }
+    else
+    {
         FATFS *fs;
         DWORD free_clusters;
         // Get volume information and free clusters about the drive 0 (mounted at /sdcard)
         FRESULT res = f_getfree("/sdcard", &free_clusters, &fs);
 
-        if (res == FR_OK) {
+        if (res == FR_OK)
+        {
             // Calculate free space in bytes
             uint64_t free_bytes = (uint64_t)free_clusters * fs->csize * s_card->csd.sector_size;
             // Convert to MB
             free_space_mb = (int)(free_bytes / (1024 * 1024));
             ESP_LOGI(TAG, "SD card free space: %d MB", free_space_mb);
-        } else {
+        }
+        else
+        {
             ESP_LOGE(TAG, "Failed to get free space, f_getfree() error: %d", res);
         }
     }
@@ -352,12 +360,13 @@ void spi_sdcard_format(void)
         else
         {
             ESP_LOGI(TAG, "SD card formatted successfully.");
-            mounted = true; // esp_vfs_fat_sdcard_format remounts it.
+            mounted = true;             // esp_vfs_fat_sdcard_format remounts it.
             current_filepath[0] = '\0'; // Reset filename to force creation of a new one
         }
     }
 
-    if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY)) {
+    if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY))
+    {
         g_command_status = (ret == ESP_OK) ? CMD_STATUS_SUCCESS : CMD_STATUS_FAIL;
         xSemaphoreGive(g_command_status_mutex);
     }

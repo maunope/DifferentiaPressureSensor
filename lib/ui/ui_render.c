@@ -507,12 +507,31 @@ void uiRender_task(void *pvParameters)
                     menu_on_cw();
                 else if (msg.event == UI_EVENT_CCW)
                     menu_on_ccw();
+                else if (msg.event == UI_EVENT_BTN_LONG)
+                {
+                    // Long press returns to main menu
+                    current_page = 0;
+                    current_item = 0;
+                    menu_stack_pos = 0;
+                    s_menu_mode = true;
+                }
                 else if (msg.event == UI_EVENT_BTN)
                     menu_on_btn();
             }
             else if (s_current_page)
             {
                 if (msg.event == UI_EVENT_CW && s_current_page->on_cw)
+                    s_current_page->on_cw();
+                else if (msg.event == UI_EVENT_BTN_LONG)
+                {
+                    // Long press returns to main menu from any page
+                    current_page = 0;
+                    current_item = 0;
+                    menu_stack_pos = 0;
+                    s_menu_mode = true;
+                    s_current_page = NULL;
+                }
+                else if (msg.event == UI_EVENT_CW && s_current_page->on_cw)
                     s_current_page->on_cw();
                 else if (msg.event == UI_EVENT_CCW && s_current_page->on_ccw)
                     s_current_page->on_ccw();

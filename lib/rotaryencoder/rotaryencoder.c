@@ -14,6 +14,7 @@ static volatile uint8_t g_encoder_state = 0;
 // Table for full-step quadrature decoding, moved to file scope.
 // Index is (old_state << 2) | new_state. Values: 0=no change, 1=CW, -1=CCW.
 // static makes it private to this file. const places it in flash.
+#define LONG_PRESS_DURATION_MS 2000
 static const int8_t KNOB_STATES[] = {0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0};
 
 /**
@@ -103,27 +104,36 @@ static void rotary_encoder_task(void *arg)
         {
             if (gpio_num == g_encoder_cfg.button_pin)
             {
-                // Disable interrupt to prevent bouncing
-                gpio_intr_disable(g_encoder_cfg.button_pin);
-
                 TickType_t current_time = xTaskGetTickCount();
                 if ((current_time - last_button_press_time) * portTICK_PERIOD_MS > g_encoder_cfg.button_debounce_ms)
                 {
                     last_button_press_time = current_time;
-                    // Add a small delay to ensure the button state is stable
-                    vTaskDelay(pdMS_TO_TICKS(20)); 
-                    if (gpio_get_level(g_encoder_cfg.button_pin) == 0)
+                    vTaskDelay(pdMS_TO_TICKS(20)); // Debounce delay
+
+                    uint32_t press_duration_ms = 0;
+                    while (gpio_get_level(g_encoder_cfg.button_pin) == 0)
                     {
-                        g_encoder_button_state = ENC_BTN_PRESSED;
-                        // Use callback to notify application
-                        if (g_encoder_cfg.on_button_press)
+                        vTaskDelay(pdMS_TO_TICKS(50));
+                        press_duration_ms += 50;
+                        if (press_duration_ms >= LONG_PRESS_DURATION_MS)
                         {
-                            g_encoder_cfg.on_button_press();
+                            // --- Long Press Detected ---
+                            if (g_encoder_cfg.on_button_long_press)
+                            {
+                                g_encoder_cfg.on_button_long_press();
+                            }
+                            // Wait for release before continuing to avoid re-triggering
+                            while (gpio_get_level(g_encoder_cfg.button_pin) == 0) {
+                                vTaskDelay(pdMS_TO_TICKS(10));
+                            }
+                            goto button_event_handled; // Skip short press logic
                         }
                     }
+                    // --- Short Press Detected ---
+                    // If the while loop finished before the long press duration, it was a short press.
+                    if (g_encoder_cfg.on_button_press) g_encoder_cfg.on_button_press();
                 }
-                // Re-enable interrupt after processing
-                gpio_intr_enable(g_encoder_cfg.button_pin);
+            button_event_handled:;
             }
             else if (gpio_num == g_encoder_cfg.pin_a || gpio_num == g_encoder_cfg.pin_b)
             {

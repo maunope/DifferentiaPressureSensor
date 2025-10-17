@@ -29,6 +29,7 @@ typedef struct
     rotary_encoder_callback_t on_rotate_cw;
     rotary_encoder_callback_t on_rotate_ccw;
     rotary_encoder_callback_t on_button_press;
+    rotary_encoder_callback_t on_button_long_press;
 } rotaryencoder_config_t;
 
 extern rotaryencoder_config_t g_encoder_cfg;

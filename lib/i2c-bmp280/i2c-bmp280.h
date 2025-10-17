@@ -42,5 +42,16 @@ int32_t bmp280_read_raw_temp(bmp280_t *dev);
 int32_t bmp280_read_raw_pressure(bmp280_t *dev);
 float bmp280_compensate_temperature(bmp280_t *dev, int32_t adc_T);
 long bmp280_compensate_pressure(bmp280_t *dev, int32_t adc_P);
+esp_err_t bmp280_force_read(bmp280_t *dev, float *temperature, long *pressure);
+
+/**
+ * @brief Reads compensated temperature and pressure data from the BMP280 sensor.
+ *
+ * @param dev Pointer to the BMP280 device descriptor.
+ * @param temperature Pointer to a float to store the compensated temperature in degrees Celsius.
+ * @param pressure Pointer to a long to store the compensated pressure in Pascals.
+ * @return esp_err_t `ESP_OK` on success, or an error code on failure.
+ */
+esp_err_t bmp280_read_fixed(bmp280_t *dev, int32_t *temperature, uint32_t *pressure);
 
 #endif // I2C_BMP280_H

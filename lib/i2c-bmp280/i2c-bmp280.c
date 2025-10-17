@@ -10,6 +10,12 @@
 #define BMP280_CTRL_MEAS_REG 0xF4
 #define BMP280_CONFIG_REG 0xF5
 #define BMP280_CALIB_DATA_START 0x88
+#define BMP280_REG_STATUS 0xF3
+
+// Status register bits
+#define BMP280_STATUS_MEASURING (1 << 3)
+#define BMP280_STATUS_IM_UPDATE (1 << 0)
+#define BMP280_MODE_FORCED 0x01
 
 #define BMP280_I2C_ADDRESS 0X60
 static const char *TAG = "BMP280";
@@ -251,4 +257,51 @@ long bmp280_compensate_pressure(bmp280_t *dev, int32_t adc_P)
     p = (uint32_t)((int32_t)p + ((var1 + var2 + dev->calib_data.dig_P7) >> 4));
 
     return (long)p;
+}
+
+esp_err_t bmp280_force_read(bmp280_t *dev, float *temperature, long *pressure)
+{
+    if (!dev) return ESP_ERR_INVALID_ARG;
+
+    // 1. Read the current ctrl_meas register
+    uint8_t ctrl_meas;
+    esp_err_t err = bmp280_i2c_read_bytes(dev, BMP280_CTRL_MEAS_REG, &ctrl_meas, 1);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read CTRL_MEAS for forced read.");
+        return err;
+    }
+
+    // 2. Set the sensor to "Forced mode"
+    // This retains the oversampling settings but triggers a single measurement.
+    ctrl_meas = (ctrl_meas & 0xFC) | BMP280_MODE_FORCED;
+    err = bmp280_i2c_write_byte(dev, BMP280_CTRL_MEAS_REG, ctrl_meas);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to write CTRL_MEAS for forced read.");
+        return err;
+    }
+
+    // 3. Poll the status register until the measurement is complete.
+    // The 'measuring' bit (bit 3) will be 0 when done.
+    uint8_t status;
+    do {
+        vTaskDelay(pdMS_TO_TICKS(5)); // Small delay to avoid busy-waiting too fast
+        err = bmp280_i2c_read_bytes(dev, BMP280_REG_STATUS, &status, 1);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to read STATUS during poll.");
+            return err;
+        }
+    } while (status & BMP280_STATUS_MEASURING);
+
+    // 4. Now that the measurement is complete, read the fresh data.
+    int32_t raw_temp = bmp280_read_raw_temp(dev);
+    int32_t raw_press = bmp280_read_raw_pressure(dev);
+
+    if (raw_temp == 0 || raw_press == 0) { // Check for read failure
+        return ESP_FAIL;
+    }
+
+    *temperature = bmp280_compensate_temperature(dev, raw_temp);
+    *pressure = bmp280_compensate_pressure(dev, raw_press);
+
+    return ESP_OK;
 }

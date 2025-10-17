@@ -53,11 +53,11 @@
 // --- Rotary Encoder Configuration ---
 #define ROTARY_ENCODER_PIN_A GPIO_NUM_41
 #define ROTARY_ENCODER_PIN_B GPIO_NUM_42
-#define ROTARY_ENCODER_BUTTON_PIN GPIO_NUM_7
+#define ROTARY_ENCODER_BUTTON_PIN GPIO_NUM_2
 #define BUTTON_DEBOUNCE_TIME_MS 50
 #define SELF_WAKEUP_TIMEOUT_MS 5000
-#define INACTIVITY_TIMEOUT_MS 30000          // 10 seconds
-#define SLEEP_DURATION_US (59 * 1000 * 1000) // 45 seconds
+#define INACTIVITY_TIMEOUT_MS 30000          // 30 seconds
+#define SLEEP_DURATION_US (60 * 1000 * 1000) // 60  seconds
 
 // --- Battery ADC Configuration ---
 #define BATTERY_PWR_PIN GPIO_NUM_5
@@ -111,6 +111,15 @@ static void on_encoder_rotate_ccw(void)
 static void on_encoder_button_press(void)
 {
     uiRender_send_event(UI_EVENT_BTN, NULL, 0);
+    uiRender_reset_activity_timer();
+}
+
+/**
+ * @brief Callback for button long press from the rotary encoder.
+ */
+static void on_encoder_button_long_press(void)
+{
+    uiRender_send_event(UI_EVENT_BTN_LONG, NULL, 0);
     uiRender_reset_activity_timer();
 }
 
@@ -424,7 +433,7 @@ void main_task(void *pvParameters)
             // De-initialize peripherals that will be powered down.
             ESP_LOGI(TAG, "De-initializing peripherals before sleep.");
             spi_sdcard_deinit(); // Inlined from peripherals_deinit
-            // OLED I2C driver is already deleted by oled_power_off()
+
 
             // Cut power to the main peripheral power rail.
             ESP_LOGI(TAG, "Powering down external devices.");
@@ -446,7 +455,10 @@ void main_task(void *pvParameters)
             // --- WAKE UP SEQUENCE ---
             // Restore power to peripherals immediately after waking up.
             gpio_set_level(DEVICES_POWER_PIN, 1);
-            vTaskDelay(pdMS_TO_TICKS(100));
+            vTaskDelay(pdMS_TO_TICKS(30)); // Increased delay for power stabilization
+            // Re-initialize the main I2C bus for sensors
+           // ESP_ERROR_CHECK(i2c_master_init());
+
             ESP_LOGI(TAG, "Powered up external devices. Re-initializing...");
 
             esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
@@ -464,11 +476,12 @@ void main_task(void *pvParameters)
             {
                 ESP_LOGI(TAG, "Woke up from light sleep due to GPIO.");
                 // Power on OLED, re-init SD card, and resume UI task.
+                // This also sends the UI_EVENT_WAKE_UP event.
                 oled_power_on();
                 spi_sdcard_init_sd_only(); // Re-init SD card only, USB will be handled by the main loop
 
-                // Debounce after GPIO wakeup to prevent the wake-up press from being processed as a command.
-                vTaskDelay(pdMS_TO_TICKS(100));
+                // The UI task has its own wake-up debounce delay. Here, we just need to
+                // clear any button press event that was queued by the ISR during wake-up.
                 xQueueReset(rotaryencoder_get_queue_handle());
                 last_activity_ms = esp_timer_get_time() / 1000ULL;    // Reset activity timer on wakeup
                 last_self_wakeup_ms = esp_timer_get_time() / 1000ULL; // Reset self-wakeup timer on wakeup
@@ -621,6 +634,7 @@ void app_main(void)
         .on_rotate_cw = on_encoder_rotate_cw,
         .on_rotate_ccw = on_encoder_rotate_ccw,
         .on_button_press = on_encoder_button_press,
+        .on_button_long_press = on_encoder_button_long_press,
     };
     rotaryencoder_init(&encoder_cfg);
 

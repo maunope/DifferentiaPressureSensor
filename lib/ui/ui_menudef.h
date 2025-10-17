@@ -35,14 +35,14 @@ const ui_menu_page_t ui_menu_tree[] = {
         .title = "Main Menu",
         .items = {
             { .label = "Sensor data", .has_submenu = false, .on_btn = menu_sensor_on_btn },
-            { .label = "Settings", .has_submenu = true, .submenu_page_index = 1, .on_btn = NULL },
+            { .label = "Options", .has_submenu = true, .submenu_page_index = 1, .on_btn = NULL },
             { .label = "About", .has_submenu = false, .on_btn = menu_about_on_btn }
            
         },
         .item_count = 3
     },
     {
-        .title = "Settings",
+        .title = "Options",
         .items = {
             { .label = "Real Time Clock", .has_submenu = true, .submenu_page_index = 2, .on_btn = NULL },
             { .label = "File System", .has_submenu = true, .submenu_page_index = 3, .on_btn = NULL },
@@ -53,7 +53,7 @@ const ui_menu_page_t ui_menu_tree[] = {
     {
         .title = "Real Time Clock",
         .items = {
-            { .label = "Build ts to RTC", .has_submenu = false, .on_btn = menu_set_time_on_btn },
+            { .label = "Build ts to RTC", .has_submenu = true, .submenu_page_index = 4, .on_btn = NULL },
             MENU_BACK_ITEM
         },
         .item_count = 2
@@ -62,10 +62,18 @@ const ui_menu_page_t ui_menu_tree[] = {
         .title = "File System",
         .items = {
             { .label = "Stats", .has_submenu = false, .on_btn = menu_fs_stats_on_btn },
-            { .label = "Format SD Card", .has_submenu = true, .submenu_page_index = 4, .on_btn = NULL },
+            { .label = "Format SD Card", .has_submenu = true, .submenu_page_index = 5, .on_btn = NULL },
             MENU_BACK_ITEM
         },
         .item_count = 3
+    },
+    {
+        .title = "Built time to RTC?",
+        .items = {
+            { .label = "Cancel", .has_submenu = false, .on_btn = menu_cancel_on_btn },
+            { .label = "Confirm", .has_submenu = false, .on_btn = menu_set_time_on_btn }
+        },
+        .item_count = 2
     },
     {
         .title = "Format SD Card?",

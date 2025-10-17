@@ -33,20 +33,22 @@ static void update_sensor_buffer(bmp280_t *bmp280_dev, d6fph_t *d6fph_dev)
     // --- Read all sensor values first ---
     float temperature_c = 0.0f;
     long pressure_pa = 0;
-    float diff_pressure_pa = NAN;
+    float diff_pressure_pa = 0.0f;
 
     if (xSemaphoreTake(g_i2c_bus_mutex, pdMS_TO_TICKS(1000)) == pdTRUE)
     {
         int32_t uncomp_temp = bmp280_read_raw_temp(bmp280_dev);
         temperature_c = bmp280_compensate_temperature(bmp280_dev, uncomp_temp);
 
+        ESP_LOGI(TAG, "Raw temp: %ld, Compensated: %.2fC", uncomp_temp, temperature_c);
+
         int32_t uncomp_press = bmp280_read_raw_pressure(bmp280_dev);
         pressure_pa = bmp280_compensate_pressure(bmp280_dev, uncomp_press);
 
-        if (d6fph_dev)
+     /*   if (d6fph_dev)
         {
             d6fph_read_pressure(d6fph_dev, &diff_pressure_pa);
-        }
+        }*/
         xSemaphoreGive(g_i2c_bus_mutex);
     }
     else
@@ -113,6 +115,31 @@ void datalogger_task(void *pvParameters)
                     g_sensor_buffer.datalogger_status = DATA_LOGGER_RUNNING;
                     xSemaphoreGive(g_sensor_buffer_mutex);
                 }
+                // After resuming (especially after sleep), perform an initial read
+                // to ensure the sensor has fresh data and is fully awake. This "primes"
+                // the sensor before the next timed read occurs.
+                ESP_LOGI(TAG, "Performing warm-up read after resuming.");
+                float temp;
+                long press;
+                if (xSemaphoreTake(g_i2c_bus_mutex, portMAX_DELAY))
+                {
+                    // Use the new blocking function to guarantee a fresh reading
+                    esp_err_t force_read_err = bmp280_force_read(bmp280_dev, &temp, &press);
+                    xSemaphoreGive(g_i2c_bus_mutex);
+
+                    if (force_read_err == ESP_OK) {
+                        // Now update the global buffer with this guaranteed fresh data
+                        if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY)) {
+                            g_sensor_buffer.temperature_c = temp;
+                            g_sensor_buffer.pressure_pa = press;
+                            g_sensor_buffer.timestamp = time(NULL);
+                            // Also update battery stats here
+                            g_sensor_buffer.battery_voltage = battery_reader_get_voltage();
+                            g_sensor_buffer.battery_percentage = battery_reader_get_percentage();
+                            xSemaphoreGive(g_sensor_buffer_mutex);
+                        }
+                    }
+                }
             }
         }
 
@@ -140,7 +167,7 @@ void datalogger_task(void *pvParameters)
                 strftime(local_time_str, sizeof(local_time_str), "%Y-%m-%d %H:%M:%S %Z", &local_tm);
 
                 // Log to console
-                ESP_LOGI(TAG, "TS: %s, Temp: %.2fC, Press: %ldPa, Batt: %d%% (%.2fV), Charging: %d, WriteSD: %d", local_time_str, local_buffer.temperature_c, local_buffer.pressure_pa, local_buffer.battery_percentage, local_buffer.battery_voltage, local_buffer.battery_externally_powered, local_buffer.writeStatus);
+                ESP_LOGI(TAG, "TS: %s, Temp: %.2fC, Press: %ldPa, Diff: %.2fPa Batt: %d%% (%.2fV), Charging: %d, WriteSD: %d", local_time_str, local_buffer.temperature_c, local_buffer.pressure_pa,local_buffer.diff_pressure_pa,local_buffer.battery_percentage, local_buffer.battery_voltage, local_buffer.battery_externally_powered, local_buffer.writeStatus);
                 
                 // Format the data into a CSV string
                 char csv_line[200];
