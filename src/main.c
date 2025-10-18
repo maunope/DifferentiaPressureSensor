@@ -171,7 +171,8 @@ static void handle_set_rtc_to_build_time(void)
  */
 static void oled_power_off(void)
 {
-    if (eTaskGetState(g_uiRender_task_handle) != eSuspended)
+    // Only act if the UI task exists and is not already suspended.
+    if (g_uiRender_task_handle != NULL && eTaskGetState(g_uiRender_task_handle) != eSuspended)
     {
         ESP_LOGI(TAG, "Powering off OLED.");
         uiRender_send_event(UI_EVENT_PREPARE_SLEEP, NULL, 0);
@@ -191,7 +192,8 @@ static void oled_power_off(void)
  */
 static void oled_power_on(void)
 {
-    if (eTaskGetState(g_uiRender_task_handle) == eSuspended)
+    // Only act if the UI task exists and is currently suspended.
+    if (g_uiRender_task_handle != NULL && eTaskGetState(g_uiRender_task_handle) == eSuspended)
     {
         ESP_LOGI(TAG, "Powering on OLED.");
         gpio_set_level(OLED_POWER_PIN, 1);
@@ -274,12 +276,7 @@ void main_task(void *pvParameters)
 {
     ESP_LOGI(TAG, "Deep sleep configured. Inactivity timeout: %lums, Sleep duration: %llums", (unsigned long)g_cfg->inactivity_timeout_ms, g_cfg->sleep_duration_ms);
     time_t last_processed_write_ts = 0;
-
-    // On a timer-based wakeup, the UI task is not created. We need to handle this.
     bool is_ui_suspended = (g_uiRender_task_handle == NULL);
-    if (!is_ui_suspended) {
-        is_ui_suspended = (eTaskGetState(g_uiRender_task_handle) == eSuspended);
-    }
 
     while (1)
     {
@@ -314,8 +311,11 @@ void main_task(void *pvParameters)
                 break;
             case APP_CMD_ACTIVITY_DETECTED:
                 last_activity_ms = esp_timer_get_time() / 1000;
-                oled_power_on();
-                is_ui_suspended = false;
+                if (g_uiRender_task_handle != NULL) {
+                    // Only power on the OLED and change state if the UI task actually exists.
+                    oled_power_on();
+                    is_ui_suspended = false;
+                }
                 break;
             case APP_CMD_REFRESH_SENSOR_DATA:
                 // ESP_LOGI(TAG, "Received command to refresh sensor data, forwarding to datalogger.");
@@ -336,6 +336,11 @@ void main_task(void *pvParameters)
         uint64_t current_time_ms = esp_timer_get_time() / 1000ULL;
         bool ui_is_inactive = (current_time_ms - last_activity_ms > g_cfg->inactivity_timeout_ms);
 
+        // Update the UI suspended state
+        if (g_uiRender_task_handle != NULL && !is_ui_suspended) {
+            is_ui_suspended = (eTaskGetState(g_uiRender_task_handle) == eSuspended);
+        }
+
         // Check if a new data entry has been successfully written to the SD card.
         time_t current_write_ts = 0;
         if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)))
@@ -346,10 +351,11 @@ void main_task(void *pvParameters)
 
         // --- USB Connection Logic ---
         bool is_externally_powered = battery_is_externally_powered();
+
         if (is_externally_powered && !is_usb_connected_state)
         {
-            // USB was just connected
-            ESP_LOGI(TAG, "USB connected. Re-initializing for MSC.");
+            // USB was just connected (or was connected at boot)
+            ESP_LOGI(TAG, "USB power detected. Initializing for MSC.");
             // De-init SD card first to release resources
             spi_sdcard_deinit();
             // Now, do a full init which includes TinyUSB
@@ -374,14 +380,13 @@ void main_task(void *pvParameters)
         // 1. The UI has been inactive for the timeout period.
         // 2. EITHER a new data log has occurred OR a self-wakeup timeout has been reached
         //    (to ensure the device sleeps even if SD card writes are failing).
-        bool new_write_occurred = (current_write_ts > 0 && current_write_ts > last_processed_write_ts);
-        // If the UI is inactive, not in the middle of waking up, and a new log has been written (or a timeout occurred),
-        // then initiate the sleep sequence.
-        if (ui_is_inactive && new_write_occurred)
+        bool new_write_occurred_since_last_sleep_check = (current_write_ts > 0 && current_write_ts > last_processed_write_ts);
+
+        // --- Deep Sleep Logic ---
+        // Conditions: UI must be inactive AND suspended, and a new log must have been written.
+        if (is_ui_suspended && new_write_occurred_since_last_sleep_check)
         {
             ESP_LOGI(TAG, "UI inactive and new data log detected. Initiating sleep.");
-
-            
             last_processed_write_ts = current_write_ts; // Mark this write as processed
 
             // --- Step 1: Prepare UI and Peripherals for Sleep ---
@@ -431,11 +436,10 @@ void main_task(void *pvParameters)
 
             go_to_deep_sleep();
         }
-        else if (ui_is_inactive && eTaskGetState(g_uiRender_task_handle) != eSuspended)
+        // --- OLED Power-Off Logic ---
+        // If UI is inactive but the screen is still on, turn it off.
+        else if (g_uiRender_task_handle != NULL && ui_is_inactive && !is_ui_suspended)
         {   
-            is_ui_suspended = true;
-            uiRender_send_event(UI_EVENT_PREPARE_SLEEP, NULL, 0);
-            vTaskDelay(pdMS_TO_TICKS(300)); // Give UI time to draw sleep message
             // UI timeout occurred, but no new write yet. Just turn off the screen.            
             oled_power_off();
         }
@@ -541,7 +545,10 @@ void app_main(void)
     }
 
     // --- Step 3: Initialize SD card and Configuration ---
-    spi_sdcard_full_init();
+    // Initialize SD card without USB first. The main_task will handle
+    // full USB initialization if external power is detected.
+    spi_sdcard_init_sd_only();
+    is_usb_connected_state = battery_is_externally_powered();
 
     config_init();
     const char* config_path = "/sdcard/config.ini";
