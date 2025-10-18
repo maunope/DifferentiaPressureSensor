@@ -37,6 +37,12 @@ typedef struct {
 extern sensor_buffer_t g_sensor_buffer;
 extern SemaphoreHandle_t g_sensor_buffer_mutex;
 extern SemaphoreHandle_t g_i2c_bus_mutex;
+extern QueueHandle_t g_datalogger_cmd_queue;
+
+// Event group to signal initialization completion
+extern EventGroupHandle_t g_init_event_group;
+#define INIT_DONE_BIT BIT0
+
 
 // --- Main app command queue ---
 typedef enum {

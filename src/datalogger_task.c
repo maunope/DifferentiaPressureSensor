@@ -33,9 +33,9 @@ static void update_sensor_buffer(bmp280_t *bmp280_dev, d6fph_t *d6fph_dev)
     ESP_LOGD(TAG, "Updating sensor buffer...");
 
     // --- Read all sensor values first ---
-    float temperature_c = 0.0f;
-    long pressure_pa = 0;
-    float diff_pressure_pa = 0.0f;
+    float temperature_c = NAN;
+    long pressure_pa = 0; // Use 0 as the sentinel for an invalid integer reading
+    float diff_pressure_pa = NAN;
 
     if (xSemaphoreTake(g_i2c_bus_mutex, pdMS_TO_TICKS(1000)) == pdTRUE)
     {
@@ -47,10 +47,14 @@ static void update_sensor_buffer(bmp280_t *bmp280_dev, d6fph_t *d6fph_dev)
         int32_t uncomp_press = bmp280_read_raw_pressure(bmp280_dev);
         pressure_pa = bmp280_compensate_pressure(bmp280_dev, uncomp_press);
 
-     /*   if (d6fph_dev)
+        if (d6fph_dev && d6fph_dev->is_initialized)
         {
-            d6fph_read_pressure(d6fph_dev, &diff_pressure_pa);
-        }*/
+            if (d6fph_read_pressure(d6fph_dev, &diff_pressure_pa) != ESP_OK) {
+                diff_pressure_pa = NAN; // Explicitly set to NAN on failure
+            }
+        } else {
+            diff_pressure_pa = NAN;
+        }
         xSemaphoreGive(g_i2c_bus_mutex);
     }
     else
@@ -85,18 +89,24 @@ void datalogger_task(void *pvParameters)
     ESP_LOGI(TAG, "Datalogger task started with log interval: %lu ms", (unsigned long)LOG_INTERVAL_MS);
     static bool is_paused = false;
 
+    // Wait until the main app signals that all initialization is complete.
+    ESP_LOGI(TAG, "Waiting for initialization to complete...");
+    xEventGroupWaitBits(g_init_event_group, INIT_DONE_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
+
+    bool refresh_requested = false;
+
     while (1)
     {
         datalogger_command_t cmd;
 
-        // Wait for a command or for 1 second to pass
-        if (xQueueReceive(g_datalogger_cmd_queue, &cmd, pdMS_TO_TICKS(1000)) == pdPASS)
+        // Check for a command without blocking. The main timing is handled by the vTaskDelay at the end.
+        if (xQueueReceive(g_datalogger_cmd_queue, &cmd, 0) == pdPASS)
         {
             if (cmd == DATALOGGER_CMD_FORCE_REFRESH)
             {
-                ESP_LOGI(TAG, "Forcing sensor data refresh due to command.");
-                update_sensor_buffer(bmp280_dev, params->d6fph_dev);
-                continue;
+                // UI requested a refresh. Just update the buffer, don't write to SD.
+                ESP_LOGD(TAG, "UI refresh requested.");
+                refresh_requested = true;
             }
             else if (cmd == DATALOGGER_CMD_PAUSE_WRITES)
             {
@@ -155,7 +165,8 @@ void datalogger_task(void *pvParameters)
 
         if (current_time_ms - last_write_ms >= LOG_INTERVAL_MS && !is_paused)
         {
-            // Update all sensor values in the shared buffer
+            // It's time for a scheduled log. This takes priority.
+            // Update sensors and write to SD card.
             update_sensor_buffer(bmp280_dev, params->d6fph_dev);
 
             // Create a local copy of the buffer for logging and writing to SD
@@ -198,7 +209,15 @@ void datalogger_task(void *pvParameters)
                 xSemaphoreGive(g_sensor_buffer_mutex);
             }
         }
+        else if (refresh_requested)
+        {
+            // A UI refresh was requested and a timed log is not due.
+            // Just update the sensor buffer without writing to SD.
+            update_sensor_buffer(bmp280_dev, params->d6fph_dev);
+            refresh_requested = false; // Reset the flag
+        }
 
-        vTaskDelay(pdMS_TO_TICKS(10));
+        // This is the main delay for the task loop.
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }

@@ -24,6 +24,7 @@ typedef struct
     i2c_port_t i2c_port;
     uint8_t i2c_addr;
     d6fph_sensor_model_t model;
+    bool is_initialized;
 
     // Model-specific calculation values
     float range;

@@ -115,32 +115,22 @@ int convert_gmt_to_cet(time_t gmt_timestamp, struct tm *timeinfo) {
         return -1;
     }
 
-    // 1. Applica l'offset di base (CET = UTC + 1 ora)
-    time_t local_time_cet = gmt_timestamp + CET_OFFSET_SECONDS;
+    // Create a tm struct representing the input UTC time
+    struct tm utc_tm;
+    gmtime_r(&gmt_timestamp, &utc_tm);
 
-    // 2. Converti il tempo base CET in una struct tm temporanea (senza DST)
-    // Usiamo gmtime_r per la sua thread-safety
-    struct tm temp_tm;
-    gmtime_r(&local_time_cet, &temp_tm);
-    
-    // 3. Verifica se la DST (CEST) è attiva in quel momento
-    bool is_dst_active = is_cest_active(&temp_tm);
+    // Check if DST is active for that UTC time
+    bool is_dst_active = is_cest_active(&utc_tm);
 
+    // Manually apply the correct offset to get the final local timestamp
+    time_t local_timestamp = gmt_timestamp + CET_OFFSET_SECONDS;
     if (is_dst_active) {
-        // 4. Se DST è attiva, aggiungi l'ora extra (CEST = UTC + 2 ore)
-        local_time_cet += DST_OFFSET_SECONDS;
-        temp_tm.tm_isdst = 1; // Mark as DST
-    } else {
-        temp_tm.tm_isdst = 0; // Mark as non-DST
+        local_timestamp += DST_OFFSET_SECONDS;
     }
 
-    // 5. Normalizza la struct tm finale
-    // Riconverti il time_t finale (in CET/CEST) in struct tm
-    gmtime_r(&local_time_cet, timeinfo);
-    
-    // tm_isdst non viene popolato automaticamente da gmtime_r;
-    // lo impostiamo in base al nostro calcolo:
-    timeinfo->tm_isdst = temp_tm.tm_isdst; 
+    // Convert the final, correct local timestamp into the tm struct for display
+    gmtime_r(&local_timestamp, timeinfo);
+    timeinfo->tm_isdst = is_dst_active; // Manually set the DST flag
 
     return 0;
 }

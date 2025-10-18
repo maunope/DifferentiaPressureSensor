@@ -63,17 +63,8 @@
 #define BUTTON_DEBOUNCE_TIME_MS 50
 
 // --- Battery ADC Configuration ---
-#define BATTERY_PWR_PIN GPIO_NUM_5
+#define BATTERY_PWR_PIN GPIO_NUM_5 // This pin is used to enable the battery voltage divider
 #define BATTERY_ADC_PIN GPIO_NUM_6
-
-// --- Global buffer and mutex definition ---
-sensor_buffer_t g_sensor_buffer = {.writeStatus = WRITE_STATUS_UNKNOWN};
-SemaphoreHandle_t g_sensor_buffer_mutex = NULL;
-QueueHandle_t g_app_cmd_queue = NULL;
-SemaphoreHandle_t g_command_status_mutex = NULL;
-SemaphoreHandle_t g_i2c_bus_mutex = NULL;
-volatile command_status_t g_command_status = CMD_STATUS_IDLE;
-QueueHandle_t g_datalogger_cmd_queue = NULL;
 
 // --- RTC Memory for State Persistence ---
 // These variables retain their values across deep sleep cycles.
@@ -483,6 +474,9 @@ void app_main(void)
     // Disable all wakeup sources after waking up to prevent immediate re-triggering.
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
 
+    // Create the initialization event group
+    g_init_event_group = xEventGroupCreate();
+
     // --- Step 1: Initialize GPIO for power control ---
     gpio_config_t oled_pwr_pin_cfg = {
         .pin_bit_mask = (1ULL << OLED_POWER_PIN),
@@ -682,17 +676,24 @@ void app_main(void)
     rotaryencoder_start_task();
 
     // Prepare parameters for the datalogger task
-    datalogger_task_params_t datalogger_params = {
-        .bmp280_dev = &g_bmp280,
-        .d6fph_dev = &g_d6fph, // This member might not exist if d6fph is commented out, but we'll keep the line for completeness
-        .log_interval_ms = g_cfg->log_interval_ms
-    };
+    // Allocate parameters on the heap so they persist after app_main exits.
+    datalogger_task_params_t *datalogger_params = malloc(sizeof(datalogger_task_params_t));
+    if (datalogger_params == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate memory for datalogger params!");
+        return; // Or handle error appropriately
+    }
+    datalogger_params->bmp280_dev = &g_bmp280;
+    datalogger_params->d6fph_dev = &g_d6fph;
+    datalogger_params->log_interval_ms = g_cfg->log_interval_ms;
 
     if (cause != ESP_SLEEP_WAKEUP_TIMER) {
         xTaskCreate(uiRender_task, "uiRender", 4096, NULL, 5, &g_uiRender_task_handle);
     } else {
         g_uiRender_task_handle = NULL; // Ensure handle is null if task is not created
     }
-    xTaskCreate(datalogger_task, "datalogger", 4096, &datalogger_params, 5, NULL); // Pass params struct
+    xTaskCreate(datalogger_task, "datalogger", 4096, datalogger_params, 5, NULL); // Pass pointer to heap-allocated struct
     xTaskCreate(main_task, "main_task", 4096, NULL, 6, NULL);             // Main command processing task at priority 6
+
+    // Signal that all initialization is done
+    xEventGroupSetBits(g_init_event_group, INIT_DONE_BIT);
 }

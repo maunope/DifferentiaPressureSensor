@@ -180,10 +180,7 @@ esp_err_t ds3231_set_time_to_build_time(ds3231_t *rtc)
 
     // Convert local build time to a UTC timestamp, then back to a UTC-based struct tm
     time_t build_ts = mktime(&build_time);
-    struct tm utc_build_time;
-    gmtime_r(&build_ts, &utc_build_time);
-
-    if (ds3231_set_time(rtc, &utc_build_time) != ESP_OK) {
+    if (ds3231_set_time_t(rtc, build_ts) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to set RTC time.");
         // Restore the system timezone to UTC before returning
         setenv("TZ", "UTC0", 1);

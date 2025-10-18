@@ -12,6 +12,7 @@
 #include "time_utils.h"
 #include "../buffers.h"
 #include "../../src/config_params.h"
+#include <math.h>
 
 static const char *TAG = "ui_render";
 
@@ -247,9 +248,25 @@ void render_sensor_callback(void)
 
         // new_lines[1] is intentionally left blank
         snprintf(new_lines[0], sizeof(new_lines[0]), "Sensors Data");
-        snprintf(new_lines[2], sizeof(new_lines[2]), "%s", time_str);
-        snprintf(new_lines[3], sizeof(new_lines[3]), "T: %.2f C", local_buffer.temperature_c);
-        snprintf(new_lines[4], sizeof(new_lines[4]), "P: %ld Pa", local_buffer.pressure_pa);
+        snprintf(new_lines[2], sizeof(new_lines[2]), "%s", local_buffer.timestamp > 0 ? time_str : "Time not set");
+
+        if (isnan(local_buffer.temperature_c)) {
+            snprintf(new_lines[3], sizeof(new_lines[3]), "T: N/A");
+        } else {
+            snprintf(new_lines[3], sizeof(new_lines[3]), "T: %.2f C", local_buffer.temperature_c);
+        }
+
+        if (local_buffer.pressure_pa == 0) {
+            snprintf(new_lines[4], sizeof(new_lines[4]), "P: N/A");
+        } else {
+            snprintf(new_lines[4], sizeof(new_lines[4]), "P: %.0f Pa", (float)local_buffer.pressure_pa);
+        }
+
+        if (isnan(local_buffer.diff_pressure_pa)) {
+            snprintf(new_lines[5], sizeof(new_lines[5]), "DP: N/A");
+        } else {
+            snprintf(new_lines[5], sizeof(new_lines[5]), "DP: %.2f Pa", local_buffer.diff_pressure_pa);
+        }
 
         char write_status_str[4];
         if (local_buffer.writeStatus == WRITE_STATUS_OK)
@@ -264,9 +281,13 @@ void render_sensor_callback(void)
         { // WRITE_STATUS_UNKNOWN
             strcpy(write_status_str, "?");
         }
-        snprintf(new_lines[5], sizeof(new_lines[5]), "Last file write: %s", write_status_str);
+        // snprintf(new_lines[5], sizeof(new_lines[5]), "Last file write: %s", write_status_str);
 
-        snprintf(new_lines[6], sizeof(new_lines[6]), "Batt: %.2fV-%d%% %s", local_buffer.battery_voltage, local_buffer.battery_percentage, local_buffer.battery_externally_powered == 1 ? "(C)" : "");
+        if (isnan(local_buffer.battery_voltage)) {
+            snprintf(new_lines[6], sizeof(new_lines[6]), "Batt: N/A");
+        } else {
+            snprintf(new_lines[6], sizeof(new_lines[6]), "Batt: %.2fV-%d%% %s", local_buffer.battery_voltage, local_buffer.battery_percentage, local_buffer.battery_externally_powered == 1 ? "(C)" : "");
+        }
     }
     else
     {
@@ -600,35 +621,6 @@ void uiRender_task(void *pvParameters)
         }
         else if (s_current_page == &sensor_page)
         {
-            uint64_t current_time_ms = esp_timer_get_time() / 1000;
-            if (current_time_ms - last_sensor_refresh_ms >= sensor_refresh_interval_ms)
-            {
-                last_sensor_refresh_ms = current_time_ms;
-                if (g_app_cmd_queue != NULL)
-                {
-                    app_command_t cmd = APP_CMD_REFRESH_SENSOR_DATA;
-                    xQueueSend(g_app_cmd_queue, &cmd, 0);
-                }
-            }
-            if (s_current_page->render)
-            {
-                s_current_page->render();
-            }
-        }
-        else if (s_current_page == &fs_stats_page)
-        {
-            uint64_t current_time_ms = esp_timer_get_time() / 1000;
-            if (current_time_ms - last_fs_stats_refresh_ms >= fs_stats_refresh_interval_ms)
-            {
-                last_fs_stats_refresh_ms = current_time_ms;
-                if (g_app_cmd_queue != NULL)
-                {
-                    app_command_t cmd_file_count = APP_CMD_GET_SD_FILE_COUNT;
-                    xQueueSend(g_app_cmd_queue, &cmd_file_count, 0);
-                    app_command_t cmd_free_space = APP_CMD_GET_SD_FREE_SPACE;
-                    xQueueSend(g_app_cmd_queue, &cmd_free_space, 0);
-                }
-            }
             if (s_current_page->render)
             {
                 s_current_page->render();
@@ -651,6 +643,7 @@ void menu_about_on_btn(void)
 void menu_sensor_on_btn(void)
 {
     s_menu_mode = false;
+    // Force a refresh when entering the page to get immediate data.
     if (g_app_cmd_queue != NULL)
     {
         app_command_t cmd = APP_CMD_REFRESH_SENSOR_DATA;
@@ -660,7 +653,6 @@ void menu_sensor_on_btn(void)
     {
         ESP_LOGE(TAG, "App command queue not initialized!");
     }
-
     s_current_page = &sensor_page;
 }
 
@@ -669,17 +661,7 @@ void menu_fs_stats_on_btn(void)
     // Always trigger a new read when entering the stats page
     if (g_app_cmd_queue != NULL)
     {
-        // Set buffer to "loading" state
-        if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY))
-        {
-            g_sensor_buffer.sd_card_file_count = -2; // -2 indicates loading for file count
-            g_sensor_buffer.sd_card_free_bytes = -2; // -2 indicates loading for free space
-            xSemaphoreGive(g_sensor_buffer_mutex);
-        }
-        // Send commands to get both stats
-        app_command_t cmd_file_count = APP_CMD_GET_SD_FILE_COUNT;
-        xQueueSend(g_app_cmd_queue, &cmd_file_count, 0);
-
+        // Set buffn  FC
         app_command_t cmd_free_space = APP_CMD_GET_SD_FREE_SPACE;
         xQueueSend(g_app_cmd_queue, &cmd_free_space, 0);
     }

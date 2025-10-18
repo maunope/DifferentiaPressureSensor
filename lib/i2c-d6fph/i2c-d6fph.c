@@ -90,6 +90,7 @@ esp_err_t d6fph_init(d6fph_t *dev, i2c_port_t port, uint8_t i2c_addr, d6fph_sens
     dev->i2c_port = port;
     dev->i2c_addr = i2c_addr;
     dev->model = model;
+    dev->is_initialized = false; // Default to not initialized
 
     switch (model)
     {
@@ -117,17 +118,25 @@ esp_err_t d6fph_init(d6fph_t *dev, i2c_port_t port, uint8_t i2c_addr, d6fph_sens
     if (ret != ESP_OK)
     {
         ESP_LOGE(TAG, "D6F-PH initialization failed: %s", esp_err_to_name(ret));
+        dev->is_initialized = false;
         return ret;
     }
 
     ESP_LOGI(TAG, "D6F-PH sensor initialized successfully at address 0x%02X", i2c_addr);
+    dev->is_initialized = true;
     return ESP_OK;
 }
 
 esp_err_t d6fph_read_pressure(d6fph_t *dev, float *pressure)
 {
+    if (!dev || !dev->is_initialized) {
+        *pressure = NAN;
+        return ESP_ERR_INVALID_STATE;
+    }
+
     uint16_t raw_value;
     esp_err_t ret = d6fph_trigger_and_read(dev, &raw_value);
+
     if (ret != ESP_OK)
     {
         *pressure = NAN;
