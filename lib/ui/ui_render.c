@@ -281,7 +281,7 @@ void render_sensor_callback(void)
         { // WRITE_STATUS_UNKNOWN
             strcpy(write_status_str, "?");
         }
-        // snprintf(new_lines[5], sizeof(new_lines[5]), "Last file write: %s", write_status_str);
+        snprintf(new_lines[7], sizeof(new_lines[7]), "Last write: %s", write_status_str);
 
         if (isnan(local_buffer.battery_voltage)) {
             snprintf(new_lines[6], sizeof(new_lines[6]), "Batt: N/A");
@@ -598,6 +598,18 @@ void uiRender_task(void *pvParameters)
                 last_value_count = msg.value_count;
             }
         }
+
+        // --- Periodic Refresh Logic ---
+        uint64_t current_time_ms = esp_timer_get_time() / 1000;
+        if (!s_menu_mode && s_current_page == &sensor_page && (current_time_ms - last_sensor_refresh_ms > sensor_refresh_interval_ms))
+        {
+            if (g_app_cmd_queue != NULL)
+            {
+                app_command_t cmd = APP_CMD_REFRESH_SENSOR_DATA;
+                xQueueSend(g_app_cmd_queue, &cmd, 0);
+            }
+            last_sensor_refresh_ms = current_time_ms;
+        }
         // Always call the correct render callback
         if (s_sleeping_mode)
         {
@@ -661,7 +673,14 @@ void menu_fs_stats_on_btn(void)
     // Always trigger a new read when entering the stats page
     if (g_app_cmd_queue != NULL)
     {
-        // Set buffn  FC
+        // Set buffer to "loading" state before sending commands
+        if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY)) {
+            g_sensor_buffer.sd_card_file_count = -2; // -2 indicates loading
+            g_sensor_buffer.sd_card_free_bytes = -2; // -2 indicates loading
+            xSemaphoreGive(g_sensor_buffer_mutex);
+        }
+        app_command_t cmd_file_count = APP_CMD_GET_SD_FILE_COUNT;
+        xQueueSend(g_app_cmd_queue, &cmd_file_count, 0);
         app_command_t cmd_free_space = APP_CMD_GET_SD_FREE_SPACE;
         xQueueSend(g_app_cmd_queue, &cmd_free_space, 0);
     }
@@ -737,8 +756,6 @@ void page_fs_stats_on_btn(void)
     s_current_page = NULL;
 }
 
-/* --- Config Page Callbacks --- */
-
 void menu_config_on_btn(void)
 {
     s_menu_mode = false;
@@ -749,21 +766,27 @@ void menu_config_on_btn(void)
 
 void page_config_on_btn(void)
 {
+    s_menu_mode = true;
+    s_current_page = NULL;
+}
+
+/* --- Config Page Callbacks --- */
+void page_config_on_cw(void) { 
     int max_pages = (s_num_config_items + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE;
     s_config_current_page_index++;
     if (s_config_current_page_index >= max_pages)
     {
-        s_menu_mode = true;
-        s_current_page = NULL;
-    } else {
-        // Still on the config page, just need to re-render
-        s_current_page = &config_page;
+        s_config_current_page_index = 0; // Wrap around to the first page
     }
 }
-
-/* --- Config Page Callbacks --- */
-void page_config_on_cw(void) { /* Do nothing */ }
-void page_config_on_ccw(void) { /* Do nothing */ }
+void page_config_on_ccw(void) { 
+    s_config_current_page_index--;
+    if (s_config_current_page_index < 0)
+    {
+        int max_pages = (s_num_config_items + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE;
+        s_config_current_page_index = max_pages - 1; // Wrap around to the last page
+    }
+}
 
 static void ui_config_page_prepare_data(void)
 {

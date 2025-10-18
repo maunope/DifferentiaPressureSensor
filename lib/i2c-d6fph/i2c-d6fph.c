@@ -46,8 +46,7 @@ static esp_err_t d6fph_trigger_and_read(d6fph_t *dev, uint16_t *raw_value)
     const uint8_t trigger_cmd[] = {D6FPH_CMD_TRIGGER_READ, D6FPH_CMD_TRIGGER_PARAM_H, D6FPH_CMD_TRIGGER_PARAM_L};
     ret = d6fph_write_cmd(dev, trigger_cmd, sizeof(trigger_cmd));
     if (ret != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Failed to send trigger command: %s", esp_err_to_name(ret));
+    { 
         return ret;
     }
 
@@ -58,8 +57,7 @@ static esp_err_t d6fph_trigger_and_read(d6fph_t *dev, uint16_t *raw_value)
     const uint8_t read_cmd[] = {D6FPH_CMD_READ_RESULT, D6FPH_CMD_READ_PARAM_H, D6FPH_CMD_READ_PARAM_L};
     ret = d6fph_write_cmd(dev, read_cmd, sizeof(read_cmd));
     if (ret != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Failed to send read command: %s", esp_err_to_name(ret));
+    { 
         return ret;
     }
 
@@ -67,8 +65,7 @@ static esp_err_t d6fph_trigger_and_read(d6fph_t *dev, uint16_t *raw_value)
     uint8_t read_buffer[3];
     ret = d6fph_read_data(dev, read_buffer, sizeof(read_buffer));
     if (ret != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Failed to read result data: %s", esp_err_to_name(ret));
+    { 
         return ret;
     }
 

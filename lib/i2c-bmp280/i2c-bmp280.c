@@ -38,11 +38,7 @@ static esp_err_t bmp280_i2c_write_byte(const bmp280_t *dev, uint8_t reg_addr, ui
     i2c_master_write_byte(cmd, data, true);
     i2c_master_stop(cmd);
     esp_err_t ret = i2c_master_cmd_begin(dev->i2c_port, cmd, I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
-    i2c_cmd_link_delete(cmd);
-    if (ret != ESP_OK)
-    {
-        ESP_LOGE(TAG, "BMP280 I2C write byte failed: %s", esp_err_to_name(ret));
-    }
+    i2c_cmd_link_delete(cmd); 
     return ret;
 }
 
@@ -70,11 +66,7 @@ static esp_err_t bmp280_i2c_read_bytes(const bmp280_t *dev, uint8_t reg_addr, ui
     i2c_master_read_byte(cmd, data + len - 1, I2C_MASTER_NACK);
     i2c_master_stop(cmd);
     esp_err_t ret = i2c_master_cmd_begin(dev->i2c_port, cmd, I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
-    i2c_cmd_link_delete(cmd);
-    if (ret != ESP_OK)
-    {
-        ESP_LOGE(TAG, "BMP280 I2C read bytes failed: %s", esp_err_to_name(ret));
-    }
+    i2c_cmd_link_delete(cmd); 
     return ret;
 }
 
@@ -263,11 +255,21 @@ esp_err_t bmp280_force_read(bmp280_t *dev, float *temperature, long *pressure)
 {
     if (!dev) return ESP_ERR_INVALID_ARG;
 
+    const int MAX_RETRIES = 3;
+    const int RETRY_DELAY_MS = 50;
+
     // 1. Read the current ctrl_meas register
     uint8_t ctrl_meas;
-    esp_err_t err = bmp280_i2c_read_bytes(dev, BMP280_CTRL_MEAS_REG, &ctrl_meas, 1);
+    esp_err_t err;
+    for (int i = 0; i < MAX_RETRIES; i++) {
+        err = bmp280_i2c_read_bytes(dev, BMP280_CTRL_MEAS_REG, &ctrl_meas, 1);
+        if (err == ESP_OK) break;
+        vTaskDelay(pdMS_TO_TICKS(RETRY_DELAY_MS));
+    }
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to read CTRL_MEAS for forced read.");
+        // This log is commented out as per your request to be less verbose.
+        // The calling function in datalogger_task will handle the final error logging.
+        // ESP_LOGE(TAG, "Failed to read CTRL_MEAS for forced read.");
         return err;
     }
 

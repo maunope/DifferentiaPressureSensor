@@ -30,6 +30,8 @@ static const char *TAG = "DataloggerTask";
  */
 static void update_sensor_buffer(bmp280_t *bmp280_dev, d6fph_t *d6fph_dev)
 {
+    const int MAX_I2C_RETRIES = 3;
+    const int RETRY_DELAY_MS = 50;
     ESP_LOGD(TAG, "Updating sensor buffer...");
 
     // --- Read all sensor values first ---
@@ -37,24 +39,32 @@ static void update_sensor_buffer(bmp280_t *bmp280_dev, d6fph_t *d6fph_dev)
     long pressure_pa = 0; // Use 0 as the sentinel for an invalid integer reading
     float diff_pressure_pa = NAN;
 
-    if (xSemaphoreTake(g_i2c_bus_mutex, pdMS_TO_TICKS(1000)) == pdTRUE)
+    if (xSemaphoreTake(g_i2c_bus_mutex, pdMS_TO_TICKS(2000)) == pdTRUE)
     {
-        int32_t uncomp_temp = bmp280_read_raw_temp(bmp280_dev);
-        temperature_c = bmp280_compensate_temperature(bmp280_dev, uncomp_temp);
+        esp_err_t d6fph_err = ESP_FAIL;
 
-        ESP_LOGI(TAG, "Raw temp: %ld, Compensated: %.2fC", uncomp_temp, temperature_c);
-
-        int32_t uncomp_press = bmp280_read_raw_pressure(bmp280_dev);
-        pressure_pa = bmp280_compensate_pressure(bmp280_dev, uncomp_press);
+        // Use forced mode to ensure sensor is correctly configured for each read.
+        // This is more robust, especially after waking from deep sleep.
+        if (bmp280_force_read(bmp280_dev, &temperature_c, &pressure_pa) != ESP_OK) {
+          //  ESP_LOGE(TAG, "BMP280 force read failed.");
+            temperature_c = NAN;
+            pressure_pa = 0;
+        }
 
         if (d6fph_dev && d6fph_dev->is_initialized)
         {
-            if (d6fph_read_pressure(d6fph_dev, &diff_pressure_pa) != ESP_OK) {
-                diff_pressure_pa = NAN; // Explicitly set to NAN on failure
+            for (int retries = 0; retries < MAX_I2C_RETRIES; retries++) {
+                d6fph_err = d6fph_read_pressure(d6fph_dev, &diff_pressure_pa);
+                if (d6fph_err == ESP_OK) break; // Success, exit retry loop
+                vTaskDelay(pdMS_TO_TICKS(RETRY_DELAY_MS));
             }
-        } else {
+            if (d6fph_err != ESP_OK) {
+                ESP_LOGE(TAG, "D6F-PH read failed after %d attempts.", MAX_I2C_RETRIES);
+            }
+        } else { // d6fph_dev is not initialized
             diff_pressure_pa = NAN;
         }
+
         xSemaphoreGive(g_i2c_bus_mutex);
     }
     else
@@ -129,12 +139,18 @@ void datalogger_task(void *pvParameters)
                 // to ensure the sensor has fresh data and is fully awake. This "primes"
                 // the sensor before the next timed read occurs.
                 ESP_LOGI(TAG, "Performing warm-up read after resuming.");
-                float temp;
-                long press;
+                float temp, diff_press;
+                long press; 
                 if (xSemaphoreTake(g_i2c_bus_mutex, portMAX_DELAY))
                 {
                     // Use the new blocking function to guarantee a fresh reading
                     esp_err_t force_read_err = bmp280_force_read(bmp280_dev, &temp, &press);
+                    if (params->d6fph_dev && params->d6fph_dev->is_initialized) {
+                        // Also read the D6F-PH sensor
+                        d6fph_read_pressure(params->d6fph_dev, &diff_press);
+                    } else {
+                        diff_press = NAN;
+                    }
                     xSemaphoreGive(g_i2c_bus_mutex);
 
                     if (force_read_err == ESP_OK) {
@@ -142,6 +158,7 @@ void datalogger_task(void *pvParameters)
                         if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY)) {
                             g_sensor_buffer.temperature_c = temp;
                             g_sensor_buffer.pressure_pa = press;
+                            g_sensor_buffer.diff_pressure_pa = diff_press;
                             g_sensor_buffer.timestamp = time(NULL);
                             // Also update battery stats here
                             g_sensor_buffer.battery_voltage = battery_reader_get_voltage();
@@ -189,22 +206,33 @@ void datalogger_task(void *pvParameters)
                 snprintf(csv_line, sizeof(csv_line), "%lld,%s,%.2f,%ld,%.2f,%.2f,%d",
                          (long long)local_buffer.timestamp,
                          local_time_str,
-                         local_buffer.temperature_c,
-                         local_buffer.pressure_pa,
-                         local_buffer.diff_pressure_pa,
+                         isnan(local_buffer.temperature_c) ? 0.0f : local_buffer.temperature_c,
+                         local_buffer.pressure_pa, // Already long, 0 is invalid
+                         isnan(local_buffer.diff_pressure_pa) ? 0.0f : local_buffer.diff_pressure_pa,
                          local_buffer.battery_voltage,
                          local_buffer.battery_percentage);
 
                 // Write the formatted string to the SD card
-                esp_err_t write_err = spi_sdcard_write_line(csv_line);
-                
-                // Update the shared buffer with the new status and timestamps
-                g_sensor_buffer.last_write_ms = current_time_ms;
-                g_sensor_buffer.writeStatus = (write_err == ESP_OK) ? WRITE_STATUS_OK : WRITE_STATUS_FAIL;
+                esp_err_t write_err;
+                const int MAX_SD_RETRIES = 3;
+                for (int i = 0; i < MAX_SD_RETRIES; i++) {
+                    write_err = spi_sdcard_write_line(csv_line);
+                    if (write_err == ESP_OK) {
+                        break; // Success
+                    }
+                    ESP_LOGE(TAG, "Failed to write to SD card (attempt %d/%d). Retrying...", i + 1, MAX_SD_RETRIES);
+                    vTaskDelay(pdMS_TO_TICKS(100)); // Wait before retrying
+                }
+
+                // Update the shared buffer with the final status and timestamps
+                g_sensor_buffer.last_write_ms = esp_timer_get_time() / 1000;
                 if (write_err == ESP_OK) {
-                    // Use time(NULL) to get a fresh timestamp for the write event,
-                    // ensuring it's different from the sensor reading timestamp.
-                    g_sensor_buffer.last_successful_write_ts = time(NULL);
+                    g_sensor_buffer.writeStatus = WRITE_STATUS_OK;
+                    g_sensor_buffer.last_successful_write_ts = time(NULL); // Mark successful write
+                    ESP_LOGI(TAG, "Successfully wrote to SD card.");
+                } else {
+                    g_sensor_buffer.writeStatus = WRITE_STATUS_FAIL;
+                    ESP_LOGE(TAG, "Failed to write to SD card after all retries.");
                 }
                 xSemaphoreGive(g_sensor_buffer_mutex);
             }

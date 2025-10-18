@@ -24,6 +24,8 @@ void render_sensor_callback(void);
 void menu_config_on_btn(void);
 void page_config_on_btn(void);
 void render_config_callback(void);
+void page_config_on_cw(void);
+void page_config_on_ccw(void);
 
 void page_fs_stats_render_callback(void);
 
@@ -54,7 +56,7 @@ const ui_menu_page_t ui_menu_tree[] = {
             { .label = "File System", .has_submenu = true, .submenu_page_index = 3, .on_btn = NULL },
             MENU_BACK_ITEM
         },
-        .item_count = 3
+        .item_count = 4
     },
     {
         .title = "Real Time Clock",
@@ -114,8 +116,8 @@ const ui_page_t fs_stats_page = {
 };
 
 const ui_page_t config_page = {
-    .on_cw = NULL, // No action for rotation
-    .on_ccw = NULL,
+    .on_cw = page_config_on_cw,
+    .on_ccw = page_config_on_ccw,
     .on_btn = page_config_on_btn,
     .render = render_config_callback
 };

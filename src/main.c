@@ -242,7 +242,6 @@ static void go_to_deep_sleep(void) {
  *
  * Configures and installs the I2C driver for the main peripheral bus (I2C_NUM_0).
  */
-
 static esp_err_t i2c_master_init(void)
 {
     int i2c_master_port = I2C_MASTER_NUM;
@@ -268,6 +267,7 @@ void main_task(void *pvParameters)
     ESP_LOGI(TAG, "Deep sleep configured. Inactivity timeout: %lums, Sleep duration: %llums", (unsigned long)g_cfg->inactivity_timeout_ms, g_cfg->sleep_duration_ms);
     time_t last_processed_write_ts = 0;
     bool is_ui_suspended = (g_uiRender_task_handle == NULL);
+    uint64_t boot_time_ms = esp_timer_get_time() / 1000ULL;
 
     while (1)
     {
@@ -371,11 +371,20 @@ void main_task(void *pvParameters)
         // 1. The UI has been inactive for the timeout period.
         // 2. EITHER a new data log has occurred OR a self-wakeup timeout has been reached
         //    (to ensure the device sleeps even if SD card writes are failing).
-        bool new_write_occurred_since_last_sleep_check = (current_write_ts > 0 && current_write_ts > last_processed_write_ts);
+        bool can_sleep = false;
+        if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50))) {
+            // Conditions to sleep:
+            // 1. A new write has been successfully completed since the last check.
+            // 2. The UI is suspended.
+            if (g_sensor_buffer.last_successful_write_ts > last_processed_write_ts && is_ui_suspended) {
+                can_sleep = true;
+            }
+            xSemaphoreGive(g_sensor_buffer_mutex);
+        }
 
         // --- Deep Sleep Logic ---
         // Conditions: UI must be inactive AND suspended, and a new log must have been written.
-        if (is_ui_suspended && new_write_occurred_since_last_sleep_check)
+        if (can_sleep)
         {
             ESP_LOGI(TAG, "UI inactive and new data log detected. Initiating sleep.");
             last_processed_write_ts = current_write_ts; // Mark this write as processed
@@ -424,6 +433,9 @@ void main_task(void *pvParameters)
             // Cut power to the main peripheral power rail.
             ESP_LOGI(TAG, "Powering down external devices.");
             gpio_set_level(DEVICES_POWER_PIN, 0);
+
+            uint64_t awake_time_ms = (esp_timer_get_time() / 1000ULL) - boot_time_ms;
+            ESP_LOGI(TAG, "Device was awake for %llu ms.", awake_time_ms);
 
             go_to_deep_sleep();
         }
