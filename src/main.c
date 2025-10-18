@@ -18,7 +18,9 @@
 #include <time.h>
 #include "esp_ota_ops.h"
 #include <sys/time.h>
+#include <sys/stat.h>
 #include "esp_sleep.h"
+#include "esp_sntp.h"
 
 #include "../lib/i2c-bmp280/i2c-bmp280.h" // BMP280 sensor API
 #include "../lib/rotaryencoder/rotaryencoder.h"
@@ -29,7 +31,9 @@
 #include "i2c-ds3231.h"
 #include "../lib/i2c-ds3231/i2c-ds3231.h"
 #include "datalogger_task.h"
+#include "../lib/config-manager/config-manager.h"
 #include "../lib/lipo-battery/lipo-battery.h"
+#include "config_params.h"
 
 // DO NOT use pins 19 and 20, they are used by the flash memory
 // DO NOT use pins 5 and 6, they are used for LiPo battery measurements unless you change the config
@@ -57,14 +61,10 @@
 #define ROTARY_ENCODER_PIN_B GPIO_NUM_42
 #define ROTARY_ENCODER_BUTTON_PIN GPIO_NUM_2
 #define BUTTON_DEBOUNCE_TIME_MS 50
-#define SELF_WAKEUP_TIMEOUT_MS 5000
-#define INACTIVITY_TIMEOUT_MS 30000          // 30 seconds
-#define SLEEP_DURATION_US (60 * 1000 * 1000) // 60  seconds
 
 // --- Battery ADC Configuration ---
 #define BATTERY_PWR_PIN GPIO_NUM_5
 #define BATTERY_ADC_PIN GPIO_NUM_6
-#define BATTERY_VOLTAGE_DIVIDER_RATIO 4.1428f // (470k + 150k) / 150k, then tuned experimentally
 
 // --- Global buffer and mutex definition ---
 sensor_buffer_t g_sensor_buffer = {.writeStatus = WRITE_STATUS_UNKNOWN};
@@ -90,6 +90,7 @@ bmp280_t g_bmp280; // Global BMP280 device handle
 d6fph_t g_d6fph;   // Global D6F-PH device handle
 
 TaskHandle_t g_uiRender_task_handle = NULL;
+const config_params_t* g_cfg = NULL;
 
 static uint64_t last_activity_ms = 0;
 static bool is_usb_connected_state = false;
@@ -219,7 +220,7 @@ static void go_to_deep_sleep(void) {
     // Configure the rotary encoder button pin as the wakeup source.
     // This uses the RTC peripheral, which is required for deep sleep.
     rotaryencoder_enable_wakeup_source();
-    esp_sleep_enable_timer_wakeup(SLEEP_DURATION_US);
+    esp_sleep_enable_timer_wakeup(g_cfg->sleep_duration_ms * 1000);
 
     // IMPORTANT: Ensure the wakeup pin has a pull-up enabled to prevent floating.
     // This is critical to prevent immediate wake-up if the pin is not externally pulled up.
@@ -271,7 +272,7 @@ static esp_err_t i2c_master_init(void)
 
 void main_task(void *pvParameters)
 {
-    ESP_LOGI(TAG, "Deep sleep configured. Inactivity timeout: %dms, Sleep duration: %llus", INACTIVITY_TIMEOUT_MS, SLEEP_DURATION_US / 1000000ULL);
+    ESP_LOGI(TAG, "Deep sleep configured. Inactivity timeout: %lums, Sleep duration: %llums", (unsigned long)g_cfg->inactivity_timeout_ms, g_cfg->sleep_duration_ms);
     time_t last_processed_write_ts = 0;
 
     // On a timer-based wakeup, the UI task is not created. We need to handle this.
@@ -332,8 +333,8 @@ void main_task(void *pvParameters)
 
         // --- Main Sleep/Wake Logic ---
         // --- Power Saving & UI Inactivity Logic ---
-        uint64_t current_time_ms = esp_timer_get_time() / 1000ULL;        
-        bool ui_is_inactive = (current_time_ms - last_activity_ms > INACTIVITY_TIMEOUT_MS);
+        uint64_t current_time_ms = esp_timer_get_time() / 1000ULL;
+        bool ui_is_inactive = (current_time_ms - last_activity_ms > g_cfg->inactivity_timeout_ms);
 
         // Check if a new data entry has been successfully written to the SD card.
         time_t current_write_ts = 0;
@@ -530,9 +531,6 @@ void app_main(void)
         xSemaphoreGive(g_sensor_buffer_mutex);
     }
 
-    // --- Step 3: Initialize hardware drivers and peripherals ---
-    // Initialize Battery Reader first, as it uses ADC which can conflict if I2C is initialized first
-    battery_reader_init(BATTERY_ADC_PIN, BATTERY_PWR_PIN, BATTERY_VOLTAGE_DIVIDER_RATIO);
 
     // Initialize main I2C bus for sensors.
     esp_err_t err = i2c_master_init();
@@ -542,6 +540,37 @@ void app_main(void)
         return;
     }
 
+    // --- Step 3: Initialize SD card and Configuration ---
+    spi_sdcard_full_init();
+
+    config_init();
+    const char* config_path = "/sdcard/config.ini";
+    const char* new_config_path = "/sdcard/config_LOADED.ini";
+
+    // Check if config.ini exists.
+    struct stat st;
+    if (stat(config_path, &st) == 0) {
+        // File exists, so load it to flash.
+        ESP_LOGI(TAG, "Found %s, loading to flash...", config_path);
+        if (config_load_from_sdcard_to_flash(config_path) == ESP_OK) {
+            ESP_LOGI(TAG, "Config loaded successfully. Renaming to %s", new_config_path);
+            // Rename the file to prevent it from being loaded again on next boot.
+            if (rename(config_path, new_config_path) != 0) {
+                ESP_LOGE(TAG, "Failed to rename config file!");
+            }
+        } else {
+            ESP_LOGE(TAG, "Failed to load config from SD card into flash.");
+        }
+    } else {
+        // File not found, which is a normal case.
+        // The application will use the configuration already stored in flash.
+        ESP_LOGI(TAG, "%s not found. Using stored or default values.", config_path);
+    }
+
+    // --- Step 3.5: Read configuration from flash and apply it ---
+    config_params_init();
+    g_cfg = config_params_get();
+
     // Initialize BMP280 Sensor.
     err = bmp280_init(&g_bmp280, I2C_MASTER_NUM, BMP280_SENSOR_ADDR);
     if (err != ESP_OK)
@@ -549,15 +578,18 @@ void app_main(void)
         ESP_LOGE(TAG, "BMP280 sensor initialization failed, stopping.");
         return;
     }
-/*
+
+    // --- Step 4: Initialize hardware drivers and peripherals ---
+    // Initialize Battery Reader first, as it uses ADC which can conflict if I2C is initialized first
+    battery_reader_init(BATTERY_ADC_PIN, BATTERY_PWR_PIN, g_cfg->battery_voltage_divider_ratio);
     // Initialize D6F-PH Sensor.
     err = d6fph_init(&g_d6fph, I2C_MASTER_NUM, D6FPH_I2C_ADDR_DEFAULT, D6FPH_MODEL_0025AD1);
     if (err != ESP_OK)
     {
-        ESP_LOGE(TAG, "D6F-PH sensor initialization failed, stopping.");
-    }*/
+        ESP_LOGE(TAG, "D6F-PH sensor initialization failed.");
+    }
 
-    // --- Step 4: Initialize and validate the external Real-Time Clock (RTC) ---
+    // --- Step 5: Initialize and validate the external Real-Time Clock (RTC) ---
     // TODO make 0x68 a define
     ds3231_init(&g_rtc, I2C_NUM_0, 0x68);
     struct tm timeinfo;
@@ -603,12 +635,12 @@ void app_main(void)
         ESP_LOGW(TAG, "RTC not available, using ESP32 system time.");
     }
 
-    // --- Step 5: Initialize user input (Rotary Encoder) ---
+    // --- Step 6: Initialize user input (Rotary Encoder) ---
     rotaryencoder_config_t encoder_cfg = {
         .pin_a = ROTARY_ENCODER_PIN_A,
         .pin_b = ROTARY_ENCODER_PIN_B,
         .button_pin = ROTARY_ENCODER_BUTTON_PIN,
-        .button_debounce_ms = BUTTON_DEBOUNCE_TIME_MS,
+        .button_debounce_ms = (uint32_t)BUTTON_DEBOUNCE_TIME_MS,
         .on_rotate_cw = on_encoder_rotate_cw,
         .on_rotate_ccw = on_encoder_rotate_ccw,
         .on_button_press = on_encoder_button_press,
@@ -616,7 +648,7 @@ void app_main(void)
     };
     rotaryencoder_init(&encoder_cfg);
 
-    // --- Step 6: Initialize UI (if needed) and SD card ---
+    // --- Step 7: Initialize UI (if needed) ---
     if (cause != ESP_SLEEP_WAKEUP_TIMER) {
         // Initialize UI renderer which will handle its own I2C bus, OLED, and rotary encoder.
         uiRender_init(I2C_OLED_NUM, I2C_OLED_SDA_IO, I2C_OLED_SCL_IO, OLED_I2C_ADDR);
@@ -638,16 +670,15 @@ void app_main(void)
         ESP_LOGI(TAG, "Timer wakeup, skipping UI initialization.");
     }
 
-    spi_sdcard_full_init();
-
-    // --- Step 7: Start all application tasks ---
+    // --- Step 8: Start all application tasks ---
     ESP_LOGI(TAG, "Starting  sensor readings and Encoder monitoring...");
     rotaryencoder_start_task();
 
     // Prepare parameters for the datalogger task
     datalogger_task_params_t datalogger_params = {
         .bmp280_dev = &g_bmp280,
-        .d6fph_dev = &g_d6fph
+        .d6fph_dev = &g_d6fph, // This member might not exist if d6fph is commented out, but we'll keep the line for completeness
+        .log_interval_ms = g_cfg->log_interval_ms
     };
 
     if (cause != ESP_SLEEP_WAKEUP_TIMER) {

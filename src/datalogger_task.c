@@ -81,10 +81,9 @@ void datalogger_task(void *pvParameters)
     // The BMP280 device handle is passed as the task parameter.
     datalogger_task_params_t *params = (datalogger_task_params_t *)pvParameters;
     bmp280_t *bmp280_dev = params->bmp280_dev;    
-
-    ESP_LOGI(TAG, "Datalogger task started.");
+    const uint32_t LOG_INTERVAL_MS = params->log_interval_ms;
+    ESP_LOGI(TAG, "Datalogger task started with log interval: %lu ms", (unsigned long)LOG_INTERVAL_MS);
     static bool is_paused = false;
-    const uint32_t log_interval_ms = 58000; // making this slightly shorted to ensure quickest recording after sleep
 
     while (1)
     {
@@ -154,7 +153,7 @@ void datalogger_task(void *pvParameters)
             xSemaphoreGive(g_sensor_buffer_mutex);
         }
 
-        if (current_time_ms - last_write_ms >= log_interval_ms && !is_paused)
+        if (current_time_ms - last_write_ms >= LOG_INTERVAL_MS && !is_paused)
         {
             // Update all sensor values in the shared buffer
             update_sensor_buffer(bmp280_dev, params->d6fph_dev);

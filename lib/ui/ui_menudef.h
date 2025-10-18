@@ -1,7 +1,7 @@
 #pragma once
 #include "ui_render.h"
 
-// Forward declarations for page event handlers
+// --- Forward declarations for page event handlers ---
 void menu_set_time_on_btn(void);
 void menu_about_on_btn(void);
 void menu_sensor_on_btn(void);
@@ -20,6 +20,11 @@ void menu_format_sd_on_btn(void);
 void menu_format_sd_confirm_on_btn(void);
 void render_about_callback(void);
 void render_sensor_callback(void);
+
+void menu_config_on_btn(void);
+void page_config_on_btn(void);
+void render_config_callback(void);
+
 void page_fs_stats_render_callback(void);
 
 #define MENU_BACK_ITEM { \
@@ -35,15 +40,16 @@ const ui_menu_page_t ui_menu_tree[] = {
         .title = "Main Menu",
         .items = {
             { .label = "Sensor data", .has_submenu = false, .on_btn = menu_sensor_on_btn },
-            { .label = "Options", .has_submenu = true, .submenu_page_index = 1, .on_btn = NULL },
-            { .label = "About", .has_submenu = false, .on_btn = menu_about_on_btn }
+            { .label = "Options", .has_submenu = true, .submenu_page_index = 1 },
+            { .label = "About", .has_submenu = false, .on_btn = menu_about_on_btn },
            
         },
-        .item_count = 3
+        .item_count = 3,
     },
     {
         .title = "Options",
         .items = {
+            { .label = "View Config", .has_submenu = false, .on_btn = menu_config_on_btn },
             { .label = "Real Time Clock", .has_submenu = true, .submenu_page_index = 2, .on_btn = NULL },
             { .label = "File System", .has_submenu = true, .submenu_page_index = 3, .on_btn = NULL },
             MENU_BACK_ITEM
@@ -83,7 +89,7 @@ const ui_menu_page_t ui_menu_tree[] = {
         },
         .item_count = 2
     }
-};
+}; // ui_menu_tree
 const uint8_t ui_menu_page_count = sizeof(ui_menu_tree) / sizeof(ui_menu_tree[0]);
 
 // Standalone pages
@@ -105,4 +111,11 @@ const ui_page_t fs_stats_page = {
     .on_ccw = page_fs_stats_on_ccw,
     .on_btn = page_fs_stats_on_btn,
     .render = page_fs_stats_render_callback
+};
+
+const ui_page_t config_page = {
+    .on_cw = NULL, // No action for rotation
+    .on_ccw = NULL,
+    .on_btn = page_config_on_btn,
+    .render = render_config_callback
 };
