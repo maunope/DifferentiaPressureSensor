@@ -10,62 +10,56 @@ static const char *TAG = "D6F-PH";
 #define I2C_MASTER_TIMEOUT_MS 1000
 
 // D6F-PH Register Addresses and Commands
-#define D6FPH_CMD_INIT 0x0B
-#define D6FPH_CMD_INIT_PARAM 0x00
-#define D6FPH_CMD_TRIGGER_READ 0xD0
-#define D6FPH_CMD_TRIGGER_PARAM_H 0x40
-#define D6FPH_CMD_TRIGGER_PARAM_L 0x18
-#define D6FPH_CMD_READ_RESULT 0xD0
-#define D6FPH_CMD_READ_PARAM_H 0x51
-#define D6FPH_CMD_READ_PARAM_L 0x2C
+#define D6FPH_CMD_INIT_1 0x0B
+#define D6FPH_CMD_INIT_2 0x00
+#define D6FPH_CMD_COMMON 0xD0
+#define D6FPH_CMD_READ_EEPROM 0x07
 
 /**
- * @brief Writes a command sequence to the D6F-PH sensor.
+ * @brief Writes a command with a 16-bit register address to the D6F-PH sensor.
  */
-static esp_err_t d6fph_write_cmd(d6fph_t *dev, const uint8_t *cmd_buffer, size_t len)
+static esp_err_t d6fph_write_reg16(d6fph_t *dev, uint16_t reg, const uint8_t *data, size_t len)
 {
-    return i2c_master_write_to_device(dev->i2c_port, dev->i2c_addr, cmd_buffer, len, pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
+    // The sensor protocol uses a 16-bit register address.
+    // We send this as the first two bytes of the write buffer.
+    uint8_t write_buf[len + 2];
+    write_buf[0] = (reg >> 8) & 0xFF;
+    write_buf[1] = reg & 0xFF;
+    if (len > 0) {
+        memcpy(&write_buf[2], data, len);
+    }
+
+    esp_err_t ret = i2c_master_write_to_device(dev->i2c_port, dev->i2c_addr, write_buf, sizeof(write_buf), pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "I2C write failed: %s", esp_err_to_name(ret));
+    }
+    return ret;
 }
 
-/**
- * @brief Reads data from the D6F-PH sensor.
- */
-static esp_err_t d6fph_read_data(d6fph_t *dev, uint8_t *data_buffer, size_t len)
-{
-    return i2c_master_read_from_device(dev->i2c_port, dev->i2c_addr, data_buffer, len, pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
-}
-
-/**
- * @brief Triggers a measurement and reads the result from the sensor.
- */
 static esp_err_t d6fph_trigger_and_read(d6fph_t *dev, uint16_t *raw_value)
 {
     esp_err_t ret;
+    
+    // Step 1: Trigger measurement
+    const uint8_t trigger_data[] = {0x40, 0x18, 0x06};
+    ret = d6fph_write_reg16(dev, 0x00D0, trigger_data, sizeof(trigger_data));
+    if (ret != ESP_OK) return ret;
 
-    // Step 1: Send command to trigger measurement
-    const uint8_t trigger_cmd[] = {D6FPH_CMD_TRIGGER_READ, D6FPH_CMD_TRIGGER_PARAM_H, D6FPH_CMD_TRIGGER_PARAM_L};
-    ret = d6fph_write_cmd(dev, trigger_cmd, sizeof(trigger_cmd));
+    // Step 2: Wait for measurement to complete
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    // Step 3: Prepare to read result
+    const uint8_t read_prep_data[] = {0x51, 0x2C};
+    ret = d6fph_write_reg16(dev, 0x00D0, read_prep_data, sizeof(read_prep_data));
+    if (ret != ESP_OK) return ret;
+
+    // Step 4: Read the 2 data bytes
+    uint8_t read_reg = D6FPH_CMD_READ_EEPROM;
+    uint8_t read_buffer[2]; // We only need the 2 data bytes
+    ret = i2c_master_write_read_device(dev->i2c_port, dev->i2c_addr, &read_reg, 1, read_buffer, sizeof(read_buffer), pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
     if (ret != ESP_OK)
     { 
-        return ret;
-    }
-
-    // Step 2: Wait for the measurement to complete (sensor datasheet indicates 33ms)
-    vTaskDelay(pdMS_TO_TICKS(35));
-
-    // Step 3: Send command to read the result
-    const uint8_t read_cmd[] = {D6FPH_CMD_READ_RESULT, D6FPH_CMD_READ_PARAM_H, D6FPH_CMD_READ_PARAM_L};
-    ret = d6fph_write_cmd(dev, read_cmd, sizeof(read_cmd));
-    if (ret != ESP_OK)
-    { 
-        return ret;
-    }
-
-    // Step 4: Read the 2 data bytes and 1 CRC byte
-    uint8_t read_buffer[3];
-    ret = d6fph_read_data(dev, read_buffer, sizeof(read_buffer));
-    if (ret != ESP_OK)
-    { 
+        ESP_LOGE(TAG, "I2C read failed: %s", esp_err_to_name(ret));
         return ret;
     }
 
@@ -88,6 +82,7 @@ esp_err_t d6fph_init(d6fph_t *dev, i2c_port_t port, uint8_t i2c_addr, d6fph_sens
     dev->i2c_addr = i2c_addr;
     dev->model = model;
     dev->is_initialized = false; // Default to not initialized
+    ESP_LOGI(TAG, "Initializing D6F-PH sensor at address 0x%02X", i2c_addr);
 
     switch (model)
     {
@@ -109,9 +104,10 @@ esp_err_t d6fph_init(d6fph_t *dev, i2c_port_t port, uint8_t i2c_addr, d6fph_sens
         break;
     }
 
-    // Send initialization command: Write 0x00 to register 0x0B
-    const uint8_t init_cmd[] = {D6FPH_CMD_INIT, D6FPH_CMD_INIT_PARAM};
-    esp_err_t ret = d6fph_write_cmd(dev, init_cmd, sizeof(init_cmd));
+    // Send initialization command: Write 0x0B, 0x00
+    ESP_LOGI(TAG, "Sending initialization command...");
+    // This is a write to register 0x0B00 with no data payload
+    esp_err_t ret = d6fph_write_reg16(dev, 0x0B00, NULL, 0);
     if (ret != ESP_OK)
     {
         ESP_LOGE(TAG, "D6F-PH initialization failed: %s", esp_err_to_name(ret));
@@ -127,6 +123,7 @@ esp_err_t d6fph_init(d6fph_t *dev, i2c_port_t port, uint8_t i2c_addr, d6fph_sens
 esp_err_t d6fph_read_pressure(d6fph_t *dev, float *pressure)
 {
     if (!dev || !dev->is_initialized) {
+        ESP_LOGE(TAG, "Device not initialized, cannot read pressure.");
         *pressure = NAN;
         return ESP_ERR_INVALID_STATE;
     }
@@ -136,12 +133,17 @@ esp_err_t d6fph_read_pressure(d6fph_t *dev, float *pressure)
 
     if (ret != ESP_OK)
     {
+        ESP_LOGE(TAG, "Failed to trigger and read from sensor: %s", esp_err_to_name(ret));
         *pressure = NAN;
         return ret;
     }
 
-    // Formula from datasheet/Arduino library: P = ((Output - 1024) * Range * Multiplier / 60000) - Subtractor
-    *pressure = ((float)raw_value - 1024.0f) * dev->range * dev->multiplier / 60000.0f - dev->subtractor;
+    ESP_LOGD(TAG, "Calculating pressure with: raw=%u, range=%.1f, mult=%.1f, sub=%.1f", raw_value, dev->range, dev->multiplier, dev->subtractor);
+    // Formula from datasheet/Arduino library:
+    // For +/- 500Pa (D6F-PH-5050AD4): P = ((Output - 1024) * 1000 / 60000) - 500
+    // For +/- 250Pa (D6F-PH-0025AD1): P = ((Output - 1024) * 250 / 60000)
+    *pressure = (((float)raw_value - 1024.0f) * dev->range / 60000.0f) * dev->multiplier - dev->subtractor;
+    ESP_LOGD(TAG, "Calculated pressure: %.2f Pa", *pressure);
 
     return ESP_OK;
 }

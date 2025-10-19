@@ -2,6 +2,7 @@
 #define CONFIG_PARAMS_H
 
 #include <stdint.h>
+#include "../lib/i2c-d6fph/i2c-d6fph.h"
 
 /**
  * @brief Structure to hold all runtime configuration parameters.
@@ -13,6 +14,7 @@ typedef struct {
     uint32_t log_interval_ms;
     char wifi_ssid[64];
     char wifi_password[64];
+    d6fph_sensor_model_t d6fph_model;
 } config_params_t;
 
 /**

@@ -551,10 +551,29 @@ void app_main(void)
     gpio_config(&pwr_pin_cfg);
 
     // Turn on power for all peripherals.
-    gpio_set_level(DEVICES_POWER_PIN, 1); // Always power sensors
+    gpio_set_level(DEVICES_POWER_PIN, 1);
+
+    // --- Early UI Initialization to show boot message ---
     if (cause != ESP_SLEEP_WAKEUP_TIMER) {
-        // Only power OLED if not a timer wakeup
+        // Power on OLED
         gpio_set_level(OLED_POWER_PIN, 1);
+        vTaskDelay(pdMS_TO_TICKS(50)); // Wait for OLED power to stabilize
+
+        // Initialize UI renderer which will handle its own I2C bus and OLED.
+        uiRender_init(I2C_OLED_NUM, I2C_OLED_SDA_IO, I2C_OLED_SCL_IO, OLED_I2C_ADDR);
+        i2c_oled_clear(I2C_OLED_NUM);
+
+        // Buffer for display messages, 20 chars + null terminator
+        char display_str[21];
+        memset(display_str, 0, sizeof(display_str)); // Ensure the buffer is clean
+
+        // Show appropriate message based on wakeup reason
+        const char* msg = (cause == ESP_SLEEP_WAKEUP_EXT0 || cause == ESP_SLEEP_WAKEUP_GPIO) ? "Waking up..." : "Booting...";
+        snprintf(display_str, sizeof(display_str), "%-20s", msg);
+        i2c_oled_write_text(I2C_OLED_NUM, 1, 0, display_str);
+    } else {
+        // Ensure OLED is off for timer-based wakeups
+        gpio_set_level(OLED_POWER_PIN, 0);
     }
     vTaskDelay(pdMS_TO_TICKS(50)); // Wait for power to stabilize
 
@@ -641,7 +660,7 @@ void app_main(void)
     // Initialize Battery Reader first, as it uses ADC which can conflict if I2C is initialized first
     battery_reader_init(BATTERY_ADC_PIN, BATTERY_PWR_PIN, g_cfg->battery_voltage_divider_ratio);
     // Initialize D6F-PH Sensor.
-    err = d6fph_init(&g_d6fph, I2C_MASTER_NUM, D6FPH_I2C_ADDR_DEFAULT, D6FPH_MODEL_0025AD1);
+    err = d6fph_init(&g_d6fph, I2C_MASTER_NUM, D6FPH_I2C_ADDR_DEFAULT, g_cfg->d6fph_model);
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "D6F-PH sensor initialization failed.");
@@ -708,22 +727,7 @@ void app_main(void)
 
     // --- Step 7: Initialize UI (if needed) ---
     if (cause != ESP_SLEEP_WAKEUP_TIMER) {
-        // Initialize UI renderer which will handle its own I2C bus, OLED, and rotary encoder.
-        uiRender_init(I2C_OLED_NUM, I2C_OLED_SDA_IO, I2C_OLED_SCL_IO, OLED_I2C_ADDR);
-        i2c_oled_clear(I2C_OLED_NUM);
-        // Buffer for display messages, 20 chars + null terminator
-        char display_str[21];
-        memset(display_str, 0, sizeof(display_str)); // Ensure the buffer is clean
-
-        if (cause == ESP_SLEEP_WAKEUP_EXT0) {
-            // Pad the string to 20 characters to clear the line
-            snprintf(display_str, sizeof(display_str), "%-20s", "Waking up...");
-            i2c_oled_write_text(I2C_OLED_NUM, 1, 0, display_str);
-        } else {
-            // Pad the string to 20 characters to clear the line
-            snprintf(display_str, sizeof(display_str), "%-20s", "Booting...");
-            i2c_oled_write_text(I2C_OLED_NUM, 1, 0, display_str);
-        }
+        // UI is already initialized and showing a boot message.
     } else {
         ESP_LOGI(TAG, "Timer wakeup, skipping UI initialization.");
     }

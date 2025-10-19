@@ -70,17 +70,18 @@ typedef struct
     char value[21]; // Max 20 chars for OLED line + null terminator
 } config_item_t;
 
-#define MAX_CONFIG_ITEMS 6 // Correctly define the number of items
+#define MAX_CONFIG_ITEMS 7 // Correctly define the number of items
 static config_item_t s_config_items[MAX_CONFIG_ITEMS];
 
 // Define the actual configuration keys here, in one place.
 static const char *s_config_keys[MAX_CONFIG_ITEMS] = {
-    "system.BATTERY_VOLTAGE_DIVIDER_RATIO",
-    "system.INACTIVITY_TIMEOUT_MS",
-    "system.SLEEP_DURATION_MS",
-    "system.LOG_INTERVAL_MS",
-    "wifi.WIFI_SSID",
-    "wifi.WIFI_PASSWORD"};
+    "v_div_ratio",
+    "inactive_ms",
+    "sleep_ms",
+    "log_int_ms",
+    "d6fph_model",
+    "wifi_ssid",
+    "wifi_password"};
 static int s_num_config_items = 0;
 
 static int s_config_current_page_index = 0;
@@ -824,17 +825,25 @@ static void ui_config_page_prepare_data(void)
     snprintf(s_config_items[2].value, sizeof(s_config_items[2].value), "%llu", (unsigned long long)params->sleep_duration_ms);
     s_config_items[3].full_key = s_config_keys[3];
     snprintf(s_config_items[3].value, sizeof(s_config_items[3].value), "%lu", (unsigned long)params->log_interval_ms);
+    
+    // D6F-PH Model
+    s_config_items[4].full_key = s_config_keys[4];
+    const char* model_str = "Unknown";
+    if (params->d6fph_model == D6FPH_MODEL_0025AD1) model_str = "0025AD1";
+    else if (params->d6fph_model == D6FPH_MODEL_0505AD3) model_str = "0505AD3";
+    else if (params->d6fph_model == D6FPH_MODEL_5050AD4) model_str = "5050AD4";
+    snprintf(s_config_items[4].value, sizeof(s_config_items[4].value), "%s (%d)", model_str, params->d6fph_model);
 
     // WiFi SSID
-    s_config_items[4].full_key = s_config_keys[4];
-    snprintf(s_config_items[4].value, sizeof(s_config_items[4].value), "%.20s", params->wifi_ssid);
+    s_config_items[5].full_key = s_config_keys[5];
+    snprintf(s_config_items[5].value, sizeof(s_config_items[5].value), "%.20s", params->wifi_ssid);
 
     // WiFi Password (masked)
-    s_config_items[5].full_key = s_config_keys[5];
+    s_config_items[6].full_key = s_config_keys[6];
     if (strlen(params->wifi_password) > 0) {
-        snprintf(s_config_items[5].value, sizeof(s_config_items[5].value), "********");
+        snprintf(s_config_items[6].value, sizeof(s_config_items[6].value), "********");
     } else {
-        snprintf(s_config_items[5].value, sizeof(s_config_items[5].value), "(not set)");
+        snprintf(s_config_items[6].value, sizeof(s_config_items[6].value), "(not set)");
     }
 }
 
@@ -858,11 +867,10 @@ void render_config_callback(void)
             // Clear the rest of the lines on the last page
             write_padded_line(line_num, "");
             write_padded_line(line_num + 1, "");
-            break;
+            continue; // Continue to clear remaining lines in the loop
         }
 
-        const char *display_key = strchr(s_config_items[item_index].full_key, '.');
-        display_key = display_key ? display_key + 1 : s_config_items[item_index].full_key;
+        const char *display_key = s_config_items[item_index].full_key;
         // Display the configuration key
         snprintf(line_buf, sizeof(line_buf), "%.20s", display_key);
         write_padded_line(line_num, line_buf);
