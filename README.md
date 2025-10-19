@@ -38,6 +38,8 @@ This project is a datalogger built on the ESP32-S3 platform using the ESP-IDF fr
 *   **Power**:
     *   LiPo Battery with a voltage divider for monitoring.
 
+For more details on the custom PCB, see the [board design documentation](board/DifferentialPressureSensor/README.md).
+
 ### Usage
 
 1.  **Configuration**: Copy the `config_sample.ini` file to the root of your SD card and rename it to `config.ini`. Edit this file to set your Wi-Fi credentials, sensor model, and other parameters.
