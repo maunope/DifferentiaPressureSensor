@@ -1,3 +1,5 @@
+[<-- Back to Main Project Page](README.md)
+
 # Differential Pressure Datalogger - PCB Design
 
 This directory contains the KiCad project files for the custom PCB designed for the ESP32-S3 Differential Pressure Datalogger.
@@ -54,4 +56,3 @@ This project was designed using **KiCad**. The main files are:
 *   `DifferentialPressureSensor.kicad_pro`: The main KiCad project file.
 *   `DifferentialPressureSensor.kicad_sch`: The schematic file.
 *   `DifferentialPressureSensor.kicad_pcb`: The PCB layout file.
-

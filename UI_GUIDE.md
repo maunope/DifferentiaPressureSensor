@@ -1,3 +1,5 @@
+[<-- Back to Main Project Page](README.md)
+
 # User Interface Guide
 
 This guide explains how to navigate and use the user interface of the Differential Pressure Datalogger. The UI is controlled using a single rotary encoder with a built-in push-button.
