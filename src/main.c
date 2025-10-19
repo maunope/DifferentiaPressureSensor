@@ -166,6 +166,16 @@ static void handle_set_rtc_to_build_time(void)
 static void handle_sync_rtc_with_ntp(void) {
     ESP_LOGI(TAG, "Starting NTP time synchronization...");
 
+    // Check if Wi-Fi SSID is configured before attempting to connect.
+    if (strlen(g_cfg->wifi_ssid) == 0) {
+        ESP_LOGE(TAG, "Wi-Fi SSID is not configured. Cannot sync time with NTP.");
+        if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY)) {
+            g_command_status = CMD_STATUS_FAIL;
+            xSemaphoreGive(g_command_status_mutex);
+        }
+        return;
+    }
+
     time_t current_utc_time;
     esp_err_t ret = ntp_client_get_utc_time(g_cfg->wifi_ssid, g_cfg->wifi_password, 30000, &current_utc_time);
 
