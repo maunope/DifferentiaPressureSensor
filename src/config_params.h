@@ -10,7 +10,9 @@ typedef struct {
     float battery_voltage_divider_ratio;
     uint32_t inactivity_timeout_ms;
     uint64_t sleep_duration_ms;
-    uint32_t log_interval_ms; 
+    uint32_t log_interval_ms;
+    char wifi_ssid[64];
+    char wifi_password[64];
 } config_params_t;
 
 /**

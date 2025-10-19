@@ -2,6 +2,7 @@
 #include "ui_render.h"
 
 // --- Forward declarations for page event handlers ---
+void menu_sync_rtc_ntp_on_btn(void);
 void menu_set_time_on_btn(void);
 void menu_about_on_btn(void);
 void menu_sensor_on_btn(void);
@@ -51,9 +52,9 @@ const ui_menu_page_t ui_menu_tree[] = {
     {
         .title = "Options",
         .items = {
-            { .label = "View Config", .has_submenu = false, .on_btn = menu_config_on_btn },
             { .label = "Real Time Clock", .has_submenu = true, .submenu_page_index = 2, .on_btn = NULL },
             { .label = "File System", .has_submenu = true, .submenu_page_index = 3, .on_btn = NULL },
+            { .label = "View Config", .has_submenu = false, .on_btn = menu_config_on_btn },
             MENU_BACK_ITEM
         },
         .item_count = 4
@@ -61,19 +62,28 @@ const ui_menu_page_t ui_menu_tree[] = {
     {
         .title = "Real Time Clock",
         .items = {
-            { .label = "Build ts to RTC", .has_submenu = true, .submenu_page_index = 4, .on_btn = NULL },
+            { .label = "Sync RTC w/ NTP", .has_submenu = true, .submenu_page_index = 4, .on_btn =  NULL},
+            { .label = "Build ts to RTC", .has_submenu = true, .submenu_page_index = 5, .on_btn = NULL },
             MENU_BACK_ITEM
         },
-        .item_count = 2
+        .item_count = 3
     },
     {
         .title = "File System",
         .items = {
             { .label = "Stats", .has_submenu = false, .on_btn = menu_fs_stats_on_btn },
-            { .label = "Format SD Card", .has_submenu = true, .submenu_page_index = 5, .on_btn = NULL },
+            { .label = "Format SD Card", .has_submenu = true, .submenu_page_index = 6, .on_btn = NULL },
             MENU_BACK_ITEM
         },
         .item_count = 3
+    },
+    {
+        .title = "Sync RTC w/ NTP?",
+        .items = {
+            { .label = "Cancel", .has_submenu = false, .on_btn = menu_cancel_on_btn },
+            { .label = "Confirm", .has_submenu = false, .on_btn = menu_sync_rtc_ntp_on_btn }
+        },
+        .item_count = 2
     },
     {
         .title = "Built time to RTC?",

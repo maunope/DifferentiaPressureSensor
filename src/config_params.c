@@ -16,23 +16,29 @@ static const config_params_t s_default_params = {
     .battery_voltage_divider_ratio = 4.1428f,
     .inactivity_timeout_ms = 30000,
     .sleep_duration_ms = 60000,
-    .log_interval_ms = 59500
+    .log_interval_ms = 59500,
+    .wifi_ssid = "",
+    .wifi_password = ""
 };
 
 void config_params_init(void) {
     ESP_LOGI(TAG, "Loading configuration from flash...");
 
     // Load values from NVS, using defaults if a key is not found.
-    g_config_params.battery_voltage_divider_ratio = config_get_float("system.BATTERY_VOLTAGE_DIVIDER_RATIO", s_default_params.battery_voltage_divider_ratio);
-    g_config_params.inactivity_timeout_ms = config_get_int("system.INACTIVITY_TIMEOUT_MS", s_default_params.inactivity_timeout_ms);
-    g_config_params.sleep_duration_ms = config_get_int("system.SLEEP_DURATION_MS", s_default_params.sleep_duration_ms);
-    g_config_params.log_interval_ms = config_get_int("system.LOG_INTERVAL_MS", s_default_params.log_interval_ms);
+    g_config_params.battery_voltage_divider_ratio = config_get_float("v_div_ratio", s_default_params.battery_voltage_divider_ratio);
+    g_config_params.inactivity_timeout_ms = config_get_int("inactive_ms", s_default_params.inactivity_timeout_ms);
+    g_config_params.sleep_duration_ms = config_get_int("sleep_ms", s_default_params.sleep_duration_ms);
+    g_config_params.log_interval_ms = config_get_int("log_int_ms", s_default_params.log_interval_ms);
+    config_get_string("ssid", s_default_params.wifi_ssid, g_config_params.wifi_ssid, sizeof(g_config_params.wifi_ssid));
+    config_get_string("pass", s_default_params.wifi_password, g_config_params.wifi_password, sizeof(g_config_params.wifi_password));
 
     ESP_LOGI(TAG, "--- Loaded Configuration ---");
-    ESP_LOGI(TAG, "BATTERY_VOLTAGE_DIVIDER_RATIO: %.4f", g_config_params.battery_voltage_divider_ratio);
-    ESP_LOGI(TAG, "INACTIVITY_TIMEOUT_MS: %lu", (unsigned long)g_config_params.inactivity_timeout_ms);
-    ESP_LOGI(TAG, "SLEEP_DURATION_MS: %llu", g_config_params.sleep_duration_ms);
-    ESP_LOGI(TAG, "LOG_INTERVAL_MS: %lu", (unsigned long)g_config_params.log_interval_ms);
+    ESP_LOGI(TAG, "v_div_ratio: %.4f", g_config_params.battery_voltage_divider_ratio);
+    ESP_LOGI(TAG, "inactive_ms: %lu", (unsigned long)g_config_params.inactivity_timeout_ms);
+    ESP_LOGI(TAG, "sleep_ms: %llu", g_config_params.sleep_duration_ms);
+    ESP_LOGI(TAG, "log_int_ms: %lu", (unsigned long)g_config_params.log_interval_ms);
+    ESP_LOGI(TAG, "ssid: '%s'", g_config_params.wifi_ssid);
+    ESP_LOGI(TAG, "pass: %s", strlen(g_config_params.wifi_password) > 0 ? "(set)" : "(not set)");
     ESP_LOGI(TAG, "--------------------------");
 }
 

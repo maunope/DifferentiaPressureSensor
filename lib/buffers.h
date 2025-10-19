@@ -53,6 +53,7 @@ typedef enum {
     APP_CMD_FORMAT_SD_CARD,
     APP_CMD_ACTIVITY_DETECTED,
 
+    APP_CMD_SYNC_RTC_NTP,
     APP_CMD_REFRESH_SENSOR_DATA,
 } app_command_t;
 

@@ -70,7 +70,7 @@ typedef struct
     char value[21]; // Max 20 chars for OLED line + null terminator
 } config_item_t;
 
-#define MAX_CONFIG_ITEMS 4
+#define MAX_CONFIG_ITEMS 6 // Correctly define the number of items
 static config_item_t s_config_items[MAX_CONFIG_ITEMS];
 
 // Define the actual configuration keys here, in one place.
@@ -78,11 +78,13 @@ static const char *s_config_keys[MAX_CONFIG_ITEMS] = {
     "system.BATTERY_VOLTAGE_DIVIDER_RATIO",
     "system.INACTIVITY_TIMEOUT_MS",
     "system.SLEEP_DURATION_MS",
-    "system.LOG_INTERVAL_MS"};
+    "system.LOG_INTERVAL_MS",
+    "wifi.WIFI_SSID",
+    "wifi.WIFI_PASSWORD"};
 static int s_num_config_items = 0;
 
 static int s_config_current_page_index = 0;
-const int ITEMS_PER_PAGE = 2; // Each item takes 2 lines (key + value)
+const int ITEMS_PER_PAGE = 3; // Each item takes 2 lines (key + value), so 3 items fit on 6-7 lines
 
 // Data for rendering
 static float last_values[8] = {0};
@@ -710,6 +712,26 @@ void menu_format_sd_confirm_on_btn(void)
     }
 }
 
+void menu_sync_rtc_ntp_on_btn(void)
+{
+    if (g_app_cmd_queue != NULL)
+    {
+        app_command_t cmd = APP_CMD_SYNC_RTC_NTP;
+        xQueueSend(g_app_cmd_queue, &cmd, 0);
+        s_cmd_pending_mode = true; // Enter loading screen mode
+        s_cmd_start_time_ms = esp_timer_get_time() / 1000;
+        s_post_cmd_action = POST_ACTION_NONE;
+        s_cmd_timeout_ms = 45000; // 45-second timeout for WiFi + NTP
+        if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY))
+        {
+            g_command_status = CMD_STATUS_PENDING; // Set initial status for UI
+            xSemaphoreGive(g_command_status_mutex);
+        }
+    } else {
+        ESP_LOGE(TAG, "App command queue not initialized!");
+    }
+}
+
 void menu_set_time_on_btn(void)
 {
     if (g_app_cmd_queue != NULL)
@@ -799,9 +821,21 @@ static void ui_config_page_prepare_data(void)
     s_config_items[1].full_key = s_config_keys[1];
     snprintf(s_config_items[1].value, sizeof(s_config_items[1].value), "%lu", (unsigned long)params->inactivity_timeout_ms);
     s_config_items[2].full_key = s_config_keys[2];
-    snprintf(s_config_items[2].value, sizeof(s_config_items[2].value), "%llu", params->sleep_duration_ms);
+    snprintf(s_config_items[2].value, sizeof(s_config_items[2].value), "%llu", (unsigned long long)params->sleep_duration_ms);
     s_config_items[3].full_key = s_config_keys[3];
     snprintf(s_config_items[3].value, sizeof(s_config_items[3].value), "%lu", (unsigned long)params->log_interval_ms);
+
+    // WiFi SSID
+    s_config_items[4].full_key = s_config_keys[4];
+    snprintf(s_config_items[4].value, sizeof(s_config_items[4].value), "%.20s", params->wifi_ssid);
+
+    // WiFi Password (masked)
+    s_config_items[5].full_key = s_config_keys[5];
+    if (strlen(params->wifi_password) > 0) {
+        snprintf(s_config_items[5].value, sizeof(s_config_items[5].value), "********");
+    } else {
+        snprintf(s_config_items[5].value, sizeof(s_config_items[5].value), "(not set)");
+    }
 }
 
 void render_config_callback(void)
@@ -818,12 +852,12 @@ void render_config_callback(void)
     for (int i = 0; i < ITEMS_PER_PAGE; ++i)
     {
         int item_index = start_index + i;
-        int line_num = 2 + (i * 2);
+        int line_num = 1 + (i * 2); // Start from line 1
         if (item_index >= s_num_config_items)
         {
             // Clear the rest of the lines on the last page
-            write_padded_line(line_num, " ");
-            write_padded_line(line_num + 1, " ");
+            write_padded_line(line_num, "");
+            write_padded_line(line_num + 1, "");
             break;
         }
 

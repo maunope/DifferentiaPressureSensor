@@ -21,22 +21,28 @@ static char* trim_whitespace(char *str) {
     if (*str == 0) return str;
     end = str + strlen(str) - 1;
     while (end > str && isspace((unsigned char)*end)) end--;
-    end[1] = '\0';
+    
+    // Add null terminator
+    *(end + 1) = '\0';
+
     return str;
 }
 
 /**
  * @brief Parses a single line and stores the key-value pair in NVS.
  */
-static esp_err_t parse_and_store_line(nvs_handle_t nvs_handle, char *line) {
+static esp_err_t parse_and_store_line(nvs_handle_t nvs_handle, char *line)
+{
     char *key = strtok(line, "=");
-    char *value = strtok(NULL, "");
+    char *value = strtok(NULL, "\n\r"); // Stop at newline or carriage return
 
     if (key && value) {
         key = trim_whitespace(key);
         value = trim_whitespace(value);
-        ESP_LOGD(TAG, "Storing to NVS: key='%s', value='%s'", key, value);
-        return nvs_set_str(nvs_handle, key, value);
+        if (strlen(key) > 0) {
+            ESP_LOGI(TAG, "Storing to NVS: key='%s', value='%s'", key, value);
+            return nvs_set_str(nvs_handle, key, value);
+        }
     }
     return ESP_ERR_INVALID_ARG;
 }
@@ -72,13 +78,15 @@ esp_err_t config_load_from_sdcard_to_flash(const char* config_filepath) {
     // Erase the namespace to ensure a clean slate before loading new config
     nvs_erase_all(nvs_handle);
 
-    char line[CONFIG_STRING_MAX_LEN + 100]; // Buffer for key + value + overhead
+    char line[256];
     while (fgets(line, sizeof(line), f)) {
+        char* trimmed_line = trim_whitespace(line);
+
         // Ignore comments and empty lines
-        if (line[0] == '#' || line[0] == ';' || line[0] == '\n' || line[0] == '\r') {
+        if (trimmed_line[0] == '#' || trimmed_line[0] == ';' || trimmed_line[0] == '\0' || trimmed_line[0] == '[') {
             continue;
         }
-        err = parse_and_store_line(nvs_handle, line);
+        err = parse_and_store_line(nvs_handle, trimmed_line);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Failed to store line in NVS: %s", esp_err_to_name(err));
             // Continue parsing other lines
@@ -100,17 +108,15 @@ esp_err_t config_load_from_sdcard_to_flash(const char* config_filepath) {
 }
 
 int config_get_int(const char* key, int default_val) {
-    nvs_handle_t nvs_handle;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs_handle);
-    if (err != ESP_OK) return default_val;
-
-    int32_t value = default_val;
-    err = nvs_get_i32(nvs_handle, key, &value);
-    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
-        ESP_LOGW(TAG, "NVS get_i32 failed for key '%s': %s", key, esp_err_to_name(err));
+    char buf[32];
+    // Get the value as a string first.
+    config_get_string(key, "", buf, sizeof(buf));
+    // If a value was retrieved, convert it to an integer.
+    if (strlen(buf) > 0) {
+        return atoi(buf);
     }
-    nvs_close(nvs_handle);
-    return value;
+    // Otherwise, return the default.
+    return default_val;
 }
 
 float config_get_float(const char* key, float default_val) {
@@ -123,25 +129,47 @@ float config_get_float(const char* key, float default_val) {
 }
 
 void config_get_string(const char* key, const char* default_val, char* out_buf, size_t buf_len) {
-    nvs_handle_t nvs_handle;
+    nvs_handle_t nvs_handle = 0; // Initialize to 0
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs_handle);
+
     if (err != ESP_OK) {
-        strncpy(out_buf, default_val, buf_len - 1);
-        out_buf[buf_len - 1] = '\0';
-        return;
+        ESP_LOGE(TAG, "Failed to open NVS for reading: %s", esp_err_to_name(err));
+        goto set_default;
     }
 
-    size_t required_size = buf_len;
-    err = nvs_get_str(nvs_handle, key, out_buf, &required_size);
+    ESP_LOGI(TAG, "Retrieving string for key '%s' from NVS", key);
+    size_t required_size = 0;
+    // First, get the required size
+    err = nvs_get_str(nvs_handle, key, NULL, &required_size);
+    if (err != ESP_OK) {
+        if (err == ESP_ERR_NVS_NOT_FOUND) {
+            ESP_LOGI(TAG, "Key '%s' not found in NVS, using default value: '%s'", key, default_val);
+        } else {
+            ESP_LOGW(TAG, "NVS get_str (size check) failed for key '%s': %s", key, esp_err_to_name(err));
+        }
+        goto set_default;
+    }
 
-    if (err == ESP_ERR_NVS_NOT_FOUND) {
-        strncpy(out_buf, default_val, buf_len - 1);
-        out_buf[buf_len - 1] = '\0';
-    } else if (err != ESP_OK) {
-        ESP_LOGW(TAG, "NVS get_string failed for key '%s': %s", key, esp_err_to_name(err));
-        strncpy(out_buf, default_val, buf_len - 1);
-        out_buf[buf_len - 1] = '\0';
+    if (required_size > buf_len) {
+        ESP_LOGW(TAG, "Buffer too small for key '%s'. Required: %zu, Available: %zu", key, required_size, buf_len);
+        goto set_default;
+    }
+
+    err = nvs_get_str(nvs_handle, key, out_buf, &required_size);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Retrieved string for key '%s': '%s'", key, out_buf);
+    } else { // Should not happen if size check passed, but for safety
+        ESP_LOGW(TAG, "NVS get_str failed for key '%s': %s", key, esp_err_to_name(err));
+        goto set_default;
     }
 
     nvs_close(nvs_handle);
+    return;
+
+set_default:
+    strncpy(out_buf, default_val, buf_len - 1);
+    out_buf[buf_len - 1] = '\0';
+    if (nvs_handle) {
+        nvs_close(nvs_handle);
+    }
 }

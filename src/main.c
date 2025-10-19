@@ -34,6 +34,7 @@
 #include "../lib/config-manager/config-manager.h"
 #include "../lib/lipo-battery/lipo-battery.h"
 #include "config_params.h"
+#include "../lib/ntp-client/ntp-client.h"
 
 // DO NOT use pins 19 and 20, they are used by the flash memory
 // DO NOT use pins 5 and 6, they are used for LiPo battery measurements unless you change the config
@@ -149,6 +150,43 @@ static void handle_set_rtc_to_build_time(void)
     // Update the global command status
     if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY))
     {
+        g_command_status = (ret == ESP_OK) ? CMD_STATUS_SUCCESS : CMD_STATUS_FAIL;
+        xSemaphoreGive(g_command_status_mutex);
+    }
+}
+
+/**
+ * @brief Synchronizes the DS3231 RTC with an NTP server.
+ *
+ * This function retrieves Wi-Fi credentials from the configuration,
+ * uses the ntp-client library to get the current UTC time, and then
+ * sets the DS3231 RTC and the system time. It provides feedback
+ * to the UI via the global command status.
+ */
+static void handle_sync_rtc_with_ntp(void) {
+    ESP_LOGI(TAG, "Starting NTP time synchronization...");
+
+    time_t current_utc_time;
+    esp_err_t ret = ntp_client_get_utc_time(g_cfg->wifi_ssid, g_cfg->wifi_password, 30000, &current_utc_time);
+
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "NTP sync successful. The current UTC time is: %lld", (long long)current_utc_time);
+        
+        // Now, set the DS3231 RTC with the obtained time
+        if (xSemaphoreTake(g_i2c_bus_mutex, portMAX_DELAY)) {
+            ret = ds3231_set_time_t(&g_rtc, current_utc_time);
+            xSemaphoreGive(g_i2c_bus_mutex);
+        }
+
+        if (ret == ESP_OK) {
+            ESP_LOGI(TAG, "DS3231 RTC updated successfully.");
+        } else {
+            ESP_LOGE(TAG, "Failed to update DS3231 RTC.");
+        }
+    }
+
+    // Update the global command status for UI feedback
+    if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY)) {
         g_command_status = (ret == ESP_OK) ? CMD_STATUS_SUCCESS : CMD_STATUS_FAIL;
         xSemaphoreGive(g_command_status_mutex);
     }
@@ -299,6 +337,10 @@ void main_task(void *pvParameters)
                 ESP_LOGI(TAG, "Received command to format SD card.");
                 spi_sdcard_format();
                 // Status is now handled inside spi_sdcard_format
+                break;
+            case APP_CMD_SYNC_RTC_NTP:
+                ESP_LOGI(TAG, "Received command to sync RTC with NTP.");
+                handle_sync_rtc_with_ntp();
                 break;
             case APP_CMD_ACTIVITY_DETECTED:
                 last_activity_ms = esp_timer_get_time() / 1000;
@@ -556,7 +598,10 @@ void app_main(void)
     spi_sdcard_init_sd_only();
     is_usb_connected_state = battery_is_externally_powered();
 
+    // Initialize NVS first, as it's required by other components (like Wi-Fi)
     config_init();
+
+
     const char* config_path = "/sdcard/config.ini";
     const char* new_config_path = "/sdcard/config_LOADED.ini";
 
@@ -568,9 +613,9 @@ void app_main(void)
         if (config_load_from_sdcard_to_flash(config_path) == ESP_OK) {
             ESP_LOGI(TAG, "Config loaded successfully. Renaming to %s", new_config_path);
             // Rename the file to prevent it from being loaded again on next boot.
-            if (rename(config_path, new_config_path) != 0) {
-                ESP_LOGE(TAG, "Failed to rename config file!");
-            }
+          //  if (rename(config_path, new_config_path) != 0) {
+           //     ESP_LOGE(TAG, "Failed to rename config file!");
+            //}
         } else {
             ESP_LOGE(TAG, "Failed to load config from SD card into flash.");
         }
