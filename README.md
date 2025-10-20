@@ -43,7 +43,7 @@ For more details on the custom PCB, see the [board design documentation](BOARD_D
 ### Usage
 
 1.  **Configuration**: Copy the `config_sample.ini` file to the root of your SD card and rename it to `config.ini`. Edit this file to set your Wi-Fi credentials, sensor model, and other parameters.
-2.  **Operation**: The device is controlled with the rotary encoder and its built-in push-button. For a detailed explanation of the menu system and on-screen information, please see the User Interface Guide.
+2.  **Operation**: The device is controlled with the rotary encoder and its built-in push-button. For a detailed explanation of the menu system and on-screen information, please see the [User Interface Guide](UI_GUIDE.md).
 ### Software & Libraries
 
 *   **Framework**: ESP-IDF
