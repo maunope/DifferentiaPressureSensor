@@ -118,7 +118,9 @@ void i2c_oled_write_text(i2c_port_t i2c_num, uint8_t row, uint8_t col, const cha
 void i2c_oled_update_screen(i2c_port_t i2c_num);
 void i2c_oled_set_invert(i2c_port_t i2c_num, bool invert);
 void i2c_oled_write_inverted_text(i2c_port_t i2c_num, uint8_t row, uint8_t col, const char *text);
-void i2c_oled_fill_rect(i2c_port_t i2c_num, int x, int y, int width, int height) ;
-void i2c_oled_draw_pixel(i2c_port_t i2c_num, int x, int y);
+void i2c_oled_draw_rect(i2c_port_t i2c_num, int x, int y, int width, int height, bool on);
+void i2c_oled_write_char(i2c_port_t i2c_num, uint8_t row, uint8_t col, char c);
+void i2c_oled_fill_rect(i2c_port_t i2c_num, int x, int y, int width, int height, bool on) ;
+void i2c_oled_draw_pixel(i2c_port_t i2c_num, int x, int y, bool on);
 void i2c_oled_get_buffer(uint8_t* out_buffer, size_t len);
 void i2c_oled_load_buffer(const uint8_t* in_buffer, size_t len);

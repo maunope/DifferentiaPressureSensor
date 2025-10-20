@@ -111,6 +111,9 @@ static int last_value_count = 0;
 static int8_t current_page = 0;
 static int8_t current_item = 0;
 
+// --- Local copy of sensor data for rendering ---
+static sensor_buffer_t s_local_sensor_buffer;
+
 // --- Initialization and event send ---
 void uiRender_init(i2c_port_t oled_i2c_num, gpio_num_t sda, gpio_num_t scl, uint8_t oled_i2c_addr)
 {
@@ -328,7 +331,7 @@ static void oled_display_qr_code(esp_qrcode_handle_t qrcode) {
     for (int y = 0; y < qr_size; y++) {
         for (int x = 0; x < qr_size; x++) {
             if (esp_qrcode_get_module(qrcode, x, y)) {
-                i2c_oled_fill_rect(s_oled_i2c_num, x_offset + x * module_size, y_offset + y * module_size, module_size, module_size);
+                i2c_oled_fill_rect(s_oled_i2c_num, x_offset + x * module_size, y_offset + y * module_size, module_size, module_size, true);
             }
         }
     }
@@ -351,76 +354,62 @@ void render_sensor_callback(void)
 {
     if (!s_oled_initialized)
         return;
-    static char last_lines[8][21] = {{0}};
     char new_lines[8][21] = {{0}};
 
-    sensor_buffer_t local_buffer;
+    // Use the local copy of the sensor buffer
+    struct tm local_tm;
+    convert_gmt_to_cet(s_local_sensor_buffer.timestamp, &local_tm);
+    char time_str[20];
+    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &local_tm);
 
-    if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
+    // new_lines[1] is intentionally left blank
+    snprintf(new_lines[0], sizeof(new_lines[0]), "Sensors Data");
+    snprintf(new_lines[2], sizeof(new_lines[2]), "%s", s_local_sensor_buffer.timestamp > 0 ? time_str : "Time not set");
+
+    if (isnan(s_local_sensor_buffer.temperature_c)) {
+        snprintf(new_lines[3], sizeof(new_lines[3]), "T: N/A");
+    } else {
+        snprintf(new_lines[3], sizeof(new_lines[3]), "T: %.2f C", s_local_sensor_buffer.temperature_c);
+    }
+
+    if (s_local_sensor_buffer.pressure_pa == 0) {
+        snprintf(new_lines[4], sizeof(new_lines[4]), "P: N/A");
+    } else {
+        snprintf(new_lines[4], sizeof(new_lines[4]), "P: %.0f Pa", (float)s_local_sensor_buffer.pressure_pa);
+    }
+
+    if (isnan(s_local_sensor_buffer.diff_pressure_pa)) {
+        snprintf(new_lines[5], sizeof(new_lines[5]), "DP: N/A");
+    } else {
+        snprintf(new_lines[5], sizeof(new_lines[5]), "DP: %.2f Pa", s_local_sensor_buffer.diff_pressure_pa);
+    }
+
+    char write_status_str[4];
+    if (s_local_sensor_buffer.writeStatus == WRITE_STATUS_OK)
     {
-        local_buffer = g_sensor_buffer;
-        xSemaphoreGive(g_sensor_buffer_mutex);
-
-        struct tm local_tm;
-        convert_gmt_to_cet(local_buffer.timestamp, &local_tm);
-        char time_str[20];
-        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &local_tm);
-
-        // new_lines[1] is intentionally left blank
-        snprintf(new_lines[0], sizeof(new_lines[0]), "Sensors Data");
-        snprintf(new_lines[2], sizeof(new_lines[2]), "%s", local_buffer.timestamp > 0 ? time_str : "Time not set");
-
-        if (isnan(local_buffer.temperature_c)) {
-            snprintf(new_lines[3], sizeof(new_lines[3]), "T: N/A");
-        } else {
-            snprintf(new_lines[3], sizeof(new_lines[3]), "T: %.2f C", local_buffer.temperature_c);
-        }
-
-        if (local_buffer.pressure_pa == 0) {
-            snprintf(new_lines[4], sizeof(new_lines[4]), "P: N/A");
-        } else {
-            snprintf(new_lines[4], sizeof(new_lines[4]), "P: %.0f Pa", (float)local_buffer.pressure_pa);
-        }
-
-        if (isnan(local_buffer.diff_pressure_pa)) {
-            snprintf(new_lines[5], sizeof(new_lines[5]), "DP: N/A");
-        } else {
-            snprintf(new_lines[5], sizeof(new_lines[5]), "DP: %.2f Pa", local_buffer.diff_pressure_pa);
-        }
-
-        char write_status_str[4];
-        if (local_buffer.writeStatus == WRITE_STATUS_OK)
-        {
-            strcpy(write_status_str, "OK");
-        }
-        else if (local_buffer.writeStatus == WRITE_STATUS_FAIL)
-        {
-            strcpy(write_status_str, "KO");
-        }
-        else
-        { // WRITE_STATUS_UNKNOWN
-            strcpy(write_status_str, "?");
-        }
-        snprintf(new_lines[7], sizeof(new_lines[7]), "Last write: %s", write_status_str);
-
-        if (isnan(local_buffer.battery_voltage)) {
-            snprintf(new_lines[6], sizeof(new_lines[6]), "Batt: N/A");
-        } else {
-            snprintf(new_lines[6], sizeof(new_lines[6]), "Batt: %.2fV-%d%% %s", local_buffer.battery_voltage, local_buffer.battery_percentage, local_buffer.battery_externally_powered == 1 ? "(C)" : "");
-        }
+        strcpy(write_status_str, "OK");
+    }
+    else if (s_local_sensor_buffer.writeStatus == WRITE_STATUS_FAIL)
+    {
+        strcpy(write_status_str, "KO");
     }
     else
-    {
-        return; // Don't update display if we can't get the data
+    { // WRITE_STATUS_UNKNOWN
+        strcpy(write_status_str, "?");
+    }
+    snprintf(new_lines[7], sizeof(new_lines[7]), "Last write: %s", write_status_str);
+
+    if (isnan(s_local_sensor_buffer.battery_voltage)) {
+        snprintf(new_lines[6], sizeof(new_lines[6]), "Batt: N/A");
+    } else {
+        snprintf(new_lines[6], sizeof(new_lines[6]), "Batt: %.2fV-%d%% %s", s_local_sensor_buffer.battery_voltage, s_local_sensor_buffer.battery_percentage, s_local_sensor_buffer.battery_externally_powered == 1 ? "(C)" : "");
     }
 
     write_inverted_line(0, new_lines[0]);
     for (uint8_t row = 1; row < 8; ++row)
     {
         write_padded_line(row, new_lines[row]);
-        strncpy(last_lines[row], new_lines[row], sizeof(last_lines[row]));
     }
-    i2c_oled_update_screen(s_oled_i2c_num);
 }
 
 void page_fs_stats_render_callback(void)
@@ -430,15 +419,9 @@ void page_fs_stats_render_callback(void)
 
     int file_count = -2; // Default to loading state
     int free_space_mb = -2;
-    time_t last_write_ts = 0;
-
-    if (g_sensor_buffer_mutex && xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
-    {
-        file_count = g_sensor_buffer.sd_card_file_count;
-        free_space_mb = g_sensor_buffer.sd_card_free_bytes;
-        last_write_ts = g_sensor_buffer.last_successful_write_ts;
-        xSemaphoreGive(g_sensor_buffer_mutex);
-    }
+    file_count = s_local_sensor_buffer.sd_card_file_count;
+    free_space_mb = s_local_sensor_buffer.sd_card_free_bytes;
+    time_t last_write_ts = s_local_sensor_buffer.last_successful_write_ts;
 
     // Line 1 is blank
 
@@ -490,7 +473,6 @@ void page_fs_stats_render_callback(void)
     {
         write_padded_line(row, new_lines[row]);
     }
-    i2c_oled_update_screen(s_oled_i2c_num);
 }
 // --- Menu event handlers ---
 void menu_on_cw(void)
@@ -636,6 +618,73 @@ void render_cmd_feedback_screen(void)
     i2c_oled_update_screen(s_oled_i2c_num);
 }
 
+/**
+ * @brief Draws a battery icon in the top-right corner of the screen.
+ *
+ * The icon's fill level represents the battery percentage. It also shows
+ * a charging symbol if the device is externally powered.
+ */
+static void draw_battery_icon(void) {
+    if (!s_oled_initialized)
+        return;
+
+    int percentage = s_local_sensor_buffer.battery_percentage;
+    bool is_charging = s_local_sensor_buffer.battery_externally_powered;
+    bool sd_write_failed = (s_local_sensor_buffer.writeStatus == WRITE_STATUS_FAIL);
+    // The title bar is inverted on most screens. We render the icon with a non-inverted
+    // color (white on black) only for specific full-screen pages that have a black background at the top.
+    bool is_fullscreen_no_bar = (s_current_page == &about_page) ||
+                                (s_current_page == &web_server_page && s_local_sensor_buffer.web_server_status == WEB_SERVER_RUNNING && s_web_page_view == 0);
+
+    bool is_inverted = !is_fullscreen_no_bar;
+
+    // Icon position and dimensions
+    const int icon_x = 114;
+    const int icon_y = 1;
+    const int body_width = 12;
+    const int body_height = 6;
+
+    // Clear the area behind the icon to prevent artifacts
+    for (int y = 0; y < 8; ++y) {
+        for (int x = icon_x; x < 128; ++x) {
+            i2c_oled_draw_pixel(s_oled_i2c_num, x, y, is_inverted);
+        }
+    }
+
+    // Draw battery outline and terminal
+    i2c_oled_draw_rect(s_oled_i2c_num, icon_x, icon_y, body_width, body_height, !is_inverted);
+    i2c_oled_fill_rect(s_oled_i2c_num, icon_x + body_width, icon_y + 2, 1, 2, !is_inverted);
+
+    // Draw fill level
+    int fill_width = (body_width - 2) * percentage / 100;
+    if (fill_width > 0) {
+        i2c_oled_fill_rect(s_oled_i2c_num, icon_x + 1, icon_y + 1, fill_width, body_height - 2, !is_inverted);
+    }
+
+    // If charging, draw a small lightning bolt symbol inside the battery
+    if (is_charging) {
+        int bolt_x = icon_x + 4;
+        int bolt_y = icon_y + 1;
+        i2c_oled_draw_pixel(s_oled_i2c_num, bolt_x + 1, bolt_y, is_inverted);
+        i2c_oled_draw_pixel(s_oled_i2c_num, bolt_x + 2, bolt_y, is_inverted);
+        i2c_oled_draw_pixel(s_oled_i2c_num, bolt_x, bolt_y + 1, is_inverted);
+        i2c_oled_draw_pixel(s_oled_i2c_num, bolt_x + 1, bolt_y + 1, is_inverted);
+        i2c_oled_draw_pixel(s_oled_i2c_num, bolt_x + 2, bolt_y + 2, is_inverted);
+        i2c_oled_draw_pixel(s_oled_i2c_num, bolt_x + 1, bolt_y + 3, is_inverted);
+    }
+
+    // If SD card write failed, draw a warning triangle to the left of the battery
+    if (sd_write_failed) {
+        int warning_x = icon_x - 9;
+        int warning_y = icon_y + 1;
+        // Draw "!!" using pixel-based rectangles
+        i2c_oled_fill_rect(s_oled_i2c_num, warning_x, warning_y, 1, 3, !is_inverted); // First '!' bar
+        i2c_oled_draw_pixel(s_oled_i2c_num, warning_x, warning_y + 4, !is_inverted);   // First '!' dot
+        i2c_oled_fill_rect(s_oled_i2c_num, warning_x + 2, warning_y, 1, 3, !is_inverted); // Second '!' bar
+        i2c_oled_draw_pixel(s_oled_i2c_num, warning_x + 2, warning_y + 4, !is_inverted);   // Second '!' dot
+    }
+}
+
 static void enter_cmd_pending_mode(uint32_t timeout_ms, post_cmd_action_t post_action) {
     s_cmd_pending_mode = true;
     s_cmd_start_time_ms = esp_timer_get_time() / 1000;
@@ -743,6 +792,13 @@ void uiRender_task(void *pvParameters)
             }
             last_sensor_refresh_ms = current_time_ms;
         }
+
+        // Centralized buffer copy for rendering
+        if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+            s_local_sensor_buffer = g_sensor_buffer;
+            xSemaphoreGive(g_sensor_buffer_mutex);
+        }
+
         // Always call the correct render callback
         if (s_sleeping_mode)
         {
@@ -775,6 +831,7 @@ void uiRender_task(void *pvParameters)
         {
             s_current_page->render();
         }
+        draw_battery_icon();
         i2c_oled_update_screen(s_oled_i2c_num);
         vTaskDelay(pdMS_TO_TICKS(100));
     }
@@ -1004,5 +1061,4 @@ void render_config_callback(void)
         snprintf(line_buf, sizeof(line_buf), " %.19s", s_config_items[item_index].value);
         write_padded_line(line_num + 1, line_buf);
     }
-    i2c_oled_update_screen(s_oled_i2c_num);
 }

@@ -14,6 +14,7 @@ This project is a datalogger built on the ESP32-S3 platform using the ESP-IDF fr
     *   Real-time sensor data (temperature, pressure, differential pressure, battery status).
     *   Current timestamp.
     *   SD card write status.
+    *   Persistent status icons for battery level, charging status, and SD card write errors.
     *   A settings menu to manage the RTC, SD card, view configuration, and display a QR code linking to the project repository.
 *   **NTP Time Sync**: Can synchronize the RTC with an NTP server over Wi-Fi.
 *   **Web Server**: Can start a Wi-Fi access point and web server to allow downloading logged data files directly from a web browser.

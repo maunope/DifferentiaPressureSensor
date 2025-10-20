@@ -14,6 +14,37 @@ This guide explains how to navigate and use the user interface of the Differenti
     *   On an information page (like "About" or "Sensor Data"), it **returns to the previous menu**.
 *   **Long Press (Hold for ~1 second)**: From any menu screen, it acts as a "home" button, immediately returning you to the **Sensor Data screen**.
 
+## Status Icons
+
+The top-right corner of the screen displays persistent icons that provide at-a-glance information about the device's status.
+
+*   **Battery Icon**: Shows the current battery charge level. The fill level represents the remaining charge.
+
+    ```
+    +--------------------+
+    | Main Menu      [[]] <-- Battery Icon
+    | ...                |
+    +--------------------+
+    ```
+
+*   **Charging Icon**: When the device is connected to USB power, a lightning bolt symbol appears **inside** the battery icon.
+
+    ```
+    +--------------------+
+    | Main Menu      [[#]] <-- Charging Icon
+    | ...                |
+    +--------------------+
+    ```
+
+*   **SD Card Error**: If the device fails to write to the SD card, a two exclamation marks (**!!**) will appear to the **left** of the battery icon. This icon persists until the next successful write.
+
+    ```
+    +--------------------+
+    | Main Menu   /!\ [[]] <-- SD Error
+    | ...                |
+    +--------------------+
+    ```
+
 ## Main Screens
 
 ### Sensor Data Screen
