@@ -89,12 +89,6 @@ const config_params_t* g_cfg = NULL;
 static uint64_t last_activity_ms = 0;
 static bool is_usb_connected_state = false;
 
-typedef enum {
-    WEB_SERVER_FSM_IDLE,
-    WEB_SERVER_FSM_WAIT_DATALOGGER_PAUSE,
-    WEB_SERVER_FSM_CONNECTING,
-} web_server_fsm_state_t;
-
 static web_server_fsm_state_t s_web_server_state = WEB_SERVER_FSM_IDLE;
 
 /**

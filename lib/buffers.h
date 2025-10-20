@@ -69,6 +69,13 @@ typedef enum {
     APP_CMD_STOP_WEB_SERVER,
 } app_command_t;
 
+typedef enum {
+    WEB_SERVER_FSM_IDLE,
+    WEB_SERVER_FSM_WAIT_DATALOGGER_PAUSE,
+    WEB_SERVER_FSM_CONNECTING,
+} web_server_fsm_state_t;
+
+
 extern QueueHandle_t g_app_cmd_queue;
 
 // --- Command execution status for UI feedback ---
