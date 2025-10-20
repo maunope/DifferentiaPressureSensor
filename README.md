@@ -17,7 +17,7 @@ This project is a datalogger built on the ESP32-S3 platform using the ESP-IDF fr
     *   Persistent status icons for battery level, charging status, and SD card write errors.
     *   A settings menu to manage the RTC, SD card, view configuration, and display a QR code linking to the project repository.
 *   **NTP Time Sync**: Can synchronize the RTC with an NTP server over Wi-Fi.
-*   **Web Server**: Can start a Wi-Fi access point and web server to allow downloading logged data files directly from a web browser.
+*   **Web Server**: Can strt a web server to allow downloading logged data files directly from a web browser.
 *   **USB Mass Storage**: The SD card can be accessed as a USB Mass Storage Device when connected to a computer, allowing for easy retrieval of log files. The system prevents SD card writes while the USB is mounted and disables the web server to prevent conflicts.
 *   **Power Management**: Implements deep sleep to conserve battery, waking up on a timer or via user interaction (rotary encoder button). The OLED screen also powers down after a period of inactivity.
 *   **Configuration via INI file**: Key parameters like sleep intervals, Wi-Fi credentials, and sensor models can be configured via a `config.ini` file on the SD card. The device does not go to sleep while the web server is active.
@@ -50,15 +50,17 @@ For more details on the custom PCB, see the [board design documentation](BOARD_D
 
 *   **Framework**: ESP-IDF
 *   **RTOS**: FreeRTOS
-*   **Component Management**: Dependencies like `esp_tinyusb` and `qrcode` are managed by the ESP-IDF Component Manager via the `idf_component.yml` file.
+*   **Component Management**: Dependencies like `qrcode` and `tinyusb` are managed by the ESP-IDF Component Manager via the `idf_component.yml` file. The `esp_tinyusb` component for USB Mass Storage is enabled and configured directly through `menuconfig`, with settings reflected in the PlatformIO build profiles.
 *   **Custom Libraries (located in `lib/`)**: This project uses a modular structure with several custom libraries:
     *   `i2c-bmp280`: Driver for the BMP280 sensor.
     *   `i2c-d6fph`: Driver for the Omron D6F-PH sensor.
     *   `i2c-ds3231`: Driver for the DS3231 RTC.
     *   `i2c-oled`: Driver for the OLED display.
-    *   `rotaryencoder`: Driver for the rotary encoder input.
-    *   `spi-sdcard`: High-level manager for SD card operations.
     *   `lipo-battery`: Logic for reading battery voltage.
     *   `ntp-client`: Helper for synchronizing time from an NTP server.
+    *   `rotaryencoder`: Driver for the rotary encoder input.
+    *   `spi-sdcard`: High-level manager for SD card operations.
     *   `config-manager`: Handles loading configuration from an INI file.
+    *   `wifi_manager`: Centralizes Wi-Fi connection and disconnection logic.
+    *   `web_server`: Provides a web interface for downloading log files.
     *   `ui`: Manages the complete user interface, menu, and pages.
