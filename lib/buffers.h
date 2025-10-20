@@ -19,6 +19,14 @@ typedef struct {
         DATA_LOGGER_RUNNING,
         DATA_LOGGER_PAUSED,
     } datalogger_status;
+    enum {
+        WEB_SERVER_STOPPED,
+        WEB_SERVER_STARTING,
+        WEB_SERVER_RUNNING,
+        WEB_SERVER_FAILED,
+        WEB_SERVER_USB_CONNECTED,
+    } web_server_status;
+    char web_server_url[64];
     long pressure_pa;
     float temperature_c;
     float diff_pressure_pa;
@@ -55,6 +63,10 @@ typedef enum {
 
     APP_CMD_SYNC_RTC_NTP,
     APP_CMD_REFRESH_SENSOR_DATA,
+    APP_CMD_PAUSE_DATALOGGER,
+    APP_CMD_RESUME_DATALOGGER,
+    APP_CMD_START_WEB_SERVER,
+    APP_CMD_STOP_WEB_SERVER,
 } app_command_t;
 
 extern QueueHandle_t g_app_cmd_queue;

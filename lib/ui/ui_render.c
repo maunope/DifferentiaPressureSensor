@@ -14,13 +14,21 @@
 #include "../../src/config_params.h"
 #include <math.h>
 #include "qrcode.h"
+#include "wifi_manager.h"
+#include "web_server.h"
 
+#include "esp_netif.h"
 // --- QR Code Caching ---
 // A dedicated buffer to store the rendered QR code image to avoid re-generating it.
 #define OLED_WIDTH 128
 #define OLED_HEIGHT 64
 static uint8_t s_qr_code_buffer[OLED_WIDTH * OLED_HEIGHT / 8];
 static bool s_qr_code_cached = false;
+
+// --- Web Server QR Code Caching ---
+static uint8_t s_web_qr_code_buffer[OLED_WIDTH * OLED_HEIGHT / 8];
+static bool s_web_qr_code_cached = false;
+static int s_web_page_view = 0; // 0 for QR code, 1 for text URL
 
 static const char *TAG = "ui_render";
 
@@ -68,7 +76,6 @@ static uint32_t s_cmd_timeout_ms = 5000; // Default timeout
 static post_cmd_action_t s_post_cmd_action = POST_ACTION_NONE;
 
 static void ui_config_page_prepare_data(void);
-
 /* --- For Config Page --- */
 
 // Structure to hold a single config item for display.
@@ -230,6 +237,74 @@ void render_about_callback(void)
     i2c_oled_load_buffer(s_qr_code_buffer, sizeof(s_qr_code_buffer));
 }
 
+// --- Web Server Page Rendering ---
+void render_web_server_callback(void) {
+    if (!s_oled_initialized) return;
+
+    int status = WEB_SERVER_STOPPED;
+    char url[64] = {0};
+
+    if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50))) {
+        status = g_sensor_buffer.web_server_status;
+        strncpy(url, g_sensor_buffer.web_server_url, sizeof(url) - 1);
+        xSemaphoreGive(g_sensor_buffer_mutex);
+    }
+
+    i2c_oled_clear(s_oled_i2c_num);
+
+    switch (status) {
+        case WEB_SERVER_STARTING:
+            write_inverted_line(0, "Web Server");
+            write_padded_line(2, "Starting...");
+            write_padded_line(3, "Please wait.");
+            break;
+
+        case WEB_SERVER_RUNNING:
+            if (s_web_page_view == 0) { // QR Code View
+                if (!s_web_qr_code_cached) {
+                    esp_qrcode_config_t cfg = ESP_QRCODE_CONFIG_DEFAULT();
+                    cfg.display_func = oled_display_qr_code;
+                    esp_qrcode_generate(&cfg, url);
+                    i2c_oled_get_buffer(s_web_qr_code_buffer, sizeof(s_web_qr_code_buffer));
+                    s_web_qr_code_cached = true;
+                }
+                i2c_oled_load_buffer(s_web_qr_code_buffer, sizeof(s_web_qr_code_buffer));
+            } else { // Text URL View
+                write_inverted_line(0, "Web Server");
+                write_padded_line(2, "Connect to:");
+                write_padded_line(3, url);
+                write_padded_line(6, "Press btn to exit");
+            }
+            break;
+
+        case WEB_SERVER_FAILED:
+            write_inverted_line(0, "Web Server");
+            write_padded_line(2, "Failed to start.");
+            write_padded_line(3, "Check WiFi config.");
+            write_padded_line(6, "Press btn to exit");
+            break;
+
+        case WEB_SERVER_USB_CONNECTED:
+            write_inverted_line(0, "Web Server");
+            write_padded_line(2, "Blocked by USB");
+            write_padded_line(3, "connection.");
+            write_padded_line(6, "Press btn to exit");
+            break;
+
+        default: // WEB_SERVER_STOPPED or unknown
+            write_inverted_line(0, "Web Server");
+            write_padded_line(2, "Stopped.");
+            break;
+    }
+}
+
+void page_web_server_on_btn(void) {
+    app_command_t cmd = APP_CMD_STOP_WEB_SERVER;
+    xQueueSend(g_app_cmd_queue, &cmd, 0);
+    s_web_qr_code_cached = false; // Invalidate cache for next time
+    s_menu_mode = true;
+    s_current_page = NULL;
+}
 
 /**
  * @brief Callback function to render a QR code to the OLED display.
@@ -805,6 +880,8 @@ void page_about_on_ccw(void) { /* Do nothing */ }
 void page_sensor_on_btn(void)
 {
     s_menu_mode = true;
+    current_page = 0; // Reset to main menu
+    current_item = 0; // Reset to first item
     s_current_page = NULL;
 }
 void page_sensor_on_cw(void) { /* Do nothing */ }
@@ -817,6 +894,23 @@ void page_fs_stats_on_btn(void)
 {
     s_menu_mode = true;
     s_current_page = NULL;
+}
+
+void menu_web_server_on_btn(void) {
+    s_menu_mode = false;
+    s_current_page = &web_server_page;
+    s_web_qr_code_cached = false; // Invalidate QR cache on entry
+    s_web_page_view = 0;          // Default to QR view
+
+    app_command_t cmd = APP_CMD_START_WEB_SERVER;
+    xQueueSend(g_app_cmd_queue, &cmd, 0);
+}
+
+void page_web_server_on_cw(void) {
+    s_web_page_view = (s_web_page_view + 1) % 2; // Toggle between 0 and 1
+}
+void page_web_server_on_ccw(void) {
+    s_web_page_view = (s_web_page_view + 1) % 2; // Toggle between 0 and 1
 }
 
 void menu_config_on_btn(void)

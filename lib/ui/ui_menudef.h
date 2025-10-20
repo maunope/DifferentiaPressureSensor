@@ -30,6 +30,12 @@ void page_config_on_ccw(void);
 
 void page_fs_stats_render_callback(void);
 
+void menu_web_server_on_btn(void);
+void page_web_server_on_cw(void);
+void page_web_server_on_ccw(void);
+void page_web_server_on_btn(void);
+void render_web_server_callback(void);
+
 #define MENU_BACK_ITEM { \
     .label = "Back", \
     .has_submenu = false, \
@@ -38,16 +44,27 @@ void page_fs_stats_render_callback(void);
     .on_btn = menu_cancel_on_btn \
 }
 
+#define CONFIRM_MENU_PAGE(page_title, confirm_callback) \
+    { \
+        .title = page_title, \
+        .items = { \
+            { .label = "Cancel", .has_submenu = false, .on_btn = menu_cancel_on_btn }, \
+            { .label = "Confirm", .has_submenu = false, .on_btn = confirm_callback } \
+        }, \
+        .item_count = 2 \
+    }
+
 const ui_menu_page_t ui_menu_tree[] = {
     {
         .title = "Main Menu",
         .items = {
             { .label = "Sensor data", .has_submenu = false, .on_btn = menu_sensor_on_btn },
             { .label = "Options", .has_submenu = true, .submenu_page_index = 1 },
+            { .label = "Web Server", .has_submenu = true, .submenu_page_index = 7, .on_btn = NULL },
             { .label = "About", .has_submenu = false, .on_btn = menu_about_on_btn },
            
         },
-        .item_count = 3,
+        .item_count = 4,
     },
     {
         .title = "Options",
@@ -77,32 +94,13 @@ const ui_menu_page_t ui_menu_tree[] = {
         },
         .item_count = 3
     },
-    {
-        .title = "Sync RTC w/ NTP?",
-        .items = {
-            { .label = "Cancel", .has_submenu = false, .on_btn = menu_cancel_on_btn },
-            { .label = "Confirm", .has_submenu = false, .on_btn = menu_sync_rtc_ntp_on_btn }
-        },
-        .item_count = 2
-    },
-    {
-        .title = "Built time to RTC?",
-        .items = {
-            { .label = "Cancel", .has_submenu = false, .on_btn = menu_cancel_on_btn },
-            { .label = "Confirm", .has_submenu = false, .on_btn = menu_set_time_on_btn }
-        },
-        .item_count = 2
-    },
-    {
-        .title = "Format SD Card?",
-        .items = {
-            { .label = "Cancel", .has_submenu = false, .on_btn = menu_cancel_on_btn },
-            { .label = "Confirm", .has_submenu = false, .on_btn = menu_format_sd_confirm_on_btn }
-        },
-        .item_count = 2
-    }
+    // Confirmation Pages
+    CONFIRM_MENU_PAGE("Sync RTC w/ NTP?", menu_sync_rtc_ntp_on_btn),       // Page 4
+    CONFIRM_MENU_PAGE("Built time to RTC?", menu_set_time_on_btn),        // Page 5
+    CONFIRM_MENU_PAGE("Format SD Card?", menu_format_sd_confirm_on_btn),  // Page 6
+    CONFIRM_MENU_PAGE("Start Web Server?", menu_web_server_on_btn),       // Page 7
 }; // ui_menu_tree
-const uint8_t ui_menu_page_count = sizeof(ui_menu_tree) / sizeof(ui_menu_tree[0]);
+const uint8_t ui_menu_page_count = sizeof(ui_menu_tree) / sizeof(ui_menu_tree[0]); // This count updates automatically
 
 // Standalone pages
 const ui_page_t about_page = {
@@ -130,4 +128,11 @@ const ui_page_t config_page = {
     .on_ccw = page_config_on_ccw,
     .on_btn = page_config_on_btn,
     .render = render_config_callback
+};
+
+const ui_page_t web_server_page = {
+    .on_cw = page_web_server_on_cw,
+    .on_ccw = page_web_server_on_ccw,
+    .on_btn = page_web_server_on_btn,
+    .render = render_web_server_callback
 };

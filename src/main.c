@@ -21,21 +21,23 @@
 #include <sys/stat.h>
 #include "esp_sleep.h"
 #include "esp_sntp.h"
+#include "esp_netif.h"
 
 #include "../lib/i2c-bmp280/i2c-bmp280.h" // BMP280 sensor API
+#include "../lib/i2c-d6fph/i2c-d6fph.h"
+#include "../lib/i2c-ds3231/i2c-ds3231.h"
+#include "../lib/i2c-oled/i2c-oled.h"
 #include "../lib/rotaryencoder/rotaryencoder.h"
 #include "../lib/spi-sdcard/spi-sdcard.h"
-#include "../lib/i2c-oled/i2c-oled.h"
-#include "ui_render.h"
 #include "../lib/buffers.h"
-#include "i2c-ds3231.h"
-#include "../lib/i2c-ds3231/i2c-ds3231.h"
-#include "datalogger_task.h"
 #include "../lib/config-manager/config-manager.h"
 #include "../lib/lipo-battery/lipo-battery.h"
-#include "config_params.h"
 #include "../lib/ntp-client/ntp-client.h"
-
+#include "../lib/wifi_manager/wifi_manager.h" 
+#include "../lib/web_server/web_server.h"
+#include "ui_render.h"
+#include "datalogger_task.h"
+#include "config_params.h"
 // DO NOT use pins 19 and 20, they are used by the flash memory
 // DO NOT use pins 5 and 6, they are used for LiPo battery measurements unless you change the config
 
@@ -86,6 +88,14 @@ const config_params_t* g_cfg = NULL;
 
 static uint64_t last_activity_ms = 0;
 static bool is_usb_connected_state = false;
+
+typedef enum {
+    WEB_SERVER_FSM_IDLE,
+    WEB_SERVER_FSM_WAIT_DATALOGGER_PAUSE,
+    WEB_SERVER_FSM_CONNECTING,
+} web_server_fsm_state_t;
+
+static web_server_fsm_state_t s_web_server_state = WEB_SERVER_FSM_IDLE;
 
 /**
  * @brief Callback for clockwise rotation from the rotary encoder.
@@ -285,6 +295,84 @@ static void go_to_deep_sleep(void) {
     // --- Execution stops here, device will restart on wakeup ---
 }
 
+static void handle_start_web_server(void) {
+    // Check if USB is connected as Mass Storage. If so, don't start the web server.
+    if (spi_sdcard_is_usb_connected()) {
+        ESP_LOGW(TAG, "Cannot start web server while USB is connected as mass storage.");
+        if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY)) {
+            g_sensor_buffer.web_server_status = WEB_SERVER_USB_CONNECTED;
+            xSemaphoreGive(g_sensor_buffer_mutex);
+        }
+        return;
+    }
+
+    s_web_server_state = WEB_SERVER_FSM_WAIT_DATALOGGER_PAUSE;
+    if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY)) {
+        g_sensor_buffer.web_server_status = WEB_SERVER_STARTING;
+        xSemaphoreGive(g_sensor_buffer_mutex);
+    }
+    ESP_LOGI(TAG, "Requesting datalogger to pause for web server...");
+    datalogger_command_t logger_cmd = DATALOGGER_CMD_PAUSE_WRITES;
+    xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
+}
+
+static void handle_stop_web_server(void) {
+    s_web_server_state = WEB_SERVER_FSM_IDLE;
+    ESP_LOGI(TAG, "Stopping web server and Wi-Fi.");
+    stop_web_server();
+    wifi_manager_disconnect();
+    if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY)) {
+        g_sensor_buffer.web_server_status = WEB_SERVER_STOPPED;
+        g_sensor_buffer.web_server_url[0] = '\0';
+        xSemaphoreGive(g_sensor_buffer_mutex);
+    }
+    // Resume datalogger
+    datalogger_command_t logger_cmd = DATALOGGER_CMD_RESUME_WRITES;
+    xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
+}
+
+static void handle_web_server_fsm(void) {
+    // --- Web Server State Machine ---
+    if (s_web_server_state == WEB_SERVER_FSM_WAIT_DATALOGGER_PAUSE) {
+        bool is_paused = false;
+        if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50))) {
+            if (g_sensor_buffer.datalogger_status == DATA_LOGGER_PAUSED) {
+                is_paused = true;
+            }
+            xSemaphoreGive(g_sensor_buffer_mutex);
+        }
+
+        if (is_paused) {
+            ESP_LOGI(TAG, "Datalogger paused. Starting Wi-Fi and Web Server...");
+            if (wifi_manager_connect(g_cfg->wifi_ssid, g_cfg->wifi_password) == ESP_OK) {
+                s_web_server_state = WEB_SERVER_FSM_CONNECTING;
+            } else {
+                ESP_LOGE(TAG, "Failed to start Wi-Fi connection.");
+                handle_stop_web_server(); // Clean up on failure
+            }
+        }
+    } else if (s_web_server_state == WEB_SERVER_FSM_CONNECTING) {
+        if (wifi_manager_is_connected()) {
+            ESP_LOGI(TAG, "Wi-Fi connected. Starting web server.");
+            start_web_server();
+            
+            esp_netif_ip_info_t ip_info;
+            esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+            if (netif && esp_netif_get_ip_info(netif, &ip_info) == ESP_OK && ip_info.ip.addr != 0) {
+                if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY)) {
+                    snprintf(g_sensor_buffer.web_server_url, sizeof(g_sensor_buffer.web_server_url), "http://" IPSTR, IP2STR(&ip_info.ip));
+                    g_sensor_buffer.web_server_status = WEB_SERVER_RUNNING;
+                    xSemaphoreGive(g_sensor_buffer_mutex);
+                }
+                s_web_server_state = WEB_SERVER_FSM_IDLE; // Transition to idle, but server is running
+            } else {
+                ESP_LOGE(TAG, "Could not get IP address. Stopping web server.");
+                handle_stop_web_server();
+            }
+        }
+    }
+}
+
 /**
  * @brief i2c master initialization
  *
@@ -368,10 +456,52 @@ void main_task(void *pvParameters)
                     xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
                 }
                 break;
+            case APP_CMD_PAUSE_DATALOGGER:
+                ESP_LOGI(TAG, "Received command to pause datalogger.");
+                if (g_datalogger_cmd_queue != NULL) {
+                    datalogger_command_t logger_cmd = DATALOGGER_CMD_PAUSE_WRITES;
+                    xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
+                }
+                break;
+            case APP_CMD_RESUME_DATALOGGER:
+                ESP_LOGI(TAG, "Received command to resume datalogger.");
+                if (g_datalogger_cmd_queue != NULL) {
+                    datalogger_command_t logger_cmd = DATALOGGER_CMD_RESUME_WRITES;
+                    xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
+                }
+                break;
+            case APP_CMD_START_WEB_SERVER:
+                ESP_LOGI(TAG, "Received command to start web server.");
+                handle_start_web_server();
+                break;
+            case APP_CMD_STOP_WEB_SERVER:
+                ESP_LOGI(TAG, "Received command to stop web server.");
+                handle_stop_web_server();
+                break;
             default:
                 ESP_LOGW(TAG, "Unknown command received: %d", cmd);
                 break;
             }
+        }
+
+        handle_web_server_fsm();
+
+        // Handle Wi-Fi disconnect when web server should be active
+        if (g_sensor_buffer.web_server_status == WEB_SERVER_RUNNING && !wifi_manager_is_connected()) {
+            ESP_LOGW(TAG, "Web server is active but Wi-Fi disconnected. Attempting to reconnect...");
+            // Update UI status
+            if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY)) {
+                g_sensor_buffer.web_server_status = WEB_SERVER_STARTING;
+                xSemaphoreGive(g_sensor_buffer_mutex);
+            }
+            wifi_manager_connect(g_cfg->wifi_ssid, g_cfg->wifi_password);
+        }
+
+        // Check if the web server is active
+        bool web_server_active = false;
+        if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50))) {
+            web_server_active = (g_sensor_buffer.web_server_status == WEB_SERVER_RUNNING || g_sensor_buffer.web_server_status == WEB_SERVER_STARTING);
+            xSemaphoreGive(g_sensor_buffer_mutex);
         }
 
         // --- Main Sleep/Wake Logic ---
@@ -417,6 +547,17 @@ void main_task(void *pvParameters)
         if (spi_sdcard_is_usb_connected())
         {
             last_activity_ms = current_time_ms;
+
+            // If web server is running while USB is connected, stop it.
+            bool web_server_was_active = false;
+            if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50))) {
+                web_server_was_active = (g_sensor_buffer.web_server_status == WEB_SERVER_RUNNING || g_sensor_buffer.web_server_status == WEB_SERVER_STARTING);
+                xSemaphoreGive(g_sensor_buffer_mutex);
+            }
+            if (web_server_was_active) {
+                ESP_LOGI(TAG, "USB connection detected, stopping web server to prevent conflict.");
+                handle_stop_web_server();
+            }
         }
 
         // Determine if it's time to sleep. Conditions are:
@@ -436,7 +577,7 @@ void main_task(void *pvParameters)
 
         // --- Deep Sleep Logic ---
         // Conditions: UI must be inactive AND suspended, and a new log must have been written.
-        if (can_sleep)
+        if (can_sleep && !web_server_active)
         {
             ESP_LOGI(TAG, "UI inactive and new data log detected. Initiating sleep.");
             last_processed_write_ts = current_write_ts; // Mark this write as processed
@@ -444,7 +585,6 @@ void main_task(void *pvParameters)
             // --- Step 1: Prepare UI and Peripherals for Sleep ---
             // Suspend UI task and power down OLED to save power.
             oled_power_off(); // This will suspend the task and power down the OLED
-
             // Tell the datalogger task to pause writes to the SD card.
             ESP_LOGI(TAG, "Requesting datalogger to pause...");
             datalogger_command_t logger_cmd = DATALOGGER_CMD_PAUSE_WRITES;
@@ -493,7 +633,7 @@ void main_task(void *pvParameters)
         }
         // --- OLED Power-Off Logic ---
         // If UI is inactive but the screen is still on, turn it off.
-        else if (g_uiRender_task_handle != NULL && ui_is_inactive && !is_ui_suspended)
+        else if (g_uiRender_task_handle != NULL && ui_is_inactive && !is_ui_suspended && !web_server_active)
         {   
             // UI timeout occurred, but no new write yet. Just turn off the screen.            
             oled_power_off();
@@ -629,6 +769,9 @@ void app_main(void)
 
     // Initialize NVS first, as it's required by other components (like Wi-Fi)
     config_init();
+
+    // Initialize Wi-Fi stack
+    wifi_manager_init();
 
 
     const char* config_path = "/sdcard/config.ini";

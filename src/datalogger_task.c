@@ -8,14 +8,12 @@
 #include <time.h>
 #include <math.h>
 
-#include "../lib/i2c-bmp280/i2c-bmp280.h"
-#include "../lib/spi-sdcard/spi-sdcard.h"
 #include "../lib/buffers.h"
-#include "../lib/ui/time_utils.h"
-
-#include "../lib/lipo-battery/lipo-battery.h"
-
+#include "../lib/i2c-bmp280/i2c-bmp280.h"
 #include "../lib/i2c-d6fph/i2c-d6fph.h"
+#include "../lib/lipo-battery/lipo-battery.h"
+#include "../lib/spi-sdcard/spi-sdcard.h"
+#include "../lib/ui/time_utils.h"
 
 
 static const char *TAG = "DataloggerTask";

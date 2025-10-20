@@ -12,7 +12,7 @@ This guide explains how to navigate and use the user interface of the Differenti
     *   From the main data screen, it **enters the main menu**.
     *   In a menu, it **selects** the highlighted item. This may enter a submenu, trigger an action, or show an information page.
     *   On an information page (like "About" or "Sensor Data"), it **returns to the previous menu**.
-*   **Long Press (Hold for ~1 second)**: From any screen, it acts as a "home" button, immediately returning you to the **Sensor Data screen**.
+*   **Long Press (Hold for ~1 second)**: From any menu screen, it acts as a "home" button, immediately returning you to the **Sensor Data screen**.
 
 ## Main Screens
 
@@ -59,8 +59,8 @@ A short press on the button from the main data screen enters the menu system.
 | Main Menu          |
 |> Sensor data       |
 |  Options >         |
+|  Web Server >      |
 |  About             |
-|                    |
 |                    |
 |                    |
 +--------------------+
@@ -68,6 +68,7 @@ A short press on the button from the main data screen enters the menu system.
 
 *   **Sensor data**: Returns to the main data display screen.
 *   **Options**: Enters the `Options` submenu for device settings.
+*   **Web Server**: Enables a web server to allow data files download through WiFi, pauses data logging and disables sleep.
 *   **About**: Displays a QR code that links to the project's GitHub repository.
 
 ### About Page
@@ -84,6 +85,22 @@ Selecting "About" from the Main Menu will display a QR code. Scan this with your
 |                    |
 +--------------------+
 ```
+
+### Web Server page
+
+Selecting "Web Server" from the Main Menu and confirming will display a QR code. Scan this with your phone to visit the data file download page, scroll the rotary encoder to access the plain thext URL
+
+```
++--------------------+
+|                    |
+|    ████████████    |
+|    █ ▄▄▄▄▄▄ █ █    |
+|    █ █▄█▄█▄ █ █    |
+|    █▄▄▄▄▄▄▄█ █    |
+|                    |
++--------------------+
+```
+
 
 ### Options Menu
 
