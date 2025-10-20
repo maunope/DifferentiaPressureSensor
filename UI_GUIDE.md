@@ -1,5 +1,4 @@
 [<-- Back to Main Project Page](README.md)
-
 # User Interface Guide
 
 This guide explains how to navigate and use the user interface of the Differential Pressure Datalogger. The UI is controlled using a single rotary encoder with a built-in push-button.
@@ -40,7 +39,7 @@ The top-right corner of the screen displays persistent icons that provide at-a-g
 
     ```
     +--------------------+
-    | Main Menu   /!\ [[]] <-- SD Error
+    | Main Menu   !! [[]] <-- SD Error
     | ...                |
     +--------------------+
     ```
