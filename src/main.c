@@ -63,7 +63,7 @@
 #define ROTARY_ENCODER_PIN_A GPIO_NUM_41
 #define ROTARY_ENCODER_PIN_B GPIO_NUM_42
 #define ROTARY_ENCODER_BUTTON_PIN GPIO_NUM_2
-#define BUTTON_DEBOUNCE_TIME_MS 50
+#define BUTTON_DEBOUNCE_TIME_MS 80
 
 // --- Battery ADC Configuration ---
 #define BATTERY_PWR_PIN GPIO_NUM_5 // This pin is used to enable the battery voltage divider
@@ -105,6 +105,7 @@ static void on_encoder_rotate_cw(void)
  */
 static void on_encoder_rotate_ccw(void)
 {
+ 
     uiRender_send_event(UI_EVENT_CCW, NULL, 0);
     uiRender_reset_activity_timer();
 }
@@ -114,6 +115,7 @@ static void on_encoder_rotate_ccw(void)
  */
 static void on_encoder_button_press(void)
 {
+ 
     uiRender_send_event(UI_EVENT_BTN, NULL, 0);
     uiRender_reset_activity_timer();
 }
@@ -414,27 +416,28 @@ void main_task(void *pvParameters)
             switch (cmd)
             {
             case APP_CMD_SET_RTC_BUILD_TIME:
-                ESP_LOGI(TAG, "Received command to set RTC to build time.");
+                ESP_LOGI(TAG, "CMD: Set RTC to build time");
                 handle_set_rtc_to_build_time();
                 break;
             case APP_CMD_GET_SD_FREE_SPACE:
-                ESP_LOGI(TAG, "Received command to get SD card free space.");
+                ESP_LOGI(TAG, "CMD: Get SD free space");
                 spi_sdcard_get_free_space_mb();
                 break;
             case APP_CMD_GET_SD_FILE_COUNT:
-                ESP_LOGI(TAG, "Received command to get SD card file count.");
+                ESP_LOGI(TAG, "CMD: Get SD file count");
                 spi_sdcard_get_file_count();
                 break;
             case APP_CMD_FORMAT_SD_CARD:
-                ESP_LOGI(TAG, "Received command to format SD card.");
+                ESP_LOGI(TAG, "CMD: Format SD card");
                 spi_sdcard_format();
                 // Status is now handled inside spi_sdcard_format
                 break;
             case APP_CMD_SYNC_RTC_NTP:
-                ESP_LOGI(TAG, "Received command to sync RTC with NTP.");
+                ESP_LOGI(TAG, "CMD: Sync RTC with NTP");
                 handle_sync_rtc_with_ntp();
                 break;
             case APP_CMD_ACTIVITY_DETECTED:
+                ESP_LOGD(TAG, "CMD: Activity Detected");
                 last_activity_ms = esp_timer_get_time() / 1000;
                 if (g_uiRender_task_handle != NULL) {
                     // Only power on the OLED and change state if the UI task actually exists.
@@ -443,7 +446,7 @@ void main_task(void *pvParameters)
                 }
                 break;
             case APP_CMD_REFRESH_SENSOR_DATA:
-                // ESP_LOGI(TAG, "Received command to refresh sensor data, forwarding to datalogger.");
+                ESP_LOGD(TAG, "CMD: Refresh sensor data");
                 if (g_datalogger_cmd_queue != NULL)
                 {
                     datalogger_command_t logger_cmd = DATALOGGER_CMD_FORCE_REFRESH;
@@ -451,25 +454,25 @@ void main_task(void *pvParameters)
                 }
                 break;
             case APP_CMD_PAUSE_DATALOGGER:
-                ESP_LOGI(TAG, "Received command to pause datalogger.");
+                ESP_LOGI(TAG, "CMD: Pause datalogger");
                 if (g_datalogger_cmd_queue != NULL) {
                     datalogger_command_t logger_cmd = DATALOGGER_CMD_PAUSE_WRITES;
                     xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
                 }
                 break;
             case APP_CMD_RESUME_DATALOGGER:
-                ESP_LOGI(TAG, "Received command to resume datalogger.");
+                ESP_LOGI(TAG, "CMD: Resume datalogger");
                 if (g_datalogger_cmd_queue != NULL) {
                     datalogger_command_t logger_cmd = DATALOGGER_CMD_RESUME_WRITES;
                     xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
                 }
                 break;
             case APP_CMD_START_WEB_SERVER:
-                ESP_LOGI(TAG, "Received command to start web server.");
+                ESP_LOGI(TAG, "CMD: Start web server");
                 handle_start_web_server();
                 break;
             case APP_CMD_STOP_WEB_SERVER:
-                ESP_LOGI(TAG, "Received command to stop web server.");
+                ESP_LOGI(TAG, "CMD: Stop web server");
                 handle_stop_web_server();
                 break;
             default:
@@ -895,12 +898,12 @@ void app_main(void)
     datalogger_params->log_interval_ms = g_cfg->log_interval_ms;
 
     if (cause != ESP_SLEEP_WAKEUP_TIMER) {
-        xTaskCreate(uiRender_task, "uiRender", 4096, NULL, 5, &g_uiRender_task_handle);
+        xTaskCreate(uiRender_task, "uiRender", 4096, NULL, 6, &g_uiRender_task_handle);
     } else {
         g_uiRender_task_handle = NULL; // Ensure handle is null if task is not created
     }
     xTaskCreate(datalogger_task, "datalogger", 4096, datalogger_params, 5, NULL); // Pass pointer to heap-allocated struct
-    xTaskCreate(main_task, "main_task", 4096, NULL, 6, NULL);             // Main command processing task at priority 6
+    xTaskCreate(main_task, "main_task", 4096, NULL, 5, NULL);             // Main command processing task at priority 5
 
     // Signal that all initialization is done
     xEventGroupSetBits(g_init_event_group, INIT_DONE_BIT);

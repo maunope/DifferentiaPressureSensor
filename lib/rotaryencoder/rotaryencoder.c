@@ -60,7 +60,7 @@ void rotaryencoder_init(const rotaryencoder_config_t *cfg)
     // mode and pull_up_en are already set from before
     gpio_config(&io_conf);
 
-    gpio_evt_queue = xQueueCreate(16, sizeof(uint32_t));
+    gpio_evt_queue = xQueueCreate(64, sizeof(uint32_t));
     gpio_install_isr_service(0);
     gpio_isr_handler_add(g_encoder_cfg.pin_a, gpio_isr_handler, (void *)g_encoder_cfg.pin_a);
     gpio_isr_handler_add(g_encoder_cfg.pin_b, gpio_isr_handler, (void *)g_encoder_cfg.pin_b);
@@ -91,7 +91,6 @@ void rotaryencoder_enable_wakeup_source(void)
 static void rotary_encoder_task(void *arg)
 {
     uint32_t gpio_num;
-    TickType_t last_button_press_time = 0;
     TickType_t last_rotation_time = 0;
     TickType_t button_down_time = 0; // Time when button was pressed
     bool long_press_fired = false;   // Flag to prevent short press after a long press
@@ -104,26 +103,27 @@ static void rotary_encoder_task(void *arg)
         {
             if (gpio_num == g_encoder_cfg.button_pin)
             {
-                TickType_t current_time = xTaskGetTickCount();
-                if ((current_time - last_button_press_time) * portTICK_PERIOD_MS < g_encoder_cfg.button_debounce_ms)
-                {
-                    continue; // Ignore bounce
-                }
-                last_button_press_time = current_time;
-
                 if (gpio_get_level(g_encoder_cfg.button_pin) == 0)
                 {
                     // --- Button is PRESSED (falling edge) ---
-                    button_down_time = current_time;
-                    long_press_fired = false; // Reset flag on new press
+                    if (button_down_time == 0) { // Only register if not already pressed
+                        // Debounce the initial press
+                        vTaskDelay(pdMS_TO_TICKS(g_encoder_cfg.button_debounce_ms));
+                        if (gpio_get_level(g_encoder_cfg.button_pin) == 0) {
+                            button_down_time = xTaskGetTickCount();
+                            long_press_fired = false; // Reset flag on new press
+                        }
+                    }
                 }
                 else
                 {
                     // --- Button is RELEASED (rising edge) ---
-                    // Only fire short press if a long press hasn't already been fired
-                    if (button_down_time > 0 && !long_press_fired)
-                    {
-                        if (g_encoder_cfg.on_button_press) g_encoder_cfg.on_button_press();
+                    if (button_down_time > 0) { // Only process release if a press was registered
+                        // Only fire short press if a long press hasn't already been fired
+                        if (!long_press_fired)
+                        {
+                            if (g_encoder_cfg.on_button_press) g_encoder_cfg.on_button_press();
+                        }
                     }
                     button_down_time = 0; // Reset press time
                 }
@@ -172,8 +172,16 @@ static void rotary_encoder_task(void *arg)
                 TickType_t current_time = xTaskGetTickCount();
                 if ((current_time - button_down_time) * portTICK_PERIOD_MS >= LONG_PRESS_DURATION_MS)
                 {
-                    if (g_encoder_cfg.on_button_long_press) g_encoder_cfg.on_button_long_press();
-                    long_press_fired = true; // Mark that long press has been handled
+                    // Before firing, double-check if the button is still physically pressed.
+                    // This prevents a spurious long press if the release event was dropped.
+                    if (gpio_get_level(g_encoder_cfg.button_pin) == 0) {
+                        if (g_encoder_cfg.on_button_long_press) g_encoder_cfg.on_button_long_press();
+                        long_press_fired = true; // Mark that long press has been handled
+                    } else {
+                        // The button is up, but we missed the release event. Reset state.
+                        //ESP_LOGD(TAG, "Missed button release event, resetting long press state.");
+                        button_down_time = 0;
+                    }
                 }
             }
         }
@@ -185,7 +193,7 @@ static void rotary_encoder_task(void *arg)
  */
 void rotaryencoder_start_task(void)
 {
-    xTaskCreate(&rotary_encoder_task, "rotary_encoder_task", 2048, NULL, 5, NULL);
+    xTaskCreate(&rotary_encoder_task, "rotary_encoder_task", 2048, NULL, 7, NULL);
 }
 
 /**

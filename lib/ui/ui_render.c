@@ -32,7 +32,7 @@ static int s_web_page_view = 0; // 0 for QR code, 1 for text URL
 
 static const char *TAG = "ui_render";
 
-#define UI_QUEUE_LEN 8
+#define UI_QUEUE_LEN 16
 #define UI_MENU_STACK_DEPTH 8
 #define UI_MENU_VISIBLE_ROWS 6
 
@@ -74,6 +74,7 @@ static bool s_cmd_pending_mode = false;
 static uint64_t s_cmd_start_time_ms = 0;
 static uint32_t s_cmd_timeout_ms = 5000; // Default timeout
 static post_cmd_action_t s_post_cmd_action = POST_ACTION_NONE;
+static uint64_t s_cmd_feedback_display_start_ms = 0; // For non-blocking feedback
 
 static void ui_config_page_prepare_data(void);
 /* --- For Config Page --- */
@@ -222,7 +223,6 @@ void render_about_callback(void)
 {
     if (!s_oled_initialized)
         return;
-
     // If the QR code is not cached, generate it once.
     if (!s_qr_code_cached)
     {
@@ -589,12 +589,14 @@ void render_cmd_feedback_screen(void)
     else if (current_status == CMD_STATUS_SUCCESS)
     {
         write_padded_line(3, "Success");
-        vTaskDelay(pdMS_TO_TICKS(300));
-        s_cmd_pending_mode = false; // Exit loading mode
-        if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY))
-        {
-            g_command_status = CMD_STATUS_IDLE;
-            xSemaphoreGive(g_command_status_mutex);
+        if (s_cmd_feedback_display_start_ms == 0) {
+            s_cmd_feedback_display_start_ms = now;
+        } else if (now - s_cmd_feedback_display_start_ms > 300) { // Show for 300ms
+            s_cmd_pending_mode = false; // Exit loading mode
+            if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY)) {
+                g_command_status = CMD_STATUS_IDLE;
+                xSemaphoreGive(g_command_status_mutex);
+            }
         }
         if (s_post_cmd_action == POST_ACTION_GO_BACK)
         {
@@ -605,12 +607,14 @@ void render_cmd_feedback_screen(void)
     else if (current_status == CMD_STATUS_FAIL)
     {
         write_padded_line(3, "Failed");
-        vTaskDelay(pdMS_TO_TICKS(500));
-        s_cmd_pending_mode = false; // Exit loading mode
-        if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY))
-        {
-            g_command_status = CMD_STATUS_IDLE;
-            xSemaphoreGive(g_command_status_mutex);
+        if (s_cmd_feedback_display_start_ms == 0) {
+            s_cmd_feedback_display_start_ms = now;
+        } else if (now - s_cmd_feedback_display_start_ms > 500) { // Show for 500ms
+            s_cmd_pending_mode = false; // Exit loading mode
+            if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY)) {
+                g_command_status = CMD_STATUS_IDLE;
+                xSemaphoreGive(g_command_status_mutex);
+            }
         }
         s_post_cmd_action = POST_ACTION_NONE; // Clear action
     }
@@ -630,6 +634,18 @@ void render_cmd_feedback_screen(void)
         }
     }
     i2c_oled_update_screen(s_oled_i2c_num);
+}
+
+static void enter_cmd_pending_mode(uint32_t timeout_ms, post_cmd_action_t post_action) {
+    s_cmd_pending_mode = true;
+    s_cmd_start_time_ms = esp_timer_get_time() / 1000;
+    s_cmd_timeout_ms = timeout_ms;
+    s_post_cmd_action = post_action;
+    s_cmd_feedback_display_start_ms = 0; // Reset feedback timer
+    if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY)) {
+        g_command_status = CMD_STATUS_PENDING;
+        xSemaphoreGive(g_command_status_mutex);
+    }
 }
 
 void uiRender_reset_activity_timer(void)
@@ -684,6 +700,7 @@ void uiRender_task(void *pvParameters)
                 else if (msg.event == UI_EVENT_BTN_LONG)
                 {
                     // Long press returns to sensor data page (home)
+                    // ESP_LOGI(TAG, "UI_EVENT_BTN_LONG in menu mode, returning to sensor page. 1");
                     s_menu_mode = false;
                     s_current_page = &sensor_page;
                 }
@@ -697,6 +714,7 @@ void uiRender_task(void *pvParameters)
                 else if (msg.event == UI_EVENT_BTN_LONG)
                 {
                     // Long press returns to sensor data page (home)
+                    // ESP_LOGI(TAG, "UI_EVENT_BTN_LONG in page mode, returning to sensor page. 2");
                     s_menu_mode = false;
                     s_current_page = &sensor_page;
                 }
@@ -765,8 +783,7 @@ void uiRender_task(void *pvParameters)
 // --- About event handlers (to be referenced in ui_menudef.h) ---
 void menu_about_on_btn(void)
 {
-    // Do not clear the cache here, it's valid for the lifetime of the app.
-    // s_qr_code_cached = false; 
+    s_qr_code_cached = false; 
     s_menu_mode = false;
     s_current_page = &about_page;
 }
@@ -774,6 +791,7 @@ void menu_sensor_on_btn(void)
 {
     s_menu_mode = false;
     // Force a refresh when entering the page to get immediate data.
+    // ESP_LOGI(TAG, "menu_sensor_on_btn called, returning to sensor page. 3");
     if (g_app_cmd_queue != NULL)
     {
         app_command_t cmd = APP_CMD_REFRESH_SENSOR_DATA;
@@ -812,15 +830,7 @@ void menu_format_sd_confirm_on_btn(void)
     {
         app_command_t cmd = APP_CMD_FORMAT_SD_CARD;
         xQueueSend(g_app_cmd_queue, &cmd, 0);
-        s_cmd_pending_mode = true; // Enter loading screen mode
-        s_cmd_start_time_ms = esp_timer_get_time() / 1000;
-        s_cmd_timeout_ms = 30000; // 30-second timeout for format
-        s_post_cmd_action = POST_ACTION_GO_BACK;
-        if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY))
-        {
-            g_command_status = CMD_STATUS_PENDING; // Set initial status for UI
-            xSemaphoreGive(g_command_status_mutex);
-        }
+        enter_cmd_pending_mode(30000, POST_ACTION_GO_BACK); // 30s timeout
     }
     else
     {
@@ -834,15 +844,7 @@ void menu_sync_rtc_ntp_on_btn(void)
     {
         app_command_t cmd = APP_CMD_SYNC_RTC_NTP;
         xQueueSend(g_app_cmd_queue, &cmd, 0);
-        s_cmd_pending_mode = true; // Enter loading screen mode
-        s_cmd_start_time_ms = esp_timer_get_time() / 1000;
-        s_post_cmd_action = POST_ACTION_NONE;
-        s_cmd_timeout_ms = 45000; // 45-second timeout for WiFi + NTP
-        if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY))
-        {
-            g_command_status = CMD_STATUS_PENDING; // Set initial status for UI
-            xSemaphoreGive(g_command_status_mutex);
-        }
+        enter_cmd_pending_mode(45000, POST_ACTION_NONE); // 45s timeout
     } else {
         ESP_LOGE(TAG, "App command queue not initialized!");
     }
@@ -854,15 +856,7 @@ void menu_set_time_on_btn(void)
     {
         app_command_t cmd = APP_CMD_SET_RTC_BUILD_TIME;
         xQueueSend(g_app_cmd_queue, &cmd, 0);
-        s_cmd_pending_mode = true; // Enter loading screen mode
-        s_cmd_start_time_ms = esp_timer_get_time() / 1000;
-        s_post_cmd_action = POST_ACTION_NONE;
-        s_cmd_timeout_ms = 5000; // 5-second timeout for RTC set
-        if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY))
-        {
-            g_command_status = CMD_STATUS_PENDING; // Set initial status for UI
-            xSemaphoreGive(g_command_status_mutex);
-        }
+        enter_cmd_pending_mode(5000, POST_ACTION_NONE); // 5s timeout
     }
     else
     {
@@ -880,8 +874,6 @@ void page_about_on_ccw(void) { /* Do nothing */ }
 void page_sensor_on_btn(void)
 {
     s_menu_mode = true;
-    current_page = 0; // Reset to main menu
-    current_item = 0; // Reset to first item
     s_current_page = NULL;
 }
 void page_sensor_on_cw(void) { /* Do nothing */ }

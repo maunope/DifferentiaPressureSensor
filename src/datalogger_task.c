@@ -189,47 +189,52 @@ void datalogger_task(void *pvParameters)
 
             // Create a local copy of the buffer for logging and writing to SD
             sensor_buffer_t local_buffer;
-            if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY) == pdTRUE)
-            {
+            if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
                 local_buffer = g_sensor_buffer;
+                xSemaphoreGive(g_sensor_buffer_mutex); // Release mutex immediately after copy
+            } else {
+                ESP_LOGE(TAG, "Failed to get sensor buffer for logging.");
+                continue; // Skip this logging cycle
+            }
 
-                // Format timestamp for logging
-                char local_time_str[32];
-                struct tm local_tm;
-                convert_gmt_to_cet(local_buffer.timestamp, &local_tm);
-                strftime(local_time_str, sizeof(local_time_str), "%Y-%m-%d %H:%M:%S %Z", &local_tm);
+            // Format timestamp for logging
+            char local_time_str[32];
+            struct tm local_tm;
+            convert_gmt_to_cet(local_buffer.timestamp, &local_tm);
+            strftime(local_time_str, sizeof(local_time_str), "%Y-%m-%d %H:%M:%S %Z", &local_tm);
 
-                // Log to console
-                ESP_LOGI(TAG, "TS: %s, Temp: %.2fC, Press: %ldPa, Diff: %.2fPa Batt: %d%% (%.2fV), Charging: %d, WriteSD: %d", local_time_str, local_buffer.temperature_c, local_buffer.pressure_pa,local_buffer.diff_pressure_pa,local_buffer.battery_percentage, local_buffer.battery_voltage, local_buffer.battery_externally_powered, local_buffer.writeStatus);
-                
-                // Format the data into a CSV string
-                char csv_line[200];
-                snprintf(csv_line, sizeof(csv_line), "%lld,%s,%.2f,%ld,%.2f,%.2f,%d",
-                         (long long)local_buffer.timestamp,
-                         local_time_str,
-                         isnan(local_buffer.temperature_c) ? 0.0f : local_buffer.temperature_c,
-                         local_buffer.pressure_pa, // Already long, 0 is invalid
-                         isnan(local_buffer.diff_pressure_pa) ? 0.0f : local_buffer.diff_pressure_pa,
-                         local_buffer.battery_voltage,
-                         local_buffer.battery_percentage);
+            // Log to console
+            ESP_LOGI(TAG, "TS: %s, Temp: %.2fC, Press: %ldPa, Diff: %.2fPa Batt: %d%% (%.2fV), Charging: %d, WriteSD: %d", local_time_str, local_buffer.temperature_c, local_buffer.pressure_pa,local_buffer.diff_pressure_pa,local_buffer.battery_percentage, local_buffer.battery_voltage, local_buffer.battery_externally_powered, local_buffer.writeStatus);
+            
+            // Format the data into a CSV string
+            char csv_line[200];
+            snprintf(csv_line, sizeof(csv_line), "%lld,%s,%.2f,%ld,%.2f,%.2f,%d",
+                     (long long)local_buffer.timestamp,
+                     local_time_str,
+                     isnan(local_buffer.temperature_c) ? 0.0f : local_buffer.temperature_c,
+                     local_buffer.pressure_pa, // Already long, 0 is invalid
+                     isnan(local_buffer.diff_pressure_pa) ? 0.0f : local_buffer.diff_pressure_pa,
+                     local_buffer.battery_voltage,
+                     local_buffer.battery_percentage);
 
-                // Write the formatted string to the SD card
-                esp_err_t write_err;
-                const int MAX_SD_RETRIES = 3;
-                for (int i = 0; i < MAX_SD_RETRIES; i++) {
-                    write_err = spi_sdcard_write_line(csv_line);
-                    if (write_err == ESP_OK) {
-                        break; // Success
-                    }
-                    ESP_LOGE(TAG, "Failed to write to SD card (attempt %d/%d). Retrying...", i + 1, MAX_SD_RETRIES);
-                    vTaskDelay(pdMS_TO_TICKS(100)); // Wait before retrying
+            // Write the formatted string to the SD card
+            esp_err_t write_err;
+            const int MAX_SD_RETRIES = 3;
+            for (int i = 0; i < MAX_SD_RETRIES; i++) {
+                write_err = spi_sdcard_write_line(csv_line);
+                if (write_err == ESP_OK) {
+                    break; // Success
                 }
+                ESP_LOGE(TAG, "Failed to write to SD card (attempt %d/%d). Retrying...", i + 1, MAX_SD_RETRIES);
+                vTaskDelay(pdMS_TO_TICKS(100)); // Wait before retrying
+            }
 
-                // Update the shared buffer with the final status and timestamps
+            // Update the shared buffer with the final status and timestamps
+            if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
                 g_sensor_buffer.last_write_ms = esp_timer_get_time() / 1000;
                 if (write_err == ESP_OK) {
                     g_sensor_buffer.writeStatus = WRITE_STATUS_OK;
-                    g_sensor_buffer.last_successful_write_ts = time(NULL); // Mark successful write
+                    g_sensor_buffer.last_successful_write_ts = time(NULL); // Mark successful write                    
                     ESP_LOGI(TAG, "Successfully wrote to SD card.");
                 } else {
                     g_sensor_buffer.writeStatus = WRITE_STATUS_FAIL;
