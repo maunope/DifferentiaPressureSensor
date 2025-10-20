@@ -615,7 +615,6 @@ void render_cmd_feedback_screen(void)
             write_padded_line(i, ""); // Clear other non-title lines
         }
     }
-    i2c_oled_update_screen(s_oled_i2c_num);
 }
 
 /**
@@ -676,12 +675,12 @@ static void draw_battery_icon(void) {
     // If SD card write failed, draw a warning triangle to the left of the battery
     if (sd_write_failed) {
         int warning_x = icon_x - 9;
-        int warning_y = icon_y + 1;
+        int warning_y = icon_y;
         // Draw "!!" using pixel-based rectangles
-        i2c_oled_fill_rect(s_oled_i2c_num, warning_x, warning_y, 1, 3, !is_inverted); // First '!' bar
-        i2c_oled_draw_pixel(s_oled_i2c_num, warning_x, warning_y + 4, !is_inverted);   // First '!' dot
-        i2c_oled_fill_rect(s_oled_i2c_num, warning_x + 2, warning_y, 1, 3, !is_inverted); // Second '!' bar
-        i2c_oled_draw_pixel(s_oled_i2c_num, warning_x + 2, warning_y + 4, !is_inverted);   // Second '!' dot
+        i2c_oled_fill_rect(s_oled_i2c_num, warning_x, warning_y, 1, 4, !is_inverted); // First '!' bar
+        i2c_oled_draw_pixel(s_oled_i2c_num, warning_x, warning_y + 5, !is_inverted);   // First '!' dot
+        i2c_oled_fill_rect(s_oled_i2c_num, warning_x + 2, warning_y, 1, 4, !is_inverted); // Second '!' bar
+        i2c_oled_draw_pixel(s_oled_i2c_num, warning_x + 2, warning_y + 5, !is_inverted);   // Second '!' dot
     }
 }
 
