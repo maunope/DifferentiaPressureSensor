@@ -30,8 +30,34 @@ static esp_err_t file_list_handler(httpd_req_t *req) {
     }
 
     httpd_resp_set_type(req, "text/html");
-    httpd_resp_send_chunk(req, "<html><body><h1>Files on SD Card</h1><ul>", HTTPD_RESP_USE_STRLEN);
-
+    
+    // Send a more modern HTML head with CSS for styling
+    const char *html_head =
+        "<!DOCTYPE html>"
+        "<html lang=\"en\">"
+        "<head>"
+        "<meta charset=\"UTF-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
+        "<title>Differential Pressure Sensor</title>"
+        "<style>"
+            "body { font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif; background-color: #121212; color: #e0e0e0; margin: 0; padding: 20px; line-height: 1.6; }"
+            ".container { max-width: 800px; margin: auto; background-color: #1e1e1e; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.5); }"
+            "h1 { color: #bb86fc; border-bottom: 2px solid #373737; padding-bottom: 10px; }"
+            "ul { list-style-type: none; padding: 0; }"
+            "li { background-color: #2c2c2c; margin-bottom: 10px; border-radius: 4px; }"
+            "li a { display: block; padding: 12px 15px; text-decoration: none; color: #03dac6; transition: background-color 0.2s ease-in-out; font-weight: 500; }"
+            "li a:hover { background-color: #373737; border-radius: 4px; }"
+            "footer { text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #373737; font-size: 0.9em; color: #888; }"
+            "footer a { color: #03dac6; text-decoration: none; }"
+            "footer a:hover { text-decoration: underline; }"
+        "</style>"
+        "</head>"
+        "<body>"
+        "<div class=\"container\">"
+        "<h1>Available Data Files</h1>"
+        "<ul>";
+    httpd_resp_send_chunk(req, html_head, HTTPD_RESP_USE_STRLEN);
+    
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
         if (entry->d_type == DT_REG) { // Only list regular files
@@ -43,7 +69,15 @@ static esp_err_t file_list_handler(httpd_req_t *req) {
     }
     closedir(dir);
 
-    httpd_resp_send_chunk(req, "</ul></body></html>", HTTPD_RESP_USE_STRLEN);
+    const char *html_foot =
+        "</ul>"
+        "<footer>"
+        "<p> <a href=\"https://github.com/maunope/DifferentiaPressureSensor/\" target=\"_blank\">DifferentialPressureSensor</a> on GitHub.</p>"
+        "</footer>"
+        "</div>"
+        "</body>"
+        "</html>";
+    httpd_resp_send_chunk(req, html_foot, HTTPD_RESP_USE_STRLEN);
     httpd_resp_send_chunk(req, NULL, 0); // Final chunk
     return ESP_OK;
 }

@@ -28,6 +28,7 @@ static bool s_qr_code_cached = false;
 // --- Web Server QR Code Caching ---
 static uint8_t s_web_qr_code_buffer[OLED_WIDTH * OLED_HEIGHT / 8];
 static bool s_web_qr_code_cached = false;
+static int s_about_page_view = 0; // 0 for QR code, 1 for text link
 static int s_web_page_view = 0; // 0 for QR code, 1 for text URL
 
 static const char *TAG = "ui_render";
@@ -226,18 +227,26 @@ void render_about_callback(void)
 {
     if (!s_oled_initialized)
         return;
-    // If the QR code is not cached, generate it once.
-    if (!s_qr_code_cached)
-    {
-        i2c_oled_clear(s_oled_i2c_num); // Clear the main buffer to draw into it
-        esp_qrcode_config_t cfg = ESP_QRCODE_CONFIG_DEFAULT();
-        cfg.display_func = oled_display_qr_code; // This will draw to the main buffer
-        esp_qrcode_generate(&cfg, "https://github.com/maunope/DifferentiaPressureSensor/");
-        i2c_oled_get_buffer(s_qr_code_buffer, sizeof(s_qr_code_buffer)); // Copy to cache
-        s_qr_code_cached = true;
+
+    if (s_about_page_view == 0) { // QR Code View
+        // If the QR code is not cached, generate it once.
+        if (!s_qr_code_cached)
+        {
+            i2c_oled_clear(s_oled_i2c_num); // Clear the main buffer to draw into it
+            esp_qrcode_config_t cfg = ESP_QRCODE_CONFIG_DEFAULT();
+            cfg.display_func = oled_display_qr_code; // This will draw to the main buffer
+            esp_qrcode_generate(&cfg, "https://github.com/maunope/DifferentiaPressureSensor/");
+            i2c_oled_get_buffer(s_qr_code_buffer, sizeof(s_qr_code_buffer)); // Copy to cache
+            s_qr_code_cached = true;
+        }
+        // Copy the cached QR code to the main screen buffer for display.
+        i2c_oled_load_buffer(s_qr_code_buffer, sizeof(s_qr_code_buffer));
+    } else { // Text Link View
+        i2c_oled_clear(s_oled_i2c_num);
+        write_inverted_line(0, "Project Link");
+        write_padded_line(3, "https://rb.gy/ddwdr5");
+        write_padded_line(6, "Press btn to exit");
     }
-    // Copy the cached QR code to the main screen buffer for display.
-    i2c_oled_load_buffer(s_qr_code_buffer, sizeof(s_qr_code_buffer));
 }
 
 // --- Web Server Page Rendering ---
@@ -632,7 +641,7 @@ static void draw_battery_icon(void) {
     bool sd_write_failed = (s_local_sensor_buffer.writeStatus == WRITE_STATUS_FAIL);
     // The title bar is inverted on most screens. We render the icon with a non-inverted
     // color (white on black) only for specific full-screen pages that have a black background at the top.
-    bool is_fullscreen_no_bar = (s_current_page == &about_page) ||
+    bool is_fullscreen_no_bar = (s_current_page == &about_page && s_about_page_view == 0) ||
                                 (s_current_page == &web_server_page && s_local_sensor_buffer.web_server_status == WEB_SERVER_RUNNING && s_web_page_view == 0);
 
     bool is_inverted = !is_fullscreen_no_bar;
@@ -840,6 +849,7 @@ void uiRender_task(void *pvParameters)
 void menu_about_on_btn(void)
 {
     s_qr_code_cached = false; 
+    s_about_page_view = 0; // Reset to QR code view on entry
     s_menu_mode = false;
     s_current_page = &about_page;
 }
@@ -925,8 +935,12 @@ void page_about_on_btn(void)
     s_menu_mode = true;
     s_current_page = NULL;
 }
-void page_about_on_cw(void) { /* Do nothing */ }
-void page_about_on_ccw(void) { /* Do nothing */ }
+void page_about_on_cw(void) {
+    s_about_page_view = (s_about_page_view + 1) % 2; // Toggle between 0 and 1
+}
+void page_about_on_ccw(void) {
+    s_about_page_view = (s_about_page_view + 1) % 2; // Toggle between 0 and 1
+}
 void page_sensor_on_btn(void)
 {
     s_menu_mode = true;
