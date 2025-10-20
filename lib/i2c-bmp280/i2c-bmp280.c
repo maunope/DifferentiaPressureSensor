@@ -119,7 +119,11 @@ static esp_err_t bmp280_read_calibration_data(bmp280_t *dev)
 esp_err_t bmp280_init(bmp280_t *dev, i2c_port_t port, uint8_t i2c_addr)
 {
     dev->i2c_port = port;
-    dev->i2c_addr = i2c_addr;
+    if (i2c_addr == 0) {
+        dev->i2c_addr = BMP280_SENSOR_ADDR; // Use default if 0 is passed
+    } else {
+        dev->i2c_addr = i2c_addr;
+    }
 
     esp_err_t ret;
     uint8_t chip_id;

@@ -79,7 +79,11 @@ esp_err_t d6fph_init(d6fph_t *dev, i2c_port_t port, uint8_t i2c_addr, d6fph_sens
     }
 
     dev->i2c_port = port;
-    dev->i2c_addr = i2c_addr;
+    if (i2c_addr == 0) {
+        dev->i2c_addr = D6FPH_I2C_ADDR_DEFAULT; // Use default if 0 is passed
+    } else {
+        dev->i2c_addr = i2c_addr;
+    }
     dev->model = model;
     dev->is_initialized = false; // Default to not initialized
     ESP_LOGI(TAG, "Initializing D6F-PH sensor at address 0x%02X", i2c_addr);

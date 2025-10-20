@@ -111,6 +111,12 @@ static const uint8_t font5x7[96][5] = {
     {0x44,0x64,0x54,0x4C,0x44}  // 'z'
 };
 
+/**
+ * @brief Initializes the I2C bus for the OLED display with the default I2C address (0x3C).
+ * This is a convenience macro that calls i2c_oled_bus_init with the default address.
+ */
+#define i2c_oled_bus_init_default(i2c_num, sda, scl) i2c_oled_bus_init(i2c_num, sda, scl, OLED_I2C_ADDR)
+
 void i2c_oled_bus_init(i2c_port_t i2c_num, gpio_num_t sda, gpio_num_t scl, uint8_t i2c_addr);
 void i2c_oled_send_init_commands(i2c_port_t i2c_num);
 void i2c_oled_clear(i2c_port_t i2c_num);

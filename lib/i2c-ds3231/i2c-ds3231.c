@@ -33,7 +33,11 @@ esp_err_t ds3231_init(ds3231_t *rtc, i2c_port_t i2c_num, uint8_t address) {
         return ESP_ERR_INVALID_ARG;
     }
     rtc->i2c_num = i2c_num;
-    rtc->address = address;
+    if (address == 0) {
+        rtc->address = DS3231_I2C_ADDR_DEFAULT; // Use default if 0 is passed
+    } else {
+        rtc->address = address;
+    }
     return ESP_OK;
 }
 

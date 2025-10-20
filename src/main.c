@@ -57,7 +57,6 @@
 #define I2C_OLED_NUM I2C_NUM_1
 #define I2C_OLED_SCL_IO GPIO_NUM_39
 #define I2C_OLED_SDA_IO GPIO_NUM_40
-#define OLED_I2C_ADDR 0x3C
 
 // --- Rotary Encoder Configuration ---
 #define ROTARY_ENCODER_PIN_A GPIO_NUM_41
@@ -68,6 +67,11 @@
 // --- Battery ADC Configuration ---
 #define BATTERY_PWR_PIN GPIO_NUM_5 // This pin is used to enable the battery voltage divider
 #define BATTERY_ADC_PIN GPIO_NUM_6
+
+#define OLED_I2C_ADDR 0x3C
+#define DS3231_I2C_ADDR 0x68
+#define BMP280_I2C_ADDR 0x76
+#define D6FPH_I2C_ADDR 0x6C
 
 // --- RTC Memory for State Persistence ---
 // These variables retain their values across deep sleep cycles.
@@ -90,6 +94,12 @@ static uint64_t last_activity_ms = 0;
 static bool is_usb_connected_state = false;
 
 static web_server_fsm_state_t s_web_server_state = WEB_SERVER_FSM_IDLE;
+
+typedef enum {
+    SLEEP_FSM_IDLE,
+    SLEEP_FSM_WAIT_DATALOGGER_PAUSE,
+} sleep_fsm_state_t;
+static sleep_fsm_state_t s_sleep_state = SLEEP_FSM_IDLE;
 
 /**
  * @brief Callback for clockwise rotation from the rotary encoder.
@@ -291,6 +301,49 @@ static void go_to_deep_sleep(void) {
     // --- Execution stops here, device will restart on wakeup ---
 }
 
+static void handle_sleep_fsm(void) {
+    if (s_sleep_state != SLEEP_FSM_WAIT_DATALOGGER_PAUSE) {
+        return;
+    }
+
+    // Check if the datalogger has confirmed it's paused.
+    int datalogger_status = 0;
+    if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50))) {
+        datalogger_status = g_sensor_buffer.datalogger_status;
+        xSemaphoreGive(g_sensor_buffer_mutex);
+    }
+
+    if (datalogger_status == DATA_LOGGER_PAUSED) {
+        ESP_LOGI(TAG, "Datalogger paused. Preparing to sleep.");
+
+        // De-initialize peripherals that will be powered down.
+        ESP_LOGI(TAG, "De-initializing peripherals before sleep.");
+        spi_sdcard_deinit();
+
+        // Cut power to the main peripheral power rail.
+        ESP_LOGI(TAG, "Powering down external devices.");
+        gpio_set_level(DEVICES_POWER_PIN, 0);
+
+        go_to_deep_sleep();
+        // Execution will not return from go_to_deep_sleep()
+    }
+    // If not paused, the FSM will check again on the next loop iteration.
+    // A timeout could be added here if necessary.
+}
+
+static void initiate_sleep_sequence(void) {
+    if (s_sleep_state != SLEEP_FSM_IDLE) {
+        return; // Already in a sleep sequence
+    }
+    ESP_LOGI(TAG, "Initiating sleep sequence...");
+    s_sleep_state = SLEEP_FSM_WAIT_DATALOGGER_PAUSE;
+
+    oled_power_off(); // This will suspend the task and power down the OLED
+    // Tell the datalogger task to pause writes to the SD card.
+    datalogger_command_t logger_cmd = DATALOGGER_CMD_PAUSE_WRITES;
+    xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
+}
+
 static void handle_start_web_server(void) {
     // Check if USB is connected as Mass Storage. If so, don't start the web server.
     if (spi_sdcard_is_usb_connected()) {
@@ -483,6 +536,8 @@ void main_task(void *pvParameters)
 
         handle_web_server_fsm();
 
+        handle_sleep_fsm();
+
         // Handle Wi-Fi disconnect when web server should be active
         if (g_sensor_buffer.web_server_status == WEB_SERVER_RUNNING && !wifi_manager_is_connected()) {
             ESP_LOGW(TAG, "Web server is active but Wi-Fi disconnected. Attempting to reconnect...");
@@ -627,6 +682,7 @@ void main_task(void *pvParameters)
             ESP_LOGI(TAG, "Device was awake for %llu ms.", awake_time_ms);
 
             go_to_deep_sleep();
+            initiate_sleep_sequence();
         }
         // --- OLED Power-Off Logic ---
         // If UI is inactive but the screen is still on, turn it off.
@@ -810,15 +866,14 @@ void app_main(void)
     // Initialize Battery Reader first, as it uses ADC which can conflict if I2C is initialized first
     battery_reader_init(BATTERY_ADC_PIN, BATTERY_PWR_PIN, g_cfg->battery_voltage_divider_ratio);
     // Initialize D6F-PH Sensor.
-    err = d6fph_init(&g_d6fph, I2C_MASTER_NUM, D6FPH_I2C_ADDR_DEFAULT, g_cfg->d6fph_model);
+    err = d6fph_init(&g_d6fph, I2C_MASTER_NUM, D6FPH_I2C_ADDR, g_cfg->d6fph_model);
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "D6F-PH sensor initialization failed.");
     }
 
     // --- Step 5: Initialize and validate the external Real-Time Clock (RTC) ---
-    // TODO make 0x68 a define
-    ds3231_init(&g_rtc, I2C_NUM_0, 0x68);
+    ds3231_init(&g_rtc, I2C_MASTER_NUM, DS3231_I2C_ADDR);
     struct tm timeinfo;
     time_t rtc_ts = -1;
 

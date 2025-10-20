@@ -96,6 +96,11 @@ static esp_err_t oled_data(i2c_port_t i2c_num, const uint8_t *data, size_t len) 
  * @param i2c_addr The I2C address of the OLED display.
  */
 void i2c_oled_bus_init(i2c_port_t i2c_num, gpio_num_t sda, gpio_num_t scl, uint8_t i2c_addr) {
+    if (i2c_addr == 0) {
+        s_oled_addr = OLED_I2C_ADDR; // Use default if 0 is passed
+    } else {
+        s_oled_addr = i2c_addr;
+    }
     i2c_config_t conf = {
         .mode = I2C_MODE_MASTER,
         .sda_io_num = sda,
@@ -105,7 +110,6 @@ void i2c_oled_bus_init(i2c_port_t i2c_num, gpio_num_t sda, gpio_num_t scl, uint8
         .master.clk_speed = 400000
     };
     i2c_param_config(i2c_num, &conf);
-    s_oled_addr = i2c_addr;
     i2c_driver_install(i2c_num, conf.mode, 0, 0, 0);
     i2c_oled_send_init_commands(i2c_num);
 }

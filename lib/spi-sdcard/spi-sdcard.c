@@ -158,7 +158,6 @@ void spi_sdcard_deinit(void)
  */
 esp_err_t spi_sdcard_write_line(const char *line)
 {
-    // TODO make all erro codes defines
     if (spi_sdcard_is_usb_connected())
     {
         ESP_LOGI(TAG, "TinyUSB is connected and mounted, cannot write to SD card directly.");

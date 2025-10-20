@@ -44,6 +44,12 @@ typedef struct
 esp_err_t d6fph_init(d6fph_t *dev, i2c_port_t port, uint8_t i2c_addr, d6fph_sensor_model_t model);
 
 /**
+ * @brief Initializes the D6F-PH sensor with the default I2C address (0x6C).
+ * This is a convenience macro that calls d6fph_init with the default address.
+ */
+#define d6fph_init_default(dev, port, model) d6fph_init(dev, port, D6FPH_I2C_ADDR_DEFAULT, model)
+
+/**
  * @brief Reads the differential pressure from the sensor.
  * @param dev Pointer to the initialized D6F-PH device descriptor.
  * @param pressure Pointer to a float to store the pressure in Pascals (Pa).
