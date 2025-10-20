@@ -68,7 +68,22 @@ A short press on the button from the main data screen enters the menu system.
 
 *   **Sensor data**: Returns to the main data display screen.
 *   **Options**: Enters the `Options` submenu for device settings.
-*   **About**: Displays the "About" page with device information.
+*   **About**: Displays a QR code that links to the project's GitHub repository.
+
+### About Page
+
+Selecting "About" from the Main Menu will display a QR code. Scan this with your phone to visit the project's source code repository.
+
+```
++--------------------+
+|                    |
+|    ████████████    |
+|    █ ▄▄▄▄▄▄ █ █    |
+|    █ █▄█▄█▄ █ █    |
+|    █▄▄▄▄▄▄▄█ █    |
+|                    |
++--------------------+
+```
 
 ### Options Menu
 
