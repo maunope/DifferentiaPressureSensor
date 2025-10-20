@@ -140,9 +140,10 @@ void spi_sdcard_deinit(void)
         tinyusb_driver_uninstall();
         s_tinyusb_is_initialized = false;
     }
-    esp_vfs_fat_sdcard_unmount("/sdcard", s_card);
-    // The SPI bus is not de-initialized here to allow for faster re-init.
-    // If full power savings were needed, spi_bus_free(host.slot) could be called.
+    esp_vfs_fat_sdcard_unmount("/sdcard", s_card); // Unmount the filesystem
+    // De-initialize the SPI bus to ensure it's powered down during deep sleep.
+    spi_bus_free(host.slot);
+    ESP_LOGI(TAG, "SPI bus freed.");
     mounted = false;
     s_card = NULL;
     current_filepath[0] = '\0'; // Reset current file path

@@ -6,6 +6,8 @@
 #include <time.h>
 #include <stdbool.h>
 
+#define PROJECT_GITHUB_URL "https://github.com/maunope/DifferentiaPressureSensor/"
+
 typedef enum {
     WRITE_STATUS_OK,
     WRITE_STATUS_FAIL,

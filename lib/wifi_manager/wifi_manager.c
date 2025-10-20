@@ -104,3 +104,24 @@ bool wifi_manager_is_connected(void) {
     // A non-zero IP address means we are connected.
     return (ip_info.ip.addr != 0);
 }
+
+void wifi_manager_deinit(void) {
+    if (s_sta_netif == NULL) {
+        ESP_LOGW(TAG, "Wi-Fi manager not initialized, skipping deinit.");
+        return;
+    }
+
+    ESP_LOGI(TAG, "De-initializing Wi-Fi manager...");
+
+    // Ensure Wi-Fi is stopped before de-initializing
+    esp_wifi_stop();
+
+    ESP_ERROR_CHECK(esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler));
+    ESP_ERROR_CHECK(esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler));
+    ESP_ERROR_CHECK(esp_wifi_deinit());
+    ESP_ERROR_CHECK(esp_event_loop_delete_default());
+    esp_netif_destroy_default_wifi(s_sta_netif);
+    s_sta_netif = NULL;
+
+    ESP_LOGI(TAG, "Wi-Fi manager de-initialized.");
+}

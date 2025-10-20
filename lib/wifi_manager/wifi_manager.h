@@ -27,4 +27,9 @@ void wifi_manager_disconnect(void);
  */
 bool wifi_manager_is_connected(void);
 
+/**
+ * @brief De-initializes the Wi-Fi manager and releases all resources.
+ */
+void wifi_manager_deinit(void);
+
 #endif // WIFI_MANAGER_H

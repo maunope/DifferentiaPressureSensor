@@ -235,7 +235,7 @@ void render_about_callback(void)
             i2c_oled_clear(s_oled_i2c_num); // Clear the main buffer to draw into it
             esp_qrcode_config_t cfg = ESP_QRCODE_CONFIG_DEFAULT();
             cfg.display_func = oled_display_qr_code; // This will draw to the main buffer
-            esp_qrcode_generate(&cfg, "https://github.com/maunope/DifferentiaPressureSensor/");
+            esp_qrcode_generate(&cfg, PROJECT_GITHUB_URL);
             i2c_oled_get_buffer(s_qr_code_buffer, sizeof(s_qr_code_buffer)); // Copy to cache
             s_qr_code_cached = true;
         }
