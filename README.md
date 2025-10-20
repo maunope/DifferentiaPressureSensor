@@ -14,7 +14,7 @@ This project is a datalogger built on the ESP32-S3 platform using the ESP-IDF fr
     *   Real-time sensor data (temperature, pressure, differential pressure, battery status).
     *   Current timestamp.
     *   SD card write status.
-    *   A settings menu to manage the RTC, SD card, and view configuration.
+    *   A settings menu to manage the RTC, SD card, view configuration, and display a QR code linking to the project repository.
 *   **NTP Time Sync**: Can synchronize the RTC with an NTP server over Wi-Fi.
 *   **USB Mass Storage**: The SD card can be accessed as a USB Mass Storage Device when connected to a computer, allowing for easy retrieval of log files. The system  prevents SD card writes while the USB is mounted.
 *   **Power Management**: Implements deep sleep to conserve battery, waking up on a timer or via user interaction (rotary encoder button). The OLED screen also powers down after a period of inactivity.
@@ -43,16 +43,13 @@ For more details on the custom PCB, see the [board design documentation](BOARD_D
 ### Usage
 
 1.  **Configuration**: Copy the `config_sample.ini` file to the root of your SD card and rename it to `config.ini`. Edit this file to set your Wi-Fi credentials, sensor model, and other parameters.
-2.  **Operation**: The device is controlled with the rotary encoder and its built-in push-button. For a detailed explanation of the menu system and on-screen information, please see the [user interface guide](UI_GUIDE.md)..
-
+2.  **Operation**: The device is controlled with the rotary encoder and its built-in push-button. For a detailed explanation of the menu system and on-screen information, please see the User Interface Guide.
 ### Software & Libraries
 
 *   **Framework**: ESP-IDF
 *   **RTOS**: FreeRTOS
-*   **Custom Libraries (located in `lib/`)**:
-    *   `driver/i2c`, `driver/spi`, `driver/gpio`: ESP-IDF drivers for hardware communication.
-    *   `esp_vfs_fat`, `sdmmc_cmd`: For SD card filesystem handling.
-    *   `tinyusb`: For USB Mass Storage functionality.
+*   **Component Management**: Dependencies like `esp_tinyusb` and `qrcode` are managed by the ESP-IDF Component Manager via the `idf_component.yml` file.
+*   **Custom Libraries (located in `lib/`)**: This project uses a modular structure with several custom libraries:
     *   `i2c-bmp280`: Driver for the BMP280 sensor.
     *   `i2c-d6fph`: Driver for the Omron D6F-PH sensor.
     *   `i2c-ds3231`: Driver for the DS3231 RTC.

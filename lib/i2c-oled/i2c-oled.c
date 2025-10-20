@@ -9,6 +9,14 @@ extern const uint8_t font5x7[96][5];
 // Store the address for the single OLED device this library manages.
 static uint8_t s_oled_addr = 0;
 
+// Screen buffer for 128x64 OLED
+#define OLED_WIDTH 128
+#define OLED_HEIGHT 64
+static uint8_t s_screen_buffer[OLED_WIDTH * OLED_HEIGHT / 8];
+
+// Forward declaration for the static helper function
+static esp_err_t oled_data(i2c_port_t i2c_num, const uint8_t *data, size_t len);
+
 /**
  * @brief Sends a command byte to the OLED controller.
  *
@@ -21,6 +29,24 @@ static esp_err_t oled_cmd(i2c_port_t i2c_num, uint8_t cmd) {
     return i2c_master_write_to_device(i2c_num, s_oled_addr, buf, 2, 1000 / portTICK_PERIOD_MS);
 }
 
+/**
+ * @brief Draws a single pixel into the screen buffer.
+ */
+void i2c_oled_draw_pixel(i2c_port_t i2c_num, int x, int y) {
+    if (x < 0 || x >= OLED_WIDTH || y < 0 || y >= OLED_HEIGHT) return;
+
+    // Set the bit in the buffer
+    s_screen_buffer[x + (y / 8) * OLED_WIDTH] |= (1 << (y % 8));
+}
+
+
+void i2c_oled_fill_rect(i2c_port_t i2c_num, int x, int y, int width, int height) {
+    for (int i = 0; i < width; i++) {
+        for (int j = 0; j < height; j++) {
+            i2c_oled_draw_pixel(i2c_num, x + i, y + j);
+        }
+    }
+}
 /**
  * @brief Sends a buffer of data bytes to the OLED GDDRAM.
  *
@@ -92,13 +118,27 @@ void i2c_oled_send_init_commands(i2c_port_t i2c_num) {
  *
  * @param i2c_num The I2C port number.
  */
-void i2c_oled_clear(i2c_port_t i2c_num) {
-    for (uint8_t page = 0; page < 8; page++) {
-        oled_cmd(i2c_num, 0xB0 | page);
-        oled_cmd(i2c_num, 0x00);
-        oled_cmd(i2c_num, 0x10);
-        uint8_t zeros[128] = {0};
-        oled_data(i2c_num, zeros, 128);
+void i2c_oled_clear(i2c_port_t i2c_num)
+{
+    memset(s_screen_buffer, 0, sizeof(s_screen_buffer));
+}
+
+/**
+ * @brief Sends the entire screen buffer to the OLED display.
+ *
+ * @param i2c_num The I2C port number.
+ */
+void i2c_oled_update_screen(i2c_port_t i2c_num)
+{
+    for (uint8_t page = 0; page < (OLED_HEIGHT / 8); page++)
+    {
+        oled_cmd(i2c_num, 0xB0 | page); // Set page
+        oled_cmd(i2c_num, 0x00);        // Set lower column address
+        oled_cmd(i2c_num, 0x10);        // Set higher column address
+
+        // Send 128 bytes of page data
+        uint8_t *page_data = &s_screen_buffer[page * OLED_WIDTH];
+        oled_data(i2c_num, page_data, OLED_WIDTH);
     }
 }
 
@@ -111,18 +151,17 @@ void i2c_oled_clear(i2c_port_t i2c_num) {
  * @param text The null-terminated string to write.
  */
 void i2c_oled_write_text(i2c_port_t i2c_num, uint8_t row, uint8_t col, const char *text) {
-    oled_cmd(i2c_num, 0xB0 | row); // Set page address
-    oled_cmd(i2c_num, 0x00 | (col * 6 & 0x0F)); // Set lower column
-    oled_cmd(i2c_num, 0x10 | ((col * 6 >> 4) & 0x0F)); // Set higher column
-
+    uint16_t x = col * 6;
+    uint16_t y = row * 8;
     while (*text) {
         if (*text < 32 || *text > 127) {
             text++;
             continue;
         }
-        oled_data(i2c_num, font5x7[*text - 32], 5);
-        uint8_t space = 0x00;
-        oled_data(i2c_num, &space, 1);
+        for (int i = 0; i < 5; i++) {
+            s_screen_buffer[x + i + y * OLED_WIDTH / 8] = font5x7[*text - 32][i];
+        }
+        x += 6; // 5 for char, 1 for space
         text++;
     }
 }
@@ -149,24 +188,31 @@ void i2c_oled_set_invert(i2c_port_t i2c_num, bool invert) {
  */
 void i2c_oled_write_inverted_text(i2c_port_t i2c_num, uint8_t row, uint8_t col, const char *text) {
     uint8_t line_buffer[128];
-    memset(line_buffer, 0xFF, sizeof(line_buffer)); // Fill with 1s for a lit background
+    memset(line_buffer, 0xFF, sizeof(line_buffer)); // Fill with 1s for an inverted background
 
     uint8_t current_col = col * 6;
 
     while (*text && current_col < 128) {
         if (*text >= 32 && *text <= 127) {
             const uint8_t* font_char = font5x7[*text - 32];
-            for (int i = 0; i < 5 && (current_col + i) < 128; i++) {
+            for (int i = 0; i < 5 && (current_col + i) < OLED_WIDTH; i++) {
                 line_buffer[current_col + i] = ~font_char[i]; // Invert font bits
             }
             current_col += 6; // 5 for char, 1 for space
         }
         text++;
     }
+    memcpy(&s_screen_buffer[row * OLED_WIDTH], line_buffer, sizeof(line_buffer));
+}
 
-    oled_cmd(i2c_num, 0xB0 | row); // Set page address
-    oled_cmd(i2c_num, 0x00);       // Set lower column to 0
-    oled_cmd(i2c_num, 0x10);       // Set higher column to 0
+void i2c_oled_get_buffer(uint8_t* out_buffer, size_t len) {
+    if (out_buffer && len >= sizeof(s_screen_buffer)) {
+        memcpy(out_buffer, s_screen_buffer, sizeof(s_screen_buffer));
+    }
+}
 
-    oled_data(i2c_num, line_buffer, sizeof(line_buffer));
+void i2c_oled_load_buffer(const uint8_t* in_buffer, size_t len) {
+    if (in_buffer && len >= sizeof(s_screen_buffer)) {
+        memcpy(s_screen_buffer, in_buffer, sizeof(s_screen_buffer));
+    }
 }

@@ -1,5 +1,6 @@
-## idf_component.yml
+## IDF Component Manager Manifest File
 dependencies:
   # This adds the official esp_tinyusb component to your project
-    espressif/esp_tinyusb: "2.0.0"
-
+  espressif/esp_tinyusb: "2.0.0"
+  # Required for qrcodegen
+  espressif/qrcode: "^0.1.0"

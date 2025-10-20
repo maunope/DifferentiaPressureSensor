@@ -13,6 +13,14 @@
 #include "../buffers.h"
 #include "../../src/config_params.h"
 #include <math.h>
+#include "qrcode.h"
+
+// --- QR Code Caching ---
+// A dedicated buffer to store the rendered QR code image to avoid re-generating it.
+#define OLED_WIDTH 128
+#define OLED_HEIGHT 64
+static uint8_t s_qr_code_buffer[OLED_WIDTH * OLED_HEIGHT / 8];
+static bool s_qr_code_cached = false;
 
 static const char *TAG = "ui_render";
 
@@ -47,11 +55,11 @@ static i2c_port_t s_oled_i2c_num;
 static gpio_num_t s_oled_sda, s_oled_scl;
 static bool s_oled_initialized = false;
 
-// UI mode: true = menu, false = page
-static bool s_menu_mode = true;
+// UI mode: false = page (default to sensor page), true = menu
+static bool s_menu_mode = false;
 static bool s_sleeping_mode = false;
 static bool s_waking_up = false; // Flag to indicate we are waking up and should ignore input
-static const ui_page_t *s_current_page = NULL;
+static const ui_page_t *s_current_page = &sensor_page;
 
 // Command feedback UI state
 static bool s_cmd_pending_mode = false;
@@ -143,6 +151,9 @@ void render_menu_callback(void)
 {
     if (!s_oled_initialized)
         return;
+    // Clear the screen buffer before drawing the menu to prevent artifacts.
+    i2c_oled_clear(s_oled_i2c_num);
+
     static char last_lines[8][21] = {{0}};
     char new_lines[8][21] = {{0}};
 
@@ -196,25 +207,55 @@ void render_menu_callback(void)
     }
 }
 
+// Forward declaration for the QR code display callback
+static void oled_display_qr_code(esp_qrcode_handle_t qrcode);
+
 // --- About rendering callback ---
 void render_about_callback(void)
 {
     if (!s_oled_initialized)
         return;
-    static char last_lines[8][21] = {{0}};
-    char new_lines[8][21] = {{0}};
-    snprintf(new_lines[0], sizeof(new_lines[0]), "About");
-    snprintf(new_lines[2], sizeof(new_lines[2]), "Differential");
-    snprintf(new_lines[3], sizeof(new_lines[3]), "Pressure Sensor");
-    snprintf(new_lines[4], sizeof(new_lines[4]), "V1.0");
-    // The rest remain empty
 
-    write_inverted_line(0, new_lines[0]);
-    write_padded_line(1, ""); // Blank line
-    for (uint8_t row = 2; row < 8; ++row)
+    // If the QR code is not cached, generate it once.
+    if (!s_qr_code_cached)
     {
-        write_padded_line(row, new_lines[row]);
-        strncpy(last_lines[row], new_lines[row], sizeof(last_lines[row]));
+        i2c_oled_clear(s_oled_i2c_num); // Clear the main buffer to draw into it
+        esp_qrcode_config_t cfg = ESP_QRCODE_CONFIG_DEFAULT();
+        cfg.display_func = oled_display_qr_code; // This will draw to the main buffer
+        esp_qrcode_generate(&cfg, "https://github.com/maunope/DifferentiaPressureSensor/");
+        i2c_oled_get_buffer(s_qr_code_buffer, sizeof(s_qr_code_buffer)); // Copy to cache
+        s_qr_code_cached = true;
+    }
+    // Copy the cached QR code to the main screen buffer for display.
+    i2c_oled_load_buffer(s_qr_code_buffer, sizeof(s_qr_code_buffer));
+}
+
+
+/**
+ * @brief Callback function to render a QR code to the OLED display.
+ *
+ * This function is passed to `esp_qrcode_generate`. It iterates through the
+ * generated QR code modules and draws them onto the OLED screen buffer.
+ *
+ * @param qrcode Handle to the generated QR code data.
+ */
+static void oled_display_qr_code(esp_qrcode_handle_t qrcode) {
+    if (qrcode == NULL) {
+        return;
+    }
+
+    int qr_size = esp_qrcode_get_size(qrcode);
+    int module_size = 2; // Each QR module will be 2x2 pixels
+    int image_size = qr_size * module_size;
+    int x_offset = (128 - image_size) / 2;
+    int y_offset = (64 - image_size) / 2;
+
+    for (int y = 0; y < qr_size; y++) {
+        for (int x = 0; x < qr_size; x++) {
+            if (esp_qrcode_get_module(qrcode, x, y)) {
+                i2c_oled_fill_rect(s_oled_i2c_num, x_offset + x * module_size, y_offset + y * module_size, module_size, module_size);
+            }
+        }
     }
 }
 
@@ -226,6 +267,7 @@ void render_sleeping_screen(void)
     // Clear screen once, then do nothing to save power.
     i2c_oled_clear(s_oled_i2c_num);
     write_inverted_line(0, "Sleep mode");
+    i2c_oled_update_screen(s_oled_i2c_num);
     i2c_oled_write_text(s_oled_i2c_num, 4, 5, "Zzzzz....");
 }
 
@@ -303,6 +345,7 @@ void render_sensor_callback(void)
         write_padded_line(row, new_lines[row]);
         strncpy(last_lines[row], new_lines[row], sizeof(last_lines[row]));
     }
+    i2c_oled_update_screen(s_oled_i2c_num);
 }
 
 void page_fs_stats_render_callback(void)
@@ -372,6 +415,7 @@ void page_fs_stats_render_callback(void)
     {
         write_padded_line(row, new_lines[row]);
     }
+    i2c_oled_update_screen(s_oled_i2c_num);
 }
 // --- Menu event handlers ---
 void menu_on_cw(void)
@@ -510,6 +554,7 @@ void render_cmd_feedback_screen(void)
             write_padded_line(i, ""); // Clear other non-title lines
         }
     }
+    i2c_oled_update_screen(s_oled_i2c_num);
 }
 
 void uiRender_reset_activity_timer(void)
@@ -526,9 +571,6 @@ void uiRender_task(void *pvParameters)
 
     uint64_t last_sensor_refresh_ms = 0;
     const uint32_t sensor_refresh_interval_ms = 5000; // 5 seconds
-
-    uint64_t last_fs_stats_refresh_ms = 0;
-    const uint32_t fs_stats_refresh_interval_ms = 5000; // 5 seconds
 
     while (1)
     {
@@ -566,11 +608,9 @@ void uiRender_task(void *pvParameters)
                     menu_on_ccw();
                 else if (msg.event == UI_EVENT_BTN_LONG)
                 {
-                    // Long press returns to main menu
-                    current_page = 0;
-                    current_item = 0;
-                    menu_stack_pos = 0;
-                    s_menu_mode = true;
+                    // Long press returns to sensor data page (home)
+                    s_menu_mode = false;
+                    s_current_page = &sensor_page;
                 }
                 else if (msg.event == UI_EVENT_BTN)
                     menu_on_btn();
@@ -581,12 +621,9 @@ void uiRender_task(void *pvParameters)
                     s_current_page->on_cw();
                 else if (msg.event == UI_EVENT_BTN_LONG)
                 {
-                    // Long press returns to main menu from any page
-                    current_page = 0;
-                    current_item = 0;
-                    menu_stack_pos = 0;
-                    s_menu_mode = true;
-                    s_current_page = NULL;
+                    // Long press returns to sensor data page (home)
+                    s_menu_mode = false;
+                    s_current_page = &sensor_page;
                 }
                 else if (msg.event == UI_EVENT_CW && s_current_page->on_cw)
                     s_current_page->on_cw();
@@ -645,6 +682,7 @@ void uiRender_task(void *pvParameters)
         {
             s_current_page->render();
         }
+        i2c_oled_update_screen(s_oled_i2c_num);
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
@@ -652,6 +690,8 @@ void uiRender_task(void *pvParameters)
 // --- About event handlers (to be referenced in ui_menudef.h) ---
 void menu_about_on_btn(void)
 {
+    // Do not clear the cache here, it's valid for the lifetime of the app.
+    // s_qr_code_cached = false; 
     s_menu_mode = false;
     s_current_page = &about_page;
 }
@@ -878,4 +918,5 @@ void render_config_callback(void)
         snprintf(line_buf, sizeof(line_buf), " %.19s", s_config_items[item_index].value);
         write_padded_line(line_num + 1, line_buf);
     }
+    i2c_oled_update_screen(s_oled_i2c_num);
 }

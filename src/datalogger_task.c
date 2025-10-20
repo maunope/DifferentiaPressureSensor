@@ -103,6 +103,9 @@ void datalogger_task(void *pvParameters)
     ESP_LOGI(TAG, "Waiting for initialization to complete...");
     xEventGroupWaitBits(g_init_event_group, INIT_DONE_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
 
+    // Perform an initial sensor update right after startup.
+    update_sensor_buffer(bmp280_dev, params->d6fph_dev);
+
     bool refresh_requested = false;
 
     while (1)
