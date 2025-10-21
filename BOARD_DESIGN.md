@@ -10,24 +10,38 @@ The following diagram shows how the main peripherals are connected to the ESP32 
 
 ![Overall Architecture](overall_arch.png)
 
+## Hardware & Compatibility
+
+This project was developed and tested on the following hardware:
+
+*   **[OLIMEX ESP32-S3-DevKit-LiPo](https://github.com/OLIMEX/ESP32-S3-DevKit-LiPo)**: This board was used for much of the development. It features a built-in LiPo battery charger and management circuit, which works seamlessly with the software's battery monitoring capabilities.
+*   **Generic ESP32-S3 Dev-board**: Testing was also performed on a no-brand ESP32-S3 development board.
+
+The software is designed to be portable and is expected to work on any ESP32-S3 based board with the correct peripheral connections. The only feature that is highly dependent on the specific board's hardware implementation is the **battery gauging**, which requires a specific voltage divider circuit on the ADC pin as detailed in the pinout table.
+
 ### Key Components
 
 *   **Microcontroller**: ESP32-S3-WROOM-1 module.
 *   **Sensors**:
-    *   BMP280 for atmospheric pressure and temperature.
-    *   Omron D6F-PH for differential pressure.
-*   **Timekeeping**: DS3231 Real-Time Clock (RTC) with a backup battery.
-*   **Storage**: MicroSD card slot for data logging.
+    *   I2C BMP280 for atmospheric pressure and temperature.
+    *   I2C Omron D6F-PH for differential pressure. The software is written to support the `D6F-PH-0505AD3` (+/- 50 Pa), `D6F-PH-0025AD1` (+/- 250 Pa), and `D6F-PH-5050AD4` (+/- 500 Pa) models, selectable via the `config.ini` file.
+*   **Timekeeping**: A generic **DS3231** I2C Real-Time Clock (RTC) module with a backup battery.
+*   **Storage**: A **SPI bus** microSD card reader for data logging.
 *   **User Interface**:
-    *   Connector for an I2C OLED display.
-    *   Connector for a rotary encoder with a push-button.
+    *   2.42 Inch 128x64 I2C OLED display. (these often come configured for SPI and require some jumper soldering to be repurposed for I2C). 
+    *   A standard 5-pin rotary encoder with a push-button.
 *   **Connectivity**: USB-C for programming, power, and accessing the SD card as a Mass Storage Device.
+*   **Power**: 3.7V LiPo battery with integrated protection circuitry. 
+
+Apart form the Omron differential pressure sensor, all other devices are run of the mill stuff, easy to source from Aliexpress/Amazon and often icluded in esp32/Arudino starter kits. 
 
 ### Power System
 
-*   **Dual Power Source**: The board can be powered via USB-C or a single-cell (1S) LiPo battery.
-*   **Battery Monitoring**: An onboard voltage divider allows the ESP32-S3's ADC to measure the battery voltage. The divider is connected via a MOSFET to prevent battery drain when not measuring.
-*   **Peripheral Power Control**: A dedicated GPIO pin controls the main power rail for the sensors and peripherals, allowing them to be completely powered down during deep sleep.
+All components used in this project are **3.3V devices**. It is critical **not to mix 5V and 3.3V logic levels** in the same circuit, as this would damage the components, especially the Omron D6F-PH sensor which is not 5V tolerant.
+
+The custom PCB design primarily consists of pin headers (I2C, SPI, etc.) to connect these components in their breakout board form. The other components on the board are standard passives like resistors, along with BS170 MOSFETs for power control and JST connectors for external hardware.
+
+The BS170 mosfets can be replaced with pretty much any N channel Mosfet that can be turned on with 3.3V gate voltage, **IRLZ34N** have been tested and work just fine.
 
 ## Hardware Deep Sleep Implementation
 
