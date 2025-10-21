@@ -29,6 +29,15 @@ The following diagram shows how the main peripherals are connected to the ESP32 
 *   **Battery Monitoring**: An onboard voltage divider allows the ESP32-S3's ADC to measure the battery voltage. The divider is connected via a MOSFET to prevent battery drain when not measuring.
 *   **Peripheral Power Control**: A dedicated GPIO pin controls the main power rail for the sensors and peripherals, allowing them to be completely powered down during deep sleep.
 
+## Hardware Deep Sleep Implementation
+
+To achieve ultra-low power consumption (under 1mA) during deep sleep, the board implements a hardware power-gating strategy. Two separate GPIO pins are used to control the power supply to different sets of peripherals:
+
+*   **`DEVICES_POWER` (GPIO 15)**: This pin controls a MOSFET that supplies power to the main I2C bus peripherals (BMP280, D6F-PH) and the SD card. Before entering deep sleep, the ESP32 sets this pin low, completely cutting power to these components. This is the primary mechanism for power saving, reducing consumption by over 85%. The DS3231 RTC is on a separate, always-on power rail to maintain timekeeping.
+*   **`OLED_POWER` (GPIO 16)**: This pin independently controls the power to the OLED display. This allows the screen to be turned off after a period of inactivity, even while the rest of the device is still running and logging data.
+
+This hardware design allows the software to aggressively manage power, ensuring long battery life for a portable datalogger.
+
 ## Pinout
 
 The following table details the GPIO connections for the main peripherals.
