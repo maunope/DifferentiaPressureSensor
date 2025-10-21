@@ -102,6 +102,9 @@ void datalogger_task(void *pvParameters)
     ESP_LOGI(TAG, "Waiting for initialization to complete...");
     xEventGroupWaitBits(g_init_event_group, INIT_DONE_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
 
+    // Set the CSV header for all new log files.
+    spi_sdcard_set_csv_header("timestamp_gmt,datetime_cet,temperature_c,pressure_pa,diff_pressure_pa,battery_voltage,battery_percentage");
+
     // Perform an initial sensor update right after startup.
     update_sensor_buffer(bmp280_dev, params->d6fph_dev);
 
@@ -128,6 +131,11 @@ void datalogger_task(void *pvParameters)
                     g_sensor_buffer.datalogger_status = DATA_LOGGER_PAUSED;
                     xSemaphoreGive(g_sensor_buffer_mutex);
                 }
+            }
+            else if (cmd == DATALOGGER_CMD_ROTATE_FILE)
+            {
+                ESP_LOGI(TAG, "Rotating log file on request.");
+                spi_sdcard_rotate_file();
             }
             else if (cmd == DATALOGGER_CMD_RESUME_WRITES)
             {
@@ -225,7 +233,7 @@ void datalogger_task(void *pvParameters)
             esp_err_t write_err;
             const int MAX_SD_RETRIES = 3;
             for (int i = 0; i < MAX_SD_RETRIES; i++) {
-                write_err = spi_sdcard_write_line(csv_line);
+                write_err = spi_sdcard_write_line(csv_line, hf_mode_active);
                 if (write_err == ESP_OK) {
                     break; // Success
                 }

@@ -6,6 +6,10 @@ This directory contains the KiCad project files for the custom PCB designed for 
 
 The board is designed to be a compact, battery-powered datalogging platform. It integrates all the necessary components for sensing, data storage, user interaction, and power management.
 
+The following diagram shows how the main peripherals are connected to the ESP32 microcontroller:
+
+![Overall Architecture](overall_arch.png)
+
 ### Key Components
 
 *   **Microcontroller**: ESP32-S3-WROOM-1 module.

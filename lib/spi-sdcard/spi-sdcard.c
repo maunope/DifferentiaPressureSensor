@@ -31,8 +31,13 @@ static sdmmc_card_t *s_card = NULL;
 static tinyusb_msc_storage_handle_t s_msc_storage_handle = NULL;
 static char current_filepath[264] = "";        // 8 for "/sdcard/" + 255 for d_name + 1 for null
 #define MAX_FILE_SIZE_BYTES (10 * 1024 * 1024) // 10 MB
+static char s_csv_header[200] = ""; // Buffer to store the CSV header
 
+static bool s_force_new_file = false; // Flag to force creation of a new file
 static bool s_tinyusb_is_initialized = false;
+
+// Forward declaration for static helper function
+static void create_new_log_file(bool is_hf_mode);
 
 // Global host and mount configuration
 static sdmmc_host_t host = SDSPI_HOST_DEFAULT();
@@ -150,6 +155,28 @@ void spi_sdcard_deinit(void)
 }
 
 /**
+ * @brief Forces the creation of a new log file on the next write.
+ *
+ * This is achieved by simply clearing the `current_filepath` buffer.
+ */
+void spi_sdcard_rotate_file(void) {
+    current_filepath[0] = '\0';
+    s_force_new_file = true;
+    ESP_LOGI(TAG, "Log file rotation requested. New file will be created on next write.");
+}
+
+/**
+ * @brief Sets the header line to be written to new CSV files.
+ *
+ * @param header The null-terminated string to use as the CSV header.
+ */
+void spi_sdcard_set_csv_header(const char* header) {
+    if (header) {
+        strncpy(s_csv_header, header, sizeof(s_csv_header) - 1);
+        s_csv_header[sizeof(s_csv_header) - 1] = '\0'; // Ensure null termination
+    }
+}
+/**
  * @brief Writes a line of text to the current log file on the SD card.
  *
  * This function handles file rotation based on a maximum file size. If the
@@ -157,7 +184,7 @@ void spi_sdcard_deinit(void)
  * @param line The null-terminated string to write to the file.
  * @return esp_err_t `ESP_OK` on success, or an error code on failure.
  */
-esp_err_t spi_sdcard_write_line(const char *line)
+esp_err_t spi_sdcard_write_line(const char *line, bool is_hf_mode)
 {
     if (spi_sdcard_is_usb_connected())
     {
@@ -173,9 +200,18 @@ esp_err_t spi_sdcard_write_line(const char *line)
 
     // --- File Rotation Logic ---
     struct stat st;
-    if (current_filepath[0] == '\0')
+
+    // If a rotation was explicitly requested, force a new file immediately.
+    if (s_force_new_file) {
+        create_new_log_file(is_hf_mode);
+        s_force_new_file = false; // Reset the flag
+    }
+    else if (current_filepath[0] == '\0')
     { // If no file is currently open
-        // First run, find the latest file
+        // This block runs on the first write after boot or after a file rotation.
+        // We need to decide whether to resume an old file or create a new one.
+
+        const char* sscanf_format = is_hf_mode ? "data_%lld_hf.csv" : "data_%lld.csv";
         DIR *dir = opendir("/sdcard");
         if (dir)
         {
@@ -186,7 +222,7 @@ esp_err_t spi_sdcard_write_line(const char *line)
             while ((ent = readdir(dir)) != NULL)
             {
                 long long ts;
-                if (sscanf(ent->d_name, "data_%lld.csv", &ts) == 1)
+                if (sscanf(ent->d_name, sscanf_format, &ts) == 1)
                 {
                     if (ts > latest_ts)
                     {
@@ -203,17 +239,19 @@ esp_err_t spi_sdcard_write_line(const char *line)
                 if (stat(latest_file, &st) == 0 && st.st_size < MAX_FILE_SIZE_BYTES)
                 {
                     ESP_LOGI(TAG, "Continuing with existing log file: %s", latest_file);
-                    strncpy(current_filepath, latest_file, sizeof(current_filepath));
+                    strncpy(current_filepath, latest_file, sizeof(current_filepath) - 1);
+                    current_filepath[sizeof(current_filepath) - 1] = '\0';
                 }
             }
         }
-    }
-
-    if (current_filepath[0] == '\0' || (stat(current_filepath, &st) == 0 && st.st_size >= MAX_FILE_SIZE_BYTES))
-    {
-        // Create a new filename based on the current system time
-        snprintf(current_filepath, sizeof(current_filepath), "/sdcard/data_%lld.csv", (long long)time(NULL));
-        ESP_LOGI(TAG, "Starting new log file: %s", current_filepath);
+        // If after searching, current_filepath is still empty, it means no suitable file was found,
+        // so we must create a new one.
+        if (current_filepath[0] == '\0') {
+            create_new_log_file(is_hf_mode);
+        }
+    } else if (stat(current_filepath, &st) == 0 && st.st_size >= MAX_FILE_SIZE_BYTES) {
+        // The current file is full, so create a new one.
+        create_new_log_file(is_hf_mode);
     }
 
     FILE *f = fopen(current_filepath, "a");
@@ -275,6 +313,28 @@ void spi_sdcard_get_file_count(void)
     else
     {
         ESP_LOGE(TAG, "Failed to acquire mutex to update sd_card_file_count.");
+    }
+}
+
+/**
+ * @brief Creates a new log file with the correct name based on the recording mode.
+ *
+ * @param is_hf_mode True if in high-frequency mode, which affects filename.
+ */
+static void create_new_log_file(bool is_hf_mode) {
+    const char* filename_format = is_hf_mode ? "/sdcard/data_%lld_hf.csv" : "/sdcard/data_%lld.csv";
+    snprintf(current_filepath, sizeof(current_filepath), filename_format, (long long)time(NULL));
+    ESP_LOGI(TAG, "Starting new log file: %s", current_filepath);
+
+    // Write the CSV header to the new file
+    if (strlen(s_csv_header) > 0) {
+        FILE *header_f = fopen(current_filepath, "w");
+        if (header_f) {
+            fprintf(header_f, "%s\n", s_csv_header);
+            fclose(header_f);
+        } else {
+            ESP_LOGE(TAG, "Failed to open new file to write header: %s", current_filepath);
+        }
     }
 }
 

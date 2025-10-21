@@ -358,21 +358,6 @@ static void handle_sleep_fsm(void)
     // A timeout could be added here if necessary.
 }
 
-static void initiate_sleep_sequence(void)
-{
-    if (s_sleep_state != SLEEP_FSM_IDLE)
-    {
-        return; // Already in a sleep sequence
-    }
-    ESP_LOGI(TAG, "Initiating sleep sequence...");
-    s_sleep_state = SLEEP_FSM_WAIT_DATALOGGER_PAUSE;
-
-    oled_power_off(); // This will suspend the task and power down the OLED
-    // Tell the datalogger task to pause writes to the SD card.
-    datalogger_command_t logger_cmd = DATALOGGER_CMD_PAUSE_WRITES;
-    xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
-}
-
 static void handle_start_web_server(void)
 {
     // Check if USB is connected as Mass Storage. If so, don't start the web server.
@@ -584,14 +569,24 @@ void main_task(void *pvParameters)
             case APP_CMD_ENABLE_HF_MODE:
                 ESP_LOGI(TAG, "CMD: Enable High-Frequency Mode");
                 if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY)) {
-                    g_sensor_buffer.high_freq_mode_enabled = true;
+                    if (!g_sensor_buffer.high_freq_mode_enabled) {
+                        g_sensor_buffer.high_freq_mode_enabled = true;
+                        // Force a new file on mode change
+                        datalogger_command_t logger_cmd = DATALOGGER_CMD_ROTATE_FILE;
+                        xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
+                    }
                     xSemaphoreGive(g_sensor_buffer_mutex);
                 }
                 break;
             case APP_CMD_DISABLE_HF_MODE:
                 ESP_LOGI(TAG, "CMD: Disable High-Frequency Mode");
                 if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY)) {
-                    g_sensor_buffer.high_freq_mode_enabled = false;
+                    if (g_sensor_buffer.high_freq_mode_enabled) {
+                        g_sensor_buffer.high_freq_mode_enabled = false;
+                        // Force a new file on mode change
+                        datalogger_command_t logger_cmd = DATALOGGER_CMD_ROTATE_FILE;
+                        xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
+                    }
                     xSemaphoreGive(g_sensor_buffer_mutex);
                 }
                 break;

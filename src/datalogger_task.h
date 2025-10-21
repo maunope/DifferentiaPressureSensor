@@ -11,6 +11,7 @@ typedef enum {
     DATALOGGER_CMD_FORCE_REFRESH,
     DATALOGGER_CMD_PAUSE_WRITES,
     DATALOGGER_CMD_RESUME_WRITES,
+    DATALOGGER_CMD_ROTATE_FILE,
 } datalogger_command_t;
 
 extern QueueHandle_t g_datalogger_cmd_queue;
