@@ -7,7 +7,7 @@
 extern const uint8_t font5x7[96][5];
 
 // Store the address for the single OLED device this library manages.
-static uint8_t s_oled_addr = 0;
+static i2c_master_dev_handle_t s_oled_dev_handle = NULL;
 
 // Screen buffer for 128x64 OLED
 #define OLED_WIDTH 128
@@ -26,7 +26,7 @@ static esp_err_t oled_data(i2c_port_t i2c_num, const uint8_t *data, size_t len);
  */
 static esp_err_t oled_cmd(i2c_port_t i2c_num, uint8_t cmd) {
     uint8_t buf[2] = {0x00, cmd};
-    return i2c_master_write_to_device(i2c_num, s_oled_addr, buf, 2, 1000 / portTICK_PERIOD_MS);
+    return i2c_master_transmit(s_oled_dev_handle, buf, 2, 1000 / portTICK_PERIOD_MS);
 }
 
 /**
@@ -82,7 +82,7 @@ static esp_err_t oled_data(i2c_port_t i2c_num, const uint8_t *data, size_t len) 
     uint8_t buf[len + 1];
     buf[0] = 0x40;
     memcpy(&buf[1], data, len);
-    return i2c_master_write_to_device(i2c_num, s_oled_addr, buf, len + 1, 1000 / portTICK_PERIOD_MS);
+    return i2c_master_transmit(s_oled_dev_handle, buf, len + 1, 1000 / portTICK_PERIOD_MS);
 }
 
 /**
@@ -95,23 +95,18 @@ static esp_err_t oled_data(i2c_port_t i2c_num, const uint8_t *data, size_t len) 
  * @param scl The GPIO number for the SCL line.
  * @param i2c_addr The I2C address of the OLED display.
  */
-void i2c_oled_bus_init(i2c_port_t i2c_num, gpio_num_t sda, gpio_num_t scl, uint8_t i2c_addr) {
+void i2c_oled_bus_init(i2c_master_bus_handle_t bus_handle, uint8_t i2c_addr) {
     if (i2c_addr == 0) {
-        s_oled_addr = OLED_I2C_ADDR; // Use default if 0 is passed
-    } else {
-        s_oled_addr = i2c_addr;
+        i2c_addr = OLED_I2C_ADDR; // Use default if 0 is passed
     }
-    i2c_config_t conf = {
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = sda,
-        .scl_io_num = scl,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = 400000
+
+    i2c_device_config_t dev_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_7,
+        .device_address = i2c_addr,
+        .scl_speed_hz = 400000,
     };
-    i2c_param_config(i2c_num, &conf);
-    i2c_driver_install(i2c_num, conf.mode, 0, 0, 0);
-    i2c_oled_send_init_commands(i2c_num);
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &dev_cfg, &s_oled_dev_handle));
+    i2c_oled_send_init_commands(0); // Port num is not used anymore, but kept for API compatibility
 }
 
 /**

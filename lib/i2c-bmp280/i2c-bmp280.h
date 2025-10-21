@@ -1,7 +1,7 @@
 #ifndef I2C_BMP280_H
 #define I2C_BMP280_H
 
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include <stdint.h>
 #include "esp_err.h"
 
@@ -24,13 +24,12 @@ typedef struct {
 } bmp280_calib_data_t;
 
 typedef struct {
-    i2c_port_t i2c_port;
-    uint8_t i2c_addr;
+    i2c_master_dev_handle_t i2c_dev_handle;
     bmp280_calib_data_t calib_data;
 } bmp280_t;
 
 // Function prototypes
-esp_err_t bmp280_init(bmp280_t *dev, i2c_port_t port, uint8_t i2c_addr);
+esp_err_t bmp280_init(bmp280_t *dev, i2c_master_bus_handle_t bus_handle, uint8_t i2c_addr);
 
 /**
  * @brief Initializes the BMP280 sensor with the default I2C address (0x76).

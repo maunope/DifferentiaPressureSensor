@@ -1,6 +1,5 @@
 #pragma once
-
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "esp_err.h"
 #include <stdint.h>
 
@@ -21,8 +20,7 @@ typedef enum
  */
 typedef struct
 {
-    i2c_port_t i2c_port;
-    uint8_t i2c_addr;
+    i2c_master_dev_handle_t i2c_dev_handle;
     d6fph_sensor_model_t model;
     bool is_initialized;
 
@@ -41,7 +39,7 @@ typedef struct
  * @param model The specific model of the D6F-PH sensor.
  * @return esp_err_t `ESP_OK` on success, or an error code on failure.
  */
-esp_err_t d6fph_init(d6fph_t *dev, i2c_port_t port, uint8_t i2c_addr, d6fph_sensor_model_t model);
+esp_err_t d6fph_init(d6fph_t *dev, i2c_master_bus_handle_t bus_handle, uint8_t i2c_addr, d6fph_sensor_model_t model);
 
 /**
  * @brief Initializes the D6F-PH sensor with the default I2C address (0x6C).

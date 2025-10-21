@@ -1,16 +1,15 @@
 #pragma once
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include <time.h>
 #include "esp_err.h"
 
 #define DS3231_I2C_ADDR_DEFAULT 0x68
 
 typedef struct {
-    i2c_port_t i2c_num;
-    uint8_t address;
+    i2c_master_dev_handle_t i2c_dev_handle;
 } ds3231_t;
 
-esp_err_t ds3231_init(ds3231_t *rtc, i2c_port_t i2c_num, uint8_t address);
+esp_err_t ds3231_init(ds3231_t *rtc, i2c_master_bus_handle_t bus_handle, uint8_t address);
 
 /**
  * @brief Initializes the DS3231 RTC with the default I2C address (0x68).

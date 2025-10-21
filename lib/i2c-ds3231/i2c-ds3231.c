@@ -1,6 +1,8 @@
 #include "i2c-ds3231.h"
 #include <string.h>
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include <time.h>
 #include <sys/time.h>
 
@@ -28,16 +30,19 @@ static uint8_t dec2bcd(uint8_t val) { return ((val / 10) << 4) | (val % 10); }
  * @param address The I2C address of the DS3231.
  * @return esp_err_t `ESP_OK` on success, `ESP_ERR_INVALID_ARG` if rtc is NULL.
  */
-esp_err_t ds3231_init(ds3231_t *rtc, i2c_port_t i2c_num, uint8_t address) {
+esp_err_t ds3231_init(ds3231_t *rtc, i2c_master_bus_handle_t bus_handle, uint8_t address) {
     if (!rtc) {
         return ESP_ERR_INVALID_ARG;
     }
-    rtc->i2c_num = i2c_num;
     if (address == 0) {
-        rtc->address = DS3231_I2C_ADDR_DEFAULT; // Use default if 0 is passed
-    } else {
-        rtc->address = address;
+        address = DS3231_I2C_ADDR_DEFAULT; // Use default if 0 is passed
     }
+    i2c_device_config_t dev_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_7,
+        .device_address = address,
+        .scl_speed_hz = 100000,
+    };
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &dev_cfg, &rtc->i2c_dev_handle));
     return ESP_OK;
 }
 
@@ -51,26 +56,16 @@ esp_err_t ds3231_init(ds3231_t *rtc, i2c_port_t i2c_num, uint8_t address) {
  */
 esp_err_t ds3231_get_time(ds3231_t *rtc, struct tm *timeinfo) {
     uint8_t data[7];
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    // Write-then-read transaction
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (rtc->address << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_write_byte(cmd, 0x00, true); // Start at register 0x00
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (rtc->address << 1) | I2C_MASTER_READ, true);
-    i2c_master_read(cmd, data, 7, I2C_MASTER_LAST_NACK);
-    i2c_master_stop(cmd);
+    uint8_t reg_addr = 0x00;
 
     esp_err_t ret;
     //F*ck those cheap *ss modules from Aliexpress, sometimes it NAKs the first read attempt
     int retries = 3;
     do {
-        ret = i2c_master_cmd_begin(rtc->i2c_num, cmd, 500 / portTICK_PERIOD_MS);
+        ret = i2c_master_transmit_receive(rtc->i2c_dev_handle, &reg_addr, 1, data, 7, pdMS_TO_TICKS(500));
         if (ret == ESP_OK) break;
         vTaskDelay(pdMS_TO_TICKS(10)); // Small delay between retries
     } while (--retries > 0);
-
-    i2c_cmd_link_delete(cmd);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to get time after multiple retries: %s", esp_err_to_name(ret));
         return ret;
@@ -103,22 +98,16 @@ esp_err_t ds3231_set_time(ds3231_t *rtc, const struct tm *timeinfo) {
     data[5] = dec2bcd(timeinfo->tm_mon + 1);
     data[6] = dec2bcd(timeinfo->tm_year % 100);
 
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (rtc->address << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_write_byte(cmd, 0x00, true); // Start at register 0
-    i2c_master_write(cmd, data, 7, true);
-    i2c_master_stop(cmd);
+    uint8_t write_buf[8] = {0x00}; // reg_addr + 7 bytes of data
+    memcpy(&write_buf[1], data, 7);
 
     esp_err_t ret;
     int retries = 3;
     do {
-        ret = i2c_master_cmd_begin(rtc->i2c_num, cmd, 500 / portTICK_PERIOD_MS);
+        ret = i2c_master_transmit(rtc->i2c_dev_handle, write_buf, sizeof(write_buf), pdMS_TO_TICKS(500));
         if (ret == ESP_OK) break;
         vTaskDelay(pdMS_TO_TICKS(10)); // Small delay between retries
     } while (--retries > 0);
-
-    i2c_cmd_link_delete(cmd);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to set time after multiple retries: %s", esp_err_to_name(ret));
     }

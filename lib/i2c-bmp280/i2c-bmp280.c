@@ -1,5 +1,5 @@
 #include "i2c-bmp280.h"
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -22,55 +22,6 @@ static const char *TAG = "BMP280";
 static int32_t t_fine;
 
 /**
- * @brief Writes a single byte to a register on the BMP280.
- *
- * @param dev Pointer to the BMP280 device descriptor.
- * @param reg_addr The register address to write to.
- * @param data The byte of data to write.
- * @return esp_err_t `ESP_OK` on success, or an error code on failure.
- */
-static esp_err_t bmp280_i2c_write_byte(const bmp280_t *dev, uint8_t reg_addr, uint8_t data)
-{
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (dev->i2c_addr << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_write_byte(cmd, reg_addr, true);
-    i2c_master_write_byte(cmd, data, true);
-    i2c_master_stop(cmd);
-    esp_err_t ret = i2c_master_cmd_begin(dev->i2c_port, cmd, I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
-    i2c_cmd_link_delete(cmd); 
-    return ret;
-}
-
-/**
- * @brief Reads a sequence of bytes from a starting register on the BMP280.
- *
- * @param dev Pointer to the BMP280 device descriptor.
- * @param reg_addr The starting register address to read from.
- * @param data Pointer to the buffer to store the read data.
- * @param len The number of bytes to read.
- * @return esp_err_t `ESP_OK` on success, or an error code on failure.
- */
-static esp_err_t bmp280_i2c_read_bytes(const bmp280_t *dev, uint8_t reg_addr, uint8_t *data, size_t len)
-{
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (dev->i2c_addr << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_write_byte(cmd, reg_addr, true);
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (dev->i2c_addr << 1) | I2C_MASTER_READ, true);
-    if (len > 1)
-    {
-        i2c_master_read(cmd, data, len - 1, I2C_MASTER_ACK);
-    }
-    i2c_master_read_byte(cmd, data + len - 1, I2C_MASTER_NACK);
-    i2c_master_stop(cmd);
-    esp_err_t ret = i2c_master_cmd_begin(dev->i2c_port, cmd, I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
-    i2c_cmd_link_delete(cmd); 
-    return ret;
-}
-
-/**
  * @brief Reads the factory-programmed calibration data from the BMP280.
  *
  * @param dev Pointer to the BMP280 device descriptor.
@@ -79,7 +30,8 @@ static esp_err_t bmp280_i2c_read_bytes(const bmp280_t *dev, uint8_t reg_addr, ui
 static esp_err_t bmp280_read_calibration_data(bmp280_t *dev)
 {
     uint8_t calib_data_raw[24];
-    esp_err_t ret = bmp280_i2c_read_bytes(dev, BMP280_CALIB_DATA_START, calib_data_raw, 24);
+    uint8_t reg_addr = BMP280_CALIB_DATA_START;
+    esp_err_t ret = i2c_master_transmit_receive(dev->i2c_dev_handle, &reg_addr, 1, calib_data_raw, 24, I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to read calibration data.");
         return ret;
@@ -116,19 +68,25 @@ static esp_err_t bmp280_read_calibration_data(bmp280_t *dev)
  * @param i2c_addr The I2C address of the sensor.
  * @return esp_err_t `ESP_OK` on success, or an error code on failure.
  */
-esp_err_t bmp280_init(bmp280_t *dev, i2c_port_t port, uint8_t i2c_addr)
+esp_err_t bmp280_init(bmp280_t *dev, i2c_master_bus_handle_t bus_handle, uint8_t i2c_addr)
 {
-    dev->i2c_port = port;
     if (i2c_addr == 0) {
-        dev->i2c_addr = BMP280_SENSOR_ADDR; // Use default if 0 is passed
-    } else {
-        dev->i2c_addr = i2c_addr;
+        i2c_addr = BMP280_SENSOR_ADDR; // Use default if 0 is passed
     }
+
+    i2c_device_config_t dev_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_7,
+        .device_address = i2c_addr,
+        .scl_speed_hz = 100000,
+    };
+
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &dev_cfg, &dev->i2c_dev_handle));
 
     esp_err_t ret;
     uint8_t chip_id;
 
-    ret = bmp280_i2c_read_bytes(dev, BMP280_CHIP_ID_REG, &chip_id, 1);
+    uint8_t reg_addr = BMP280_CHIP_ID_REG;
+    ret = i2c_master_transmit_receive(dev->i2c_dev_handle, &reg_addr, 1, &chip_id, 1, I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
     if (ret != ESP_OK)
     {
         ESP_LOGE(TAG, "Failed to read chip ID: %s", esp_err_to_name(ret));
@@ -150,14 +108,16 @@ esp_err_t bmp280_init(bmp280_t *dev, i2c_port_t port, uint8_t i2c_addr)
     }
 
     // Set control register to normal mode with 16x oversampling for both temp and pressure
-    ret = bmp280_i2c_write_byte(dev, BMP280_CTRL_MEAS_REG, 0x5F);
+    uint8_t write_buf1[] = {BMP280_CTRL_MEAS_REG, 0x5F};
+    ret = i2c_master_transmit(dev->i2c_dev_handle, write_buf1, sizeof(write_buf1), I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to write to CTRL_MEAS register.");
         return ret;
     }
     
     // Set config register for 0.5ms standby time and filter coefficient 16
-    ret = bmp280_i2c_write_byte(dev, BMP280_CONFIG_REG, 0x10);
+    uint8_t write_buf2[] = {BMP280_CONFIG_REG, 0x10};
+    ret = i2c_master_transmit(dev->i2c_dev_handle, write_buf2, sizeof(write_buf2), I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to write to CONFIG register.");
         return ret;
@@ -175,7 +135,8 @@ esp_err_t bmp280_init(bmp280_t *dev, i2c_port_t port, uint8_t i2c_addr)
 int32_t bmp280_read_raw_temp(bmp280_t *dev)
 {
     uint8_t raw_data[3];
-    if (bmp280_i2c_read_bytes(dev, 0xFA, raw_data, 3) != ESP_OK) {
+    uint8_t reg_addr = 0xFA;
+    if (i2c_master_transmit_receive(dev->i2c_dev_handle, &reg_addr, 1, raw_data, 3, I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS) != ESP_OK) {
         return 0; // Return 0 on read failure
     }
     return (int32_t)((raw_data[0] << 12) | (raw_data[1] << 4) | (raw_data[2] >> 4));
@@ -190,7 +151,8 @@ int32_t bmp280_read_raw_temp(bmp280_t *dev)
 int32_t bmp280_read_raw_pressure(bmp280_t *dev)
 {
     uint8_t raw_data[3];
-    if (bmp280_i2c_read_bytes(dev, 0xF7, raw_data, 3) != ESP_OK) {
+    uint8_t reg_addr = 0xF7;
+    if (i2c_master_transmit_receive(dev->i2c_dev_handle, &reg_addr, 1, raw_data, 3, I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS) != ESP_OK) {
         return 0; // Return 0 on read failure
     }
     return (int32_t)((raw_data[0] << 12) | (raw_data[1] << 4) | (raw_data[2] >> 4));
@@ -265,8 +227,9 @@ esp_err_t bmp280_force_read(bmp280_t *dev, float *temperature, long *pressure)
     // 1. Read the current ctrl_meas register
     uint8_t ctrl_meas;
     esp_err_t err;
+    uint8_t reg_addr = BMP280_CTRL_MEAS_REG;
     for (int i = 0; i < MAX_RETRIES; i++) {
-        err = bmp280_i2c_read_bytes(dev, BMP280_CTRL_MEAS_REG, &ctrl_meas, 1);
+        err = i2c_master_transmit_receive(dev->i2c_dev_handle, &reg_addr, 1, &ctrl_meas, 1, I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
         if (err == ESP_OK) break;
         vTaskDelay(pdMS_TO_TICKS(RETRY_DELAY_MS));
     }
@@ -280,7 +243,8 @@ esp_err_t bmp280_force_read(bmp280_t *dev, float *temperature, long *pressure)
     // 2. Set the sensor to "Forced mode"
     // This retains the oversampling settings but triggers a single measurement.
     ctrl_meas = (ctrl_meas & 0xFC) | BMP280_MODE_FORCED;
-    err = bmp280_i2c_write_byte(dev, BMP280_CTRL_MEAS_REG, ctrl_meas);
+    uint8_t write_buf[] = {BMP280_CTRL_MEAS_REG, ctrl_meas};
+    err = i2c_master_transmit(dev->i2c_dev_handle, write_buf, sizeof(write_buf), I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to write CTRL_MEAS for forced read.");
         return err;
@@ -290,8 +254,9 @@ esp_err_t bmp280_force_read(bmp280_t *dev, float *temperature, long *pressure)
     // The 'measuring' bit (bit 3) will be 0 when done.
     uint8_t status;
     do {
+        reg_addr = BMP280_REG_STATUS;
         vTaskDelay(pdMS_TO_TICKS(5)); // Small delay to avoid busy-waiting too fast
-        err = bmp280_i2c_read_bytes(dev, BMP280_REG_STATUS, &status, 1);
+        err = i2c_master_transmit_receive(dev->i2c_dev_handle, &reg_addr, 1, &status, 1, I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Failed to read STATUS during poll.");
             return err;

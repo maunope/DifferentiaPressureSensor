@@ -1,5 +1,5 @@
 #include "i2c-d6fph.h"
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -29,7 +29,7 @@ static esp_err_t d6fph_write_reg16(d6fph_t *dev, uint16_t reg, const uint8_t *da
         memcpy(&write_buf[2], data, len);
     }
 
-    esp_err_t ret = i2c_master_write_to_device(dev->i2c_port, dev->i2c_addr, write_buf, sizeof(write_buf), pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
+    esp_err_t ret = i2c_master_transmit(dev->i2c_dev_handle, write_buf, sizeof(write_buf), pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "I2C write failed: %s", esp_err_to_name(ret));
     }
@@ -56,7 +56,7 @@ static esp_err_t d6fph_trigger_and_read(d6fph_t *dev, uint16_t *raw_value)
     // Step 4: Read the 2 data bytes
     uint8_t read_reg = D6FPH_CMD_READ_EEPROM;
     uint8_t read_buffer[2]; // We only need the 2 data bytes
-    ret = i2c_master_write_read_device(dev->i2c_port, dev->i2c_addr, &read_reg, 1, read_buffer, sizeof(read_buffer), pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
+    ret = i2c_master_transmit_receive(dev->i2c_dev_handle, &read_reg, 1, read_buffer, sizeof(read_buffer), pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
     if (ret != ESP_OK)
     { 
         ESP_LOGE(TAG, "I2C read failed: %s", esp_err_to_name(ret));
@@ -71,19 +71,24 @@ static esp_err_t d6fph_trigger_and_read(d6fph_t *dev, uint16_t *raw_value)
     return ESP_OK;
 }
 
-esp_err_t d6fph_init(d6fph_t *dev, i2c_port_t port, uint8_t i2c_addr, d6fph_sensor_model_t model)
+esp_err_t d6fph_init(d6fph_t *dev, i2c_master_bus_handle_t bus_handle, uint8_t i2c_addr, d6fph_sensor_model_t model)
 {
     if (!dev)
     {
         return ESP_ERR_INVALID_ARG;
     }
 
-    dev->i2c_port = port;
     if (i2c_addr == 0) {
-        dev->i2c_addr = D6FPH_I2C_ADDR_DEFAULT; // Use default if 0 is passed
-    } else {
-        dev->i2c_addr = i2c_addr;
+        i2c_addr = D6FPH_I2C_ADDR_DEFAULT; // Use default if 0 is passed
     }
+
+    i2c_device_config_t dev_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_7,
+        .device_address = i2c_addr,
+        .scl_speed_hz = 100000,
+    };
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &dev_cfg, &dev->i2c_dev_handle));
+
     dev->model = model;
     dev->is_initialized = false; // Default to not initialized
     ESP_LOGI(TAG, "Initializing D6F-PH sensor at address 0x%02X", i2c_addr);

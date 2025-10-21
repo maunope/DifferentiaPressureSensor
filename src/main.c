@@ -9,7 +9,7 @@
 #include "freertos/queue.h"
 #include "esp_system.h"
 #include "esp_log.h"
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "driver/gpio.h"
 #include "driver/rtc_io.h"
 #include "sdkconfig.h"
@@ -88,6 +88,9 @@ bmp280_t g_bmp280; // Global BMP280 device handle
 d6fph_t g_d6fph;   // Global D6F-PH device handle
 
 TaskHandle_t g_uiRender_task_handle = NULL;
+i2c_master_bus_handle_t g_i2c_bus0_handle = NULL;
+i2c_master_bus_handle_t g_i2c_bus1_handle = NULL;
+
 const config_params_t *g_cfg = NULL;
 
 static uint64_t last_activity_ms = 0;
@@ -462,22 +465,31 @@ static void handle_web_server_fsm(void)
  *
  * Configures and installs the I2C driver for the main peripheral bus (I2C_NUM_0).
  */
-static esp_err_t i2c_master_init(void)
+static esp_err_t i2c_bus_init(void)
 {
-    int i2c_master_port = I2C_MASTER_NUM;
-
-    i2c_config_t conf = {
-        .mode = I2C_MODE_MASTER,
+    // --- Init I2C Bus 0 for Sensors ---
+    i2c_master_bus_config_t i2c_mst0_config = {
+        .clk_source = I2C_CLK_SRC_DEFAULT,
+        .i2c_port = I2C_MASTER_NUM,
         .sda_io_num = I2C_MASTER_SDA_IO,
         .scl_io_num = I2C_MASTER_SCL_IO,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = I2C_MASTER_FREQ_HZ,
+        .glitch_ignore_cnt = 7,
+        .flags.enable_internal_pullup = true,
     };
+    ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst0_config, &g_i2c_bus0_handle));
 
-    i2c_param_config(i2c_master_port, &conf);
+    // --- Init I2C Bus 1 for OLED ---
+    i2c_master_bus_config_t i2c_mst1_config = {
+        .clk_source = I2C_CLK_SRC_DEFAULT,
+        .i2c_port = I2C_OLED_NUM,
+        .sda_io_num = I2C_OLED_SDA_IO,
+        .scl_io_num = I2C_OLED_SCL_IO,
+        .glitch_ignore_cnt = 7,
+        .flags.enable_internal_pullup = true,
+    };
+    ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst1_config, &g_i2c_bus1_handle));
 
-    return i2c_driver_install(i2c_master_port, conf.mode, 0, 0, 0);
+    return ESP_OK;
 }
 
 // --- Main Application Entry Point ---
@@ -823,17 +835,34 @@ void app_main(void)
     // Turn on power for all peripherals.
     gpio_set_level(DEVICES_POWER_PIN, 1);
 
+    // Initialize I2C buses first, as they are needed by peripherals.
+    esp_err_t err = i2c_bus_init();
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "I2C master initialization failed, stopping.");
+        return;
+    }
+
     // --- Early UI Initialization to show boot message ---
     if (cause != ESP_SLEEP_WAKEUP_TIMER)
     {
         // Power on OLED
         gpio_set_level(OLED_POWER_PIN, 1);
         vTaskDelay(pdMS_TO_TICKS(50)); // Wait for OLED power to stabilize
+    }
+    else
+    {
+        // Ensure OLED is off for timer-based wakeups
+        gpio_set_level(OLED_POWER_PIN, 0);
+    }
+    vTaskDelay(pdMS_TO_TICKS(50)); // Wait for power to stabilize
 
-        // Initialize UI renderer which will handle its own I2C bus and OLED.
-        uiRender_init(I2C_OLED_NUM, I2C_OLED_SDA_IO, I2C_OLED_SCL_IO, OLED_I2C_ADDR);
+    // Initialize UI renderer which will handle its own I2C bus and OLED.
+    uiRender_init(g_i2c_bus1_handle, OLED_I2C_ADDR);
+
+    if (cause != ESP_SLEEP_WAKEUP_TIMER)
+    {
         i2c_oled_clear(I2C_OLED_NUM);
-
         // Buffer for display messages, 20 chars + null terminator
         char display_str[21];
         memset(display_str, 0, sizeof(display_str)); // Ensure the buffer is clean
@@ -843,12 +872,6 @@ void app_main(void)
         snprintf(display_str, sizeof(display_str), "%-20s", msg);
         i2c_oled_write_text(I2C_OLED_NUM, 1, 0, display_str);
     }
-    else
-    {
-        // Ensure OLED is off for timer-based wakeups
-        gpio_set_level(OLED_POWER_PIN, 0);
-    }
-    vTaskDelay(pdMS_TO_TICKS(50)); // Wait for power to stabilize
 
     // --- Step 2: Initialize RTOS objects (Mutexes and Queues) ---
     g_command_status_mutex = xSemaphoreCreateMutex();
@@ -876,14 +899,6 @@ void app_main(void)
         g_sensor_buffer.last_successful_write_ts = rtc_last_successful_write_ts;
         g_sensor_buffer.high_freq_mode_enabled = rtc_high_freq_mode_enabled;
         xSemaphoreGive(g_sensor_buffer_mutex);
-    }
-
-    // Initialize main I2C bus for sensors.
-    esp_err_t err = i2c_master_init();
-    if (err != ESP_OK)
-    {
-        ESP_LOGE(TAG, "I2C master initialization failed, stopping.");
-        return;
     }
 
     // --- Step 3: Initialize SD card and Configuration ---
@@ -932,7 +947,7 @@ void app_main(void)
     g_cfg = config_params_get();
 
     // Initialize BMP280 Sensor.
-    err = bmp280_init(&g_bmp280, I2C_MASTER_NUM, BMP280_I2C_ADDR);
+    err = bmp280_init(&g_bmp280, g_i2c_bus0_handle, BMP280_I2C_ADDR);
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "BMP280 sensor initialization failed, stopping.");
@@ -943,14 +958,14 @@ void app_main(void)
     // Initialize Battery Reader first, as it uses ADC which can conflict if I2C is initialized first
     battery_reader_init(BATTERY_ADC_PIN, BATTERY_PWR_PIN, g_cfg->battery_voltage_divider_ratio);
     // Initialize D6F-PH Sensor.
-    err = d6fph_init(&g_d6fph, I2C_MASTER_NUM, D6FPH_I2C_ADDR, g_cfg->d6fph_model);
+    err = d6fph_init(&g_d6fph, g_i2c_bus0_handle, D6FPH_I2C_ADDR, g_cfg->d6fph_model);
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "D6F-PH sensor initialization failed.");
     }
 
     // --- Step 5: Initialize and validate the external Real-Time Clock (RTC) ---
-    ds3231_init(&g_rtc, I2C_MASTER_NUM, DS3231_I2C_ADDR);
+    ds3231_init(&g_rtc, g_i2c_bus0_handle, DS3231_I2C_ADDR);
     struct tm timeinfo;
     time_t rtc_ts = -1;
 

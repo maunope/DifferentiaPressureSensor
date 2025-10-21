@@ -41,7 +41,7 @@ All components used in this project are **3.3V devices**. It is critical **not t
 
 The custom PCB design primarily consists of pin headers (I2C, SPI, etc.) to connect these components in their breakout board form. The other components on the board are standard passives like resistors, along with BS170 MOSFETs for power control and JST connectors for external hardware.
 
-The BS170 mosfets can be replaced with pretty much any N channel Mosfet that can be turned on with 3.3V gate voltage, **IRLZ34N** have been tested and work just fine.
+The BS170 mosfets can be replaced with pretty much any N channel mosfet that can be turned on with 3.3V gate voltage, **IRLZ34N** have been tested and work just fine.
 
 ## Hardware Deep Sleep Implementation
 

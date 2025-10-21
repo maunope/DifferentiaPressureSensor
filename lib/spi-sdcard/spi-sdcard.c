@@ -138,16 +138,21 @@ void spi_sdcard_deinit(void)
     if (s_msc_storage_handle)
     {
         tinyusb_msc_delete_storage(s_msc_storage_handle);
+        ESP_LOGI("TAG", "1");
         s_msc_storage_handle = NULL;
     }
     if (s_tinyusb_is_initialized)
     {
         tinyusb_driver_uninstall();
+          ESP_LOGI("TAG", "2");
         s_tinyusb_is_initialized = false;
     }
     esp_vfs_fat_sdcard_unmount("/sdcard", s_card); // Unmount the filesystem
+      ESP_LOGI("TAG", "3");
     // De-initialize the SPI bus to ensure it's powered down during deep sleep.
+    
     spi_bus_free(host.slot);
+      ESP_LOGI("TAG", "4");
     ESP_LOGI(TAG, "SPI bus freed.");
     mounted = false;
     s_card = NULL;
@@ -222,7 +227,13 @@ esp_err_t spi_sdcard_write_line(const char *line, bool is_hf_mode)
             while ((ent = readdir(dir)) != NULL)
             {
                 long long ts;
-                if (sscanf(ent->d_name, sscanf_format, &ts) == 1)
+                // Ensure we only parse files that match the current mode.
+                // If in HF mode, filename must contain "_hf".
+                // If not in HF mode, filename must NOT contain "_hf".
+                bool name_matches_mode = (is_hf_mode && strstr(ent->d_name, "_hf")) ||
+                                         (!is_hf_mode && !strstr(ent->d_name, "_hf"));
+
+                if (name_matches_mode && sscanf(ent->d_name, sscanf_format, &ts) == 1)
                 {
                     if (ts > latest_ts)
                     {
