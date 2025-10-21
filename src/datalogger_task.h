@@ -19,6 +19,7 @@ typedef struct {
     bmp280_t *bmp280_dev;
     d6fph_t *d6fph_dev;
     uint32_t log_interval_ms;
+    uint32_t hf_log_interval_ms;
 } datalogger_task_params_t;
 
 /**

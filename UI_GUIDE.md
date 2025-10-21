@@ -43,6 +43,16 @@ The top-right corner of the screen displays persistent icons that provide at-a-g
     +--------------------+
     ```
 
+*   **High-Frequency Mode**: When enabled, a `>>` symbol appears in the top-left corner. This indicates that the device is using shorter logging and sleep intervals.
+    If an SD card error occurs, the `>>` icon will shift to the right to make space for the `!!` warning icon.
+
+    ```
+    +--------------------+
+    | >> !! Main Menu[[]] <-- HF and SD Error
+    | ...                |
+    +--------------------+
+    ```
+
 ## Main Screens
 
 ### Sensor Data Screen
@@ -89,6 +99,7 @@ A short press on the button from the main data screen enters the menu system.
 |> Sensor data       |
 |  Options >         |
 |  Web Server >      |
+|  High Freq. Mode   |
 |  About             |
 |                    |
 |                    |
@@ -96,28 +107,30 @@ A short press on the button from the main data screen enters the menu system.
 ```
 
 *   **Sensor data**: Returns to the main data display screen.
-*   **Options**: Enters the `Options` submenu for device settings.
+*   **High Freq. Mode**: Enters a menu to enable or disable high-frequency logging mode. This mode is temporary and resets on reboot.
 *   **Web Server**: Enables a web server to allow data files download through WiFi, pauses data logging and disables sleep.
-*   **About**: Displays a QR code that links to the project's GitHub repository.
+*   **Options**: Enters the `Options` submenu for device settings.
+*   **About**: Displays a QR code and a short link to the project's GitHub repository.
 
-### About Page
+### High Freq. Mode Submenu
 
-Selecting "About" from the Main Menu will display a QR code. Scan this with your phone to visit the project's source code repository.
+High Frequency polling sunmenu allows to enable/disable high frequency polling, the default HF logging interval is 5 seconds. 
 
 ```
 +--------------------+
+| High Freq. Mode    |
+|> Enable            |
+|  Disable           |
 |                    |
-|    ████████████    |
-|    █ ▄▄▄▄▄▄ █ █    |
-|    █ █▄█▄█▄ █ █    |
-|    █▄▄▄▄▄▄▄█ █    |
+|                    |
 |                    |
 +--------------------+
 ```
+
 
 ### Web Server page
 
-Selecting "Web Server" from the Main Menu and confirming will display a QR code. Scan this with your phone to visit the data file download page, scroll the rotary encoder to access the plain thext URL
+Selecting "Web Server" from the Main Menu and confirming will display a QR code. Scan this with your phone to visit the data file download page, scroll the rotary encoder to access the plain text URL
 
 ```
 +--------------------+
@@ -144,6 +157,7 @@ Selecting "Web Server" from the Main Menu and confirming will display a QR code.
 |                    |
 +--------------------+
 ```
+
 
 *   **Real Time Clock**: Enters a submenu for time-related actions.
 *   **File System**: Enters a submenu for SD card actions.
@@ -183,3 +197,18 @@ Selecting "Web Server" from the Main Menu and confirming will display a QR code.
 
 *   **View Stats**: Shows a page with SD card statistics, including free space and file count.
 *   **Format SD**: **(Warning!)** Enters a confirmation screen to format the SD card, which will erase all data.
+
+### About Page
+
+Selecting "About" from the Main Menu will display a QR code. Scan this with your phone to visit the project's source code repository.
+
+```
++--------------------+
+|                    |
+|    ████████████    |
+|    █ ▄▄▄▄▄▄ █ █    |
+|    █ █▄█▄█▄ █ █    |
+|    █▄▄▄▄▄▄▄█ █    |
+|                    |
++--------------------+
+```

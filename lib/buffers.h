@@ -41,6 +41,7 @@ typedef struct {
     int battery_externally_powered;
     int sd_card_file_count;
     int sd_card_free_bytes;
+    bool high_freq_mode_enabled;
 } sensor_buffer_t;
 
 // Global buffer and mutex declarations
@@ -69,6 +70,8 @@ typedef enum {
     APP_CMD_RESUME_DATALOGGER,
     APP_CMD_START_WEB_SERVER,
     APP_CMD_STOP_WEB_SERVER,
+    APP_CMD_ENABLE_HF_MODE,
+    APP_CMD_DISABLE_HF_MODE,
 } app_command_t;
 
 typedef enum {

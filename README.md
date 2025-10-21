@@ -18,6 +18,7 @@ This project is a datalogger built on the ESP32-S3 platform using the ESP-IDF fr
     *   A settings menu to manage the RTC, SD card, view configuration, and display a QR code linking to the project repository.
 *   **NTP Time Sync**: Can synchronize the RTC with an NTP server over Wi-Fi.
 *   **Web Server**: Can strt a web server to allow downloading logged data files directly from a web browser.
+*   **High-Frequency Mode**: An optional mode that can be enabled via the UI for more frequent data logging and shorter sleep intervals, useful for capturing more granular data.
 *   **Power Management**: Implements deep sleep to conserve battery, waking up on a timer or via user interaction (rotary encoder button). The OLED screen also powers down after a period of inactivity.
 *   **Exclusive File System Access**: To prevent data corruption, the system ensures that only one component (Datalogger, Web Server, or USB Mass Storage) can access the SD card at a time. For example, starting the web server will pause the datalogger, and connecting the device to a PC will disable both the web server and the datalogger.
 *   **Configuration via INI file**: Key parameters like sleep intervals, Wi-Fi credentials, and sensor models can be configured via a `config.ini` file on the SD card. The device does not go to sleep while the web server is active.

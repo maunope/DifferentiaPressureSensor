@@ -20,6 +20,7 @@ sensor_buffer_t g_sensor_buffer = {
     .last_successful_write_ts = 0,
     .sd_card_file_count = -2, // -2 indicates loading
     .sd_card_free_bytes = -2, // -2 indicates loading
+    .high_freq_mode_enabled = false,
 };
 
 SemaphoreHandle_t g_sensor_buffer_mutex = NULL;

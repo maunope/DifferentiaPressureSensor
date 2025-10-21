@@ -77,6 +77,7 @@
 static RTC_DATA_ATTR uint64_t rtc_last_write_ms = 0;
 static RTC_DATA_ATTR write_status_t rtc_last_write_status = WRITE_STATUS_UNKNOWN;
 static RTC_DATA_ATTR time_t rtc_last_successful_write_ts = 0;
+static RTC_DATA_ATTR bool rtc_high_freq_mode_enabled = false;
 
 static const char *TAG = "main";
 
@@ -279,6 +280,7 @@ static void go_to_deep_sleep(void)
         rtc_last_write_ms = g_sensor_buffer.last_write_ms;
         rtc_last_write_status = g_sensor_buffer.writeStatus;
         rtc_last_successful_write_ts = g_sensor_buffer.last_successful_write_ts;
+        rtc_high_freq_mode_enabled = g_sensor_buffer.high_freq_mode_enabled;
         xSemaphoreGive(g_sensor_buffer_mutex);
         ESP_LOGI(TAG, "Saved last write time (%llu) and status (%d) to RTC memory.", rtc_last_write_ms, rtc_last_write_status);
     }
@@ -290,7 +292,14 @@ static void go_to_deep_sleep(void)
     // Configure the rotary encoder button pin as the wakeup source.
     // This uses the RTC peripheral, which is required for deep sleep.
     rotaryencoder_enable_wakeup_source();
-    esp_sleep_enable_timer_wakeup(g_cfg->sleep_duration_ms * 1000);
+
+    bool hf_mode_active = false;
+    if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50))) {
+        hf_mode_active = g_sensor_buffer.high_freq_mode_enabled;
+        xSemaphoreGive(g_sensor_buffer_mutex);
+    }
+    uint64_t sleep_duration = hf_mode_active ? g_cfg->hf_sleep_duration_ms : g_cfg->sleep_duration_ms;
+    esp_sleep_enable_timer_wakeup(sleep_duration * 1000);
 
     // IMPORTANT: Ensure the wakeup pin has a pull-up enabled to prevent floating.
     // This is critical to prevent immediate wake-up if the pin is not externally pulled up.
@@ -572,6 +581,20 @@ void main_task(void *pvParameters)
                 ESP_LOGI(TAG, "CMD: Stop web server");
                 handle_stop_web_server();
                 break;
+            case APP_CMD_ENABLE_HF_MODE:
+                ESP_LOGI(TAG, "CMD: Enable High-Frequency Mode");
+                if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY)) {
+                    g_sensor_buffer.high_freq_mode_enabled = true;
+                    xSemaphoreGive(g_sensor_buffer_mutex);
+                }
+                break;
+            case APP_CMD_DISABLE_HF_MODE:
+                ESP_LOGI(TAG, "CMD: Disable High-Frequency Mode");
+                if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY)) {
+                    g_sensor_buffer.high_freq_mode_enabled = false;
+                    xSemaphoreGive(g_sensor_buffer_mutex);
+                }
+                break;
             default:
                 ESP_LOGW(TAG, "Unknown command received: %d", cmd);
                 break;
@@ -621,7 +644,6 @@ void main_task(void *pvParameters)
             current_write_ts = g_sensor_buffer.last_successful_write_ts;
             xSemaphoreGive(g_sensor_buffer_mutex);
         }
-
         // --- USB Connection Logic ---
         bool is_externally_powered = battery_is_externally_powered();
 
@@ -675,6 +697,7 @@ void main_task(void *pvParameters)
             if (g_sensor_buffer.last_successful_write_ts > last_processed_write_ts && is_ui_suspended)
             {
                 can_sleep = true;
+                last_processed_write_ts = g_sensor_buffer.last_successful_write_ts; // Mark this write as processed
             }
             xSemaphoreGive(g_sensor_buffer_mutex);
         }
@@ -684,8 +707,7 @@ void main_task(void *pvParameters)
         if (can_sleep && !web_server_active)
         {
             ESP_LOGI(TAG, "UI inactive and new data log detected. Initiating sleep.");
-            last_processed_write_ts = current_write_ts; // Mark this write as processed
-
+    last_processed_write_ts = current_write_ts; // Mark this write as processed
             // --- Step 1: Prepare UI and Peripherals for Sleep ---
             // Suspend UI task and power down OLED to save power.
             oled_power_off(); // This will suspend the task and power down the OLED
@@ -733,7 +755,6 @@ void main_task(void *pvParameters)
             ESP_LOGI(TAG, "Device was awake for %llu ms.", awake_time_ms);
 
             go_to_deep_sleep();
-            initiate_sleep_sequence();
         }
         // --- OLED Power-Off Logic ---
         // If UI is inactive but the screen is still on, turn it off.
@@ -849,6 +870,7 @@ void app_main(void)
         rtc_last_write_ms = 0; // Ensures first log happens immediately
         rtc_last_write_status = WRITE_STATUS_UNKNOWN;
         rtc_last_successful_write_ts = 0;
+        rtc_high_freq_mode_enabled = false; // HF mode is off on cold boot
     }
 
     // Restore the persisted state into the global buffer.
@@ -857,6 +879,7 @@ void app_main(void)
         g_sensor_buffer.last_write_ms = rtc_last_write_ms;
         g_sensor_buffer.writeStatus = rtc_last_write_status;
         g_sensor_buffer.last_successful_write_ts = rtc_last_successful_write_ts;
+        g_sensor_buffer.high_freq_mode_enabled = rtc_high_freq_mode_enabled;
         xSemaphoreGive(g_sensor_buffer_mutex);
     }
 
@@ -1014,6 +1037,7 @@ void app_main(void)
     datalogger_params->bmp280_dev = &g_bmp280;
     datalogger_params->d6fph_dev = &g_d6fph;
     datalogger_params->log_interval_ms = g_cfg->log_interval_ms;
+    datalogger_params->hf_log_interval_ms = g_cfg->hf_log_interval_ms;
 
     if (cause != ESP_SLEEP_WAKEUP_TIMER)
     {
@@ -1029,4 +1053,3 @@ void app_main(void)
     // Signal that all initialization is done
     xEventGroupSetBits(g_init_event_group, INIT_DONE_BIT);
 }
-

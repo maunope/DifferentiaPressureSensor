@@ -34,6 +34,8 @@ void menu_web_server_on_btn(void);
 void page_web_server_on_cw(void);
 void page_web_server_on_ccw(void);
 void page_web_server_on_btn(void);
+void menu_hf_mode_enable_on_btn(void);
+void menu_hf_mode_disable_on_btn(void);
 void render_web_server_callback(void);
 
 #define MENU_BACK_ITEM { \
@@ -59,12 +61,13 @@ const ui_menu_page_t ui_menu_tree[] = {
         .title = "Main Menu",
         .items = {
             { .label = "Sensor data", .has_submenu = false, .on_btn = menu_sensor_on_btn },
-            { .label = "Options", .has_submenu = true, .submenu_page_index = 1 },
+            { .label = "High Freq. Mode", .has_submenu = true, .submenu_page_index = 8, .on_btn = NULL },
             { .label = "Web Server", .has_submenu = true, .submenu_page_index = 7, .on_btn = NULL },
+            { .label = "Options", .has_submenu = true, .submenu_page_index = 1 },
             { .label = "About", .has_submenu = false, .on_btn = menu_about_on_btn },
            
         },
-        .item_count = 4,
+        .item_count = 5,
     },
     {
         .title = "Options",
@@ -99,6 +102,14 @@ const ui_menu_page_t ui_menu_tree[] = {
     CONFIRM_MENU_PAGE("Build ts to RTC?", menu_set_time_on_btn),        // Page 5
     CONFIRM_MENU_PAGE("Format SD Card?", menu_format_sd_confirm_on_btn),  // Page 6
     CONFIRM_MENU_PAGE("Start Web Server?", menu_web_server_on_btn),       // Page 7
+    { // Page 8: High Freq. Mode
+        .title = "High Freq. Mode",
+        .items = {
+            { .label = "Enable", .has_submenu = false, .on_btn = menu_hf_mode_enable_on_btn },
+            { .label = "Disable", .has_submenu = false, .on_btn = menu_hf_mode_disable_on_btn }
+        },
+        .item_count = 2
+    },
 }; // ui_menu_tree
 const uint8_t ui_menu_page_count = sizeof(ui_menu_tree) / sizeof(ui_menu_tree[0]); // This count updates automatically
 

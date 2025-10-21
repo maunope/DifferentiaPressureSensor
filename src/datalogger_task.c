@@ -93,8 +93,9 @@ void datalogger_task(void *pvParameters)
     // The BMP280 device handle is passed as the task parameter.
     datalogger_task_params_t *params = (datalogger_task_params_t *)pvParameters;
     bmp280_t *bmp280_dev = params->bmp280_dev;    
-    const uint32_t LOG_INTERVAL_MS = params->log_interval_ms;
-    ESP_LOGI(TAG, "Datalogger task started with log interval: %lu ms", (unsigned long)LOG_INTERVAL_MS);
+    const uint32_t LOG_INTERVAL_MS_NORMAL = params->log_interval_ms;
+    const uint32_t LOG_INTERVAL_MS_HF = params->hf_log_interval_ms;
+    ESP_LOGI(TAG, "Datalogger task started with intervals: Normal=%lu ms, HF=%lu ms", (unsigned long)LOG_INTERVAL_MS_NORMAL, (unsigned long)LOG_INTERVAL_MS_HF);
     static bool is_paused = false;
 
     // Wait until the main app signals that all initialization is complete.
@@ -174,14 +175,17 @@ void datalogger_task(void *pvParameters)
 
         uint64_t current_time_ms = esp_timer_get_time() / 1000;
         uint64_t last_write_ms = 0;
+        bool hf_mode_active = false;
 
         // Get the last write time from the shared buffer
         if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50))) {
             last_write_ms = g_sensor_buffer.last_write_ms;
+            hf_mode_active = g_sensor_buffer.high_freq_mode_enabled;
             xSemaphoreGive(g_sensor_buffer_mutex);
         }
 
-        if (current_time_ms - last_write_ms >= LOG_INTERVAL_MS && !is_paused)
+        uint32_t current_log_interval = hf_mode_active ? LOG_INTERVAL_MS_HF : LOG_INTERVAL_MS_NORMAL;
+        if (current_time_ms - last_write_ms >= current_log_interval && !is_paused)
         {
             // It's time for a scheduled log. This takes priority.
             // Update sensors and write to SD card.

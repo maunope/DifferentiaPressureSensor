@@ -87,7 +87,7 @@ typedef struct
     char value[21]; // Max 20 chars for OLED line + null terminator
 } config_item_t;
 
-#define MAX_CONFIG_ITEMS 7 // Correctly define the number of items
+#define MAX_CONFIG_ITEMS 9 // Correctly define the number of items
 static config_item_t s_config_items[MAX_CONFIG_ITEMS];
 
 // Define the actual configuration keys here, in one place.
@@ -95,7 +95,9 @@ static const char *s_config_keys[MAX_CONFIG_ITEMS] = {
     "v_div_ratio",
     "inactive_ms",
     "sleep_ms",
+    "hf_sleep_ms",
     "log_int_ms",
+    "hf_log_int_ms",
     "d6fph_model",
     "wifi_ssid",
     "wifi_password"};
@@ -227,26 +229,18 @@ void render_about_callback(void)
 {
     if (!s_oled_initialized)
         return;
-
-    if (s_about_page_view == 0) { // QR Code View
-        // If the QR code is not cached, generate it once.
-        if (!s_qr_code_cached)
-        {
-            i2c_oled_clear(s_oled_i2c_num); // Clear the main buffer to draw into it
-            esp_qrcode_config_t cfg = ESP_QRCODE_CONFIG_DEFAULT();
-            cfg.display_func = oled_display_qr_code; // This will draw to the main buffer
-            esp_qrcode_generate(&cfg, PROJECT_GITHUB_URL);
-            i2c_oled_get_buffer(s_qr_code_buffer, sizeof(s_qr_code_buffer)); // Copy to cache
-            s_qr_code_cached = true;
-        }
-        // Copy the cached QR code to the main screen buffer for display.
-        i2c_oled_load_buffer(s_qr_code_buffer, sizeof(s_qr_code_buffer));
-    } else { // Text Link View
-        i2c_oled_clear(s_oled_i2c_num);
-        write_inverted_line(0, "Project Link");
-        write_padded_line(3, "https://rb.gy/ddwdr5");
-        write_padded_line(6, "Press btn to exit");
+    // If the QR code is not cached, generate it once.
+    if (!s_qr_code_cached)
+    {
+        i2c_oled_clear(s_oled_i2c_num); // Clear the main buffer to draw into it
+        esp_qrcode_config_t cfg = ESP_QRCODE_CONFIG_DEFAULT();
+        cfg.display_func = oled_display_qr_code; // This will draw to the main buffer
+        esp_qrcode_generate(&cfg, "https://github.com/maunope/DifferentiaPressureSensor/");
+        i2c_oled_get_buffer(s_qr_code_buffer, sizeof(s_qr_code_buffer)); // Copy to cache
+        s_qr_code_cached = true;
     }
+    // Copy the cached QR code to the main screen buffer for display.
+    i2c_oled_load_buffer(s_qr_code_buffer, sizeof(s_qr_code_buffer));
 }
 
 // --- Web Server Page Rendering ---
@@ -624,21 +618,25 @@ void render_cmd_feedback_screen(void)
             write_padded_line(i, ""); // Clear other non-title lines
         }
     }
+    i2c_oled_update_screen(s_oled_i2c_num);
 }
 
-/**
- * @brief Draws a battery icon in the top-right corner of the screen.
+/*
+ * @brief Draws all status icons (HF Mode, SD Error, Battery) in the top-right corner.
  *
- * The icon's fill level represents the battery percentage. It also shows
- * a charging symbol if the device is externally powered.
+ * This function handles the positioning and rendering of all status icons,
+ * ensuring they are correctly aligned and do not overlap.
  */
-static void draw_battery_icon(void) {
+static void draw_status_icons(void) {
     if (!s_oled_initialized)
         return;
 
+    // --- Get current state from the local buffer ---
     int percentage = s_local_sensor_buffer.battery_percentage;
     bool is_charging = s_local_sensor_buffer.battery_externally_powered;
     bool sd_write_failed = (s_local_sensor_buffer.writeStatus == WRITE_STATUS_FAIL);
+    bool hf_mode_enabled = s_local_sensor_buffer.high_freq_mode_enabled;
+
     // The title bar is inverted on most screens. We render the icon with a non-inverted
     // color (white on black) only for specific full-screen pages that have a black background at the top.
     bool is_fullscreen_no_bar = (s_current_page == &about_page && s_about_page_view == 0) ||
@@ -646,50 +644,77 @@ static void draw_battery_icon(void) {
 
     bool is_inverted = !is_fullscreen_no_bar;
 
-    // Icon position and dimensions
-    const int icon_x = 114;
-    const int icon_y = 1;
-    const int body_width = 12;
-    const int body_height = 6;
-
-    // Clear the area behind the icon to prevent artifacts
+    // --- Clear the entire status icon area ---
+    // This prevents flickering and artifacts from previous frames.
+    int clear_start_x = 90; // Start clearing from the left of where any icon could be.
     for (int y = 0; y < 8; ++y) {
-        for (int x = icon_x; x < 128; ++x) {
+        for (int x = clear_start_x; x < 128; ++x) {
             i2c_oled_draw_pixel(s_oled_i2c_num, x, y, is_inverted);
         }
     }
 
-    // Draw battery outline and terminal
-    i2c_oled_draw_rect(s_oled_i2c_num, icon_x, icon_y, body_width, body_height, !is_inverted);
-    i2c_oled_fill_rect(s_oled_i2c_num, icon_x + body_width, icon_y + 2, 1, 2, !is_inverted);
+    // --- Draw Battery Icon (always visible) ---
+    {
+        const int icon_x = 114;
+        const int icon_y = 1;
+        const int body_width = 12;
+        const int body_height = 6;
 
-    // Draw fill level
-    int fill_width = (body_width - 2) * percentage / 100;
-    if (fill_width > 0) {
-        i2c_oled_fill_rect(s_oled_i2c_num, icon_x + 1, icon_y + 1, fill_width, body_height - 2, !is_inverted);
+        // Draw battery outline and terminal
+        i2c_oled_draw_rect(s_oled_i2c_num, icon_x, icon_y, body_width, body_height, !is_inverted);
+        i2c_oled_fill_rect(s_oled_i2c_num, icon_x + body_width, icon_y + 2, 1, 2, !is_inverted);
+
+        // Draw fill level
+        int fill_width = (body_width - 2) * percentage / 100;
+        if (fill_width > 0) {
+            i2c_oled_fill_rect(s_oled_i2c_num, icon_x + 1, icon_y + 1, fill_width, body_height - 2, !is_inverted);
+        }
+
+        // If charging, draw a small lightning bolt symbol inside
+        if (is_charging) {
+            int bolt_x = icon_x + 4;
+            int bolt_y = icon_y + 1;
+            i2c_oled_draw_pixel(s_oled_i2c_num, bolt_x + 1, bolt_y, is_inverted);
+            i2c_oled_draw_pixel(s_oled_i2c_num, bolt_x + 2, bolt_y, is_inverted);
+            i2c_oled_draw_pixel(s_oled_i2c_num, bolt_x, bolt_y + 1, is_inverted);
+            i2c_oled_draw_pixel(s_oled_i2c_num, bolt_x + 1, bolt_y + 1, is_inverted);
+            i2c_oled_draw_pixel(s_oled_i2c_num, bolt_x + 2, bolt_y + 2, is_inverted);
+            i2c_oled_draw_pixel(s_oled_i2c_num, bolt_x + 1, bolt_y + 3, is_inverted);
+        }
     }
 
-    // If charging, draw a small lightning bolt symbol inside the battery
-    if (is_charging) {
-        int bolt_x = icon_x + 4;
-        int bolt_y = icon_y + 1;
-        i2c_oled_draw_pixel(s_oled_i2c_num, bolt_x + 1, bolt_y, is_inverted);
-        i2c_oled_draw_pixel(s_oled_i2c_num, bolt_x + 2, bolt_y, is_inverted);
-        i2c_oled_draw_pixel(s_oled_i2c_num, bolt_x, bolt_y + 1, is_inverted);
-        i2c_oled_draw_pixel(s_oled_i2c_num, bolt_x + 1, bolt_y + 1, is_inverted);
-        i2c_oled_draw_pixel(s_oled_i2c_num, bolt_x + 2, bolt_y + 2, is_inverted);
-        i2c_oled_draw_pixel(s_oled_i2c_num, bolt_x + 1, bolt_y + 3, is_inverted);
-    }
+    // --- Draw Conditional Icons (SD Error and HF Mode) ---
+    int current_icon_x = 114; // Start from the left edge of the battery icon
 
-    // If SD card write failed, draw a warning triangle to the left of the battery
+    // If SD card write failed, draw "!!"
     if (sd_write_failed) {
-        int warning_x = icon_x - 9;
-        int warning_y = icon_y;
+        current_icon_x -= 8; // Move left to make space
+        int warning_y = 1;
         // Draw "!!" using pixel-based rectangles
-        i2c_oled_fill_rect(s_oled_i2c_num, warning_x, warning_y, 1, 4, !is_inverted); // First '!' bar
-        i2c_oled_draw_pixel(s_oled_i2c_num, warning_x, warning_y + 5, !is_inverted);   // First '!' dot
-        i2c_oled_fill_rect(s_oled_i2c_num, warning_x + 2, warning_y, 1, 4, !is_inverted); // Second '!' bar
-        i2c_oled_draw_pixel(s_oled_i2c_num, warning_x + 2, warning_y + 5, !is_inverted);   // Second '!' dot
+        i2c_oled_fill_rect(s_oled_i2c_num, current_icon_x, warning_y, 1, 4, !is_inverted);
+        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x, warning_y + 5, !is_inverted);
+        i2c_oled_fill_rect(s_oled_i2c_num, current_icon_x + 2, warning_y, 1, 4, !is_inverted);
+        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 2, warning_y + 5, !is_inverted);
+    }
+
+    // If HF mode is enabled, draw ">>"
+    if (hf_mode_enabled) {
+        current_icon_x -= 8; // Move left again
+        int hf_icon_y = 1;
+        // Draw ">>" using pixels
+        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 1, hf_icon_y, !is_inverted);
+        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x, hf_icon_y + 1, !is_inverted);
+        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 1, hf_icon_y + 2, !is_inverted);
+        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 1, hf_icon_y + 3, !is_inverted);
+        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x, hf_icon_y + 4, !is_inverted);
+        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 1, hf_icon_y + 5, !is_inverted);
+        // Second '>'
+        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 4, hf_icon_y, !is_inverted);
+        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 3, hf_icon_y + 1, !is_inverted);
+        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 4, hf_icon_y + 2, !is_inverted);
+        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 4, hf_icon_y + 3, !is_inverted);
+        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 3, hf_icon_y + 4, !is_inverted);
+        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 4, hf_icon_y + 5, !is_inverted);
     }
 }
 
@@ -839,7 +864,7 @@ void uiRender_task(void *pvParameters)
         {
             s_current_page->render();
         }
-        draw_battery_icon();
+        draw_status_icons();
         i2c_oled_update_screen(s_oled_i2c_num);
         vTaskDelay(pdMS_TO_TICKS(100));
     }
@@ -849,7 +874,6 @@ void uiRender_task(void *pvParameters)
 void menu_about_on_btn(void)
 {
     s_qr_code_cached = false; 
-    s_about_page_view = 0; // Reset to QR code view on entry
     s_menu_mode = false;
     s_current_page = &about_page;
 }
@@ -930,17 +954,31 @@ void menu_set_time_on_btn(void)
     }
 }
 
+void menu_hf_mode_enable_on_btn(void)
+{
+    app_command_t cmd = APP_CMD_ENABLE_HF_MODE;
+    xQueueSend(g_app_cmd_queue, &cmd, 0);
+    // After action, go back to the main menu
+    current_page = 0;
+    current_item = 0;
+    s_menu_mode = true;
+    s_current_page = NULL;
+}
+
+void menu_hf_mode_disable_on_btn(void)
+{
+    app_command_t cmd = APP_CMD_DISABLE_HF_MODE;
+    xQueueSend(g_app_cmd_queue, &cmd, 0);
+    menu_cancel_on_btn(); // Go back to previous menu
+}
+
 void page_about_on_btn(void)
 {
     s_menu_mode = true;
     s_current_page = NULL;
 }
-void page_about_on_cw(void) {
-    s_about_page_view = (s_about_page_view + 1) % 2; // Toggle between 0 and 1
-}
-void page_about_on_ccw(void) {
-    s_about_page_view = (s_about_page_view + 1) % 2; // Toggle between 0 and 1
-}
+void page_about_on_cw(void) { /* Do nothing */ }
+void page_about_on_ccw(void) { /* Do nothing */ }
 void page_sensor_on_btn(void)
 {
     s_menu_mode = true;
@@ -1019,27 +1057,31 @@ static void ui_config_page_prepare_data(void)
     snprintf(s_config_items[1].value, sizeof(s_config_items[1].value), "%lu", (unsigned long)params->inactivity_timeout_ms);
     s_config_items[2].full_key = s_config_keys[2];
     snprintf(s_config_items[2].value, sizeof(s_config_items[2].value), "%llu", (unsigned long long)params->sleep_duration_ms);
-    s_config_items[3].full_key = s_config_keys[3];
-    snprintf(s_config_items[3].value, sizeof(s_config_items[3].value), "%lu", (unsigned long)params->log_interval_ms);
+    s_config_items[3].full_key = s_config_keys[3]; // hf_sleep_ms
+    snprintf(s_config_items[3].value, sizeof(s_config_items[3].value), "%llu", (unsigned long long)params->hf_sleep_duration_ms);
+    s_config_items[4].full_key = s_config_keys[4]; // log_int_ms
+    snprintf(s_config_items[4].value, sizeof(s_config_items[4].value), "%lu", (unsigned long)params->log_interval_ms);
+    s_config_items[5].full_key = s_config_keys[5]; // hf_log_int_ms
+    snprintf(s_config_items[5].value, sizeof(s_config_items[5].value), "%lu", (unsigned long)params->hf_log_interval_ms);
     
     // D6F-PH Model
-    s_config_items[4].full_key = s_config_keys[4];
+    s_config_items[6].full_key = s_config_keys[6];
     const char* model_str = "Unknown";
     if (params->d6fph_model == D6FPH_MODEL_0025AD1) model_str = "0025AD1";
     else if (params->d6fph_model == D6FPH_MODEL_0505AD3) model_str = "0505AD3";
     else if (params->d6fph_model == D6FPH_MODEL_5050AD4) model_str = "5050AD4";
-    snprintf(s_config_items[4].value, sizeof(s_config_items[4].value), "%s (%d)", model_str, params->d6fph_model);
+    snprintf(s_config_items[6].value, sizeof(s_config_items[6].value), "%s (%d)", model_str, params->d6fph_model);
 
     // WiFi SSID
-    s_config_items[5].full_key = s_config_keys[5];
-    snprintf(s_config_items[5].value, sizeof(s_config_items[5].value), "%.20s", params->wifi_ssid);
+    s_config_items[7].full_key = s_config_keys[7];
+    snprintf(s_config_items[7].value, sizeof(s_config_items[7].value), "%.20s", params->wifi_ssid);
 
     // WiFi Password (masked)
-    s_config_items[6].full_key = s_config_keys[6];
+    s_config_items[8].full_key = s_config_keys[8];
     if (strlen(params->wifi_password) > 0) {
-        snprintf(s_config_items[6].value, sizeof(s_config_items[6].value), "********");
+        snprintf(s_config_items[8].value, sizeof(s_config_items[8].value), "********");
     } else {
-        snprintf(s_config_items[6].value, sizeof(s_config_items[6].value), "(not set)");
+        snprintf(s_config_items[8].value, sizeof(s_config_items[8].value), "(not set)");
     }
 }
 

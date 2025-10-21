@@ -15,6 +15,8 @@ typedef struct {
     char wifi_ssid[64];
     char wifi_password[64];
     d6fph_sensor_model_t d6fph_model;
+    uint64_t hf_sleep_duration_ms;
+    uint32_t hf_log_interval_ms;
 } config_params_t;
 
 /**
