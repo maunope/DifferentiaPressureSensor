@@ -10,6 +10,7 @@
 #include <ui_menudef.h>
 #include "esp_log.h"
 #include "time_utils.h"
+#include "../../src/datalogger_task.h"
 #include "../buffers.h"
 #include "../../src/config_params.h"
 #include <math.h>
@@ -877,10 +878,11 @@ void uiRender_task(void *pvParameters)
         uint64_t current_time_ms = esp_timer_get_time() / 1000;
         if (!s_menu_mode && s_current_page == &sensor_page && (current_time_ms - last_sensor_refresh_ms > sensor_refresh_interval_ms))
         {
-            if (g_app_cmd_queue != NULL)
+            // Send command directly to datalogger to prevent resetting the main inactivity timer.
+            if (g_datalogger_cmd_queue != NULL)
             {
-                app_command_t cmd = APP_CMD_REFRESH_SENSOR_DATA;
-                xQueueSend(g_app_cmd_queue, &cmd, 0);
+                datalogger_command_t cmd = DATALOGGER_CMD_FORCE_REFRESH;
+                xQueueSend(g_datalogger_cmd_queue, &cmd, 0);
             }
             last_sensor_refresh_ms = current_time_ms;
         }

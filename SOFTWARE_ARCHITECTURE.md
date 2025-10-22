@@ -114,7 +114,6 @@ The sleep sequence is as follows:
 7.  It configures two wakeup sources for the ESP32-S3:
     *   **GPIO**: A press on the rotary encoder button.
     *   **Timer**: A timer set by the `sleep_duration_ms` configuration value.
-    *   **Timer**: A "smart" timer. It calculates the time remaining until the next log is due and will sleep for the configured `sleep_duration_ms` or the remaining time, whichever is shorter. This ensures the device wakes up on time for the next log without oversleeping.
 8.  It calls `esp_deep_sleep_start()` to enter deep sleep.
 
 ### Waking Up

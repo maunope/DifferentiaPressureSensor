@@ -241,9 +241,9 @@ static void oled_power_off(void)
     if (g_uiRender_task_handle != NULL && eTaskGetState(g_uiRender_task_handle) != eSuspended)
     {
         ESP_LOGI(TAG, "Powering off OLED.");
+        vTaskSuspend(g_uiRender_task_handle);
         uiRender_send_event(UI_EVENT_PREPARE_SLEEP, NULL, 0);
         vTaskDelay(pdMS_TO_TICKS(200)); // Give UI time to draw sleep message
-        vTaskSuspend(g_uiRender_task_handle);
         // i2c_driver_delete(I2C_OLED_NUM);
         gpio_set_level(OLED_POWER_PIN, 0);
     }
@@ -625,15 +625,13 @@ void main_task(void *pvParameters)
                 break;
             case APP_CMD_LOG_COMPLETE_SLEEP_NOW:
                 ESP_LOGI(TAG, "CMD: Log complete, checking sleep conditions.");
-                bool is_ui_suspended = (g_uiRender_task_handle == NULL || eTaskGetState(g_uiRender_task_handle) == eSuspended);
                 bool web_server_active = (local_buffer.web_server_status == WEB_SERVER_RUNNING || local_buffer.web_server_status == WEB_SERVER_STARTING);
-
-                if (is_ui_suspended && !web_server_active) {
+                uint64_t current_time_ms_for_sleep_check = esp_timer_get_time() / 1000ULL;
+                bool ui_is_inactive = (current_time_ms_for_sleep_check - last_activity_ms > g_cfg->inactivity_timeout_ms);
+                if (ui_is_inactive && !web_server_active) {
                     ESP_LOGI(TAG, "UI is inactive and log is complete. Initiating sleep.");
-                    
-                    // The UI is already off and the task suspended due to the inactivity timer,
-                    // so we don't need to call oled_power_off() again here.
-                    //oled_power_off();
+                    //in case it's already off, this does no harm
+                    oled_power_off();
                     
                     // --- Step 1: Tell the logger to pause---
                     xQueueSend(g_datalogger_cmd_queue, &(datalogger_command_t){DATALOGGER_CMD_PAUSE_WRITES}, 0);
@@ -649,7 +647,6 @@ void main_task(void *pvParameters)
 
                     if (wait_cycles >= max_wait_cycles) {
                         ESP_LOGE(TAG, "Timeout waiting for datalogger to pause. Aborting sleep.");
-                        oled_power_on(); // Wake the UI back up
                     } else {
                         ESP_LOGI(TAG, "Datalogger paused. De-initializing peripherals and sleeping.");
                         spi_sdcard_deinit();
@@ -658,7 +655,16 @@ void main_task(void *pvParameters)
                         go_to_deep_sleep();
                     }
                 } else {
-                    ESP_LOGI(TAG, "Sleep conditions not met (UI active or Web Server running).");
+                    // Detailed logging for why sleep was skipped.
+                    if (!ui_is_inactive) {
+                        uint64_t current_time_ms_for_log = esp_timer_get_time() / 1000ULL;
+                        uint64_t inactivity_duration = current_time_ms_for_log - last_activity_ms;
+                        ESP_LOGW(TAG, "Sleep skipped: UI is active. Inactivity timer: %llu ms (timeout is %lu ms)", 
+                                 inactivity_duration, (unsigned long)g_cfg->inactivity_timeout_ms);
+                    }
+                    if (web_server_active) {
+                        ESP_LOGW(TAG, "Sleep skipped: Web server is active.");
+                    }
                 }
                 break;
             default:
@@ -687,18 +693,12 @@ void main_task(void *pvParameters)
         // --- Main Sleep/Wake Logic ---
         // --- Power Saving & UI Inactivity Logic ---
         uint64_t current_time_ms = esp_timer_get_time() / 1000ULL;
-        bool is_ui_suspended = (g_uiRender_task_handle == NULL || eTaskGetState(g_uiRender_task_handle) == eSuspended);
+        
         bool ui_is_inactive = (current_time_ms - last_activity_ms > g_cfg->inactivity_timeout_ms);
-
-        // Update the UI suspended state
-        if (g_uiRender_task_handle != NULL && !is_ui_suspended)
-        {
-            is_ui_suspended = (eTaskGetState(g_uiRender_task_handle) == eSuspended);
-        }
 
         // --- OLED Power-Off Logic ---
         // If UI is inactive but the screen is still on, turn it off.
-        if (g_uiRender_task_handle != NULL && ui_is_inactive && !is_ui_suspended && !web_server_active)
+        if (g_uiRender_task_handle != NULL && ui_is_inactive  && !web_server_active)
         {
             // UI timeout occurred, but no new write yet. Just turn off the screen.
             oled_power_off();

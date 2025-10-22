@@ -59,7 +59,6 @@ The top-right corner of the screen displays persistent icons that provide at-a-g
 This is the default screen shown on startup. It is composed of two pages that you can cycle through by **rotating the encoder**. A **short press** on the button will take you to the Main Menu.
 
 #### Page 1: Sensor Readings
-#### Page 1: Main Sensor Readings
 
 This page shows the primary environmental sensor data.
 
@@ -84,8 +83,8 @@ This page displays system-level information, including the persistent uptime and
 | Sensor Data        |
 |                    |
 | Uptime: 0:01:23:45 |  <-- Total awake time (D:HH:MM:SS)
-| last wr.: 14:30:05 |  <-- Time of last successful SD write
-| batt: 4.2V (100%)  |  <-- Current battery voltate 
+|                    |
+| lw: 14:30:05       |  <-- Time of last successful SD write
 +--------------------+
 ```
 
@@ -219,7 +218,6 @@ Selecting "Web Server" from the Main Menu and confirming will display a QR code.
 ### About Page
 
 Selecting "About" from the Main Menu will display a QR code. Scan this with your phone to visit the project's source code repository.
-Buld timestamp and text format repo link are available scrolling through subpages.
 
 ```
 +--------------------+
