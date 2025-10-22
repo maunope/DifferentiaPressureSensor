@@ -7,9 +7,8 @@ This guide explains how to navigate and use the user interface of the Differenti
 *   **Rotate Clockwise (CW)**: Navigates **down** in menus or cycles forward through pages.
 *   **Rotate Counter-Clockwise (CCW)**: Navigates **up** in menus or cycles backward through pages.
 *   **Short Press**:
-    *   From the main data screen, it **enters the main menu**.
     *   In a menu, it **selects** the highlighted item. This may enter a submenu, trigger an action, or show an information page.
-    *   On an information page (like "About" or "Sensor Data"), it **returns to the previous menu**.
+    *   On an information page (like "About" or "Sensor Data"), it **returns to the main menu**.
 *   **Long Press (Hold for ~1 second)**: From any menu screen, it acts as a "home" button, immediately returning you to the **Sensor Data screen**.
 
 ## Status Icons
@@ -57,17 +56,36 @@ The top-right corner of the screen displays persistent icons that provide at-a-g
 
 ### Sensor Data Screen
 
-This is the default screen shown on startup and after a period of inactivity. It displays real-time data from all sensors. A short press on the button enters the Main Menu.
+This is the default screen shown on startup. It is composed of two pages that you can cycle through by **rotating the encoder**. A **short press** on the button will take you to the Main Menu.
+
+#### Page 1: Sensor Readings
+#### Page 1: Main Sensor Readings
+
+This page shows the primary environmental sensor data.
 
 ```
 +--------------------+
-| Sensors Data       |  <-- Title
+| Sensor Data        |
+|                    |
 | 2023-10-27 14:30:15|  <-- Current Date & Time (CET)
+|                    |
 | T: 24.51 C         |  <-- Temperature
 | P: 101325 Pa       |  <-- Atmospheric Pressure
 | DP: -2.34 Pa       |  <-- Differential Pressure
-| Batt: 3.85V-65%    |  <-- Battery Voltage & Percentage
-| Last write: OK     |  <-- Status of the last SD card write
++--------------------+
+```
+
+#### Page 2: System Information
+
+This page displays system-level information, including the persistent uptime and the time of the last successful write to the SD card.
+
+```
++--------------------+
+| Sensor Data        |
+|                    |
+| Uptime: 0:01:23:45 |  <-- Total awake time (D:HH:MM:SS)
+| last wr.: 14:30:05 |  <-- Time of last successful SD write
+| batt: 4.2V (100%)  |  <-- Current battery voltate 
 +--------------------+
 ```
 
@@ -201,6 +219,7 @@ Selecting "Web Server" from the Main Menu and confirming will display a QR code.
 ### About Page
 
 Selecting "About" from the Main Menu will display a QR code. Scan this with your phone to visit the project's source code repository.
+Buld timestamp and text format repo link are available scrolling through subpages.
 
 ```
 +--------------------+

@@ -28,6 +28,7 @@ typedef struct {
     long pressure_pa;
     float temperature_c;
     float diff_pressure_pa;
+    uint64_t last_write_ms; // Timestamp of the last write attempt (from esp_timer)
     time_t timestamp;
     time_t last_successful_write_ts;
     bool timestamp_from_rtc; 
@@ -37,13 +38,13 @@ typedef struct {
     int sd_card_file_count;
     int sd_card_free_bytes;
     bool high_freq_mode_enabled;
-    uint64_t uptime_seconds;
 } sensor_buffer_t;
 
 // Global buffer and mutex declarations
 extern sensor_buffer_t g_sensor_buffer;
 extern SemaphoreHandle_t g_sensor_buffer_mutex;
 extern SemaphoreHandle_t g_i2c_bus_mutex;
+extern SemaphoreHandle_t g_sdcard_mutex;
 extern QueueHandle_t g_datalogger_cmd_queue;
 
 // Event group to signal initialization completion
@@ -66,7 +67,6 @@ typedef enum {
     APP_CMD_STOP_WEB_SERVER,
     APP_CMD_ENABLE_HF_MODE,
     APP_CMD_DISABLE_HF_MODE,
-    APP_CMD_LOG_COMPLETE_SLEEP_NOW
 } app_command_t;
 
 typedef enum {

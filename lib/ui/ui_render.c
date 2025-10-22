@@ -28,8 +28,8 @@ static bool s_qr_code_cached = false;
 // --- Web Server QR Code Caching ---
 static uint8_t s_web_qr_code_buffer[OLED_WIDTH * OLED_HEIGHT / 8];
 static bool s_web_qr_code_cached = false;
-static int s_about_page_view = 0; // 0 for QR code, 1 for text link
-static int s_web_page_view = 0; // 0 for QR code, 1 for text URL
+static int s_about_page_view = 0; // 0 for QR code, 1 for text link, 2 for build info
+static int s_web_page_view = 0;   // 0 for QR code, 1 for text URL
 
 static const char *TAG = "ui_render";
 
@@ -54,6 +54,8 @@ static QueueHandle_t ui_event_queue = NULL;
 static menu_stack_entry_t menu_stack[UI_MENU_STACK_DEPTH];
 static int menu_stack_pos = 0;
 
+static int s_sensor_page_num = 0; // 0 for page 1, 1 for page 2
+static const int SENSOR_PAGE_COUNT = 2;
 typedef enum
 {
     POST_ACTION_NONE,
@@ -61,7 +63,6 @@ typedef enum
 } post_cmd_action_t;
 
 static i2c_port_t s_oled_i2c_num;
-static gpio_num_t s_oled_sda, s_oled_scl;
 static bool s_oled_initialized = false;
 
 // UI mode: false = page (default to sensor page), true = menu
@@ -218,6 +219,18 @@ void render_menu_callback(void)
     }
 }
 
+/**
+ * @brief Formats uptime in seconds to a D:HH:MM:SS string.
+ */
+static void format_uptime(uint64_t total_seconds, char *buf, size_t len)
+{
+    uint32_t days = total_seconds / (24 * 3600);
+    total_seconds %= (24 * 3600);
+    uint32_t hours = total_seconds / 3600;
+    total_seconds %= 3600;
+    snprintf(buf, len, "%lu:%02lu:%02llu:%02llu", days, hours, (unsigned long long)total_seconds / 60, (unsigned long long)total_seconds % 60);
+}
+
 // Forward declaration for the QR code display callback
 static void oled_display_qr_code(esp_qrcode_handle_t qrcode);
 
@@ -226,28 +239,44 @@ void render_about_callback(void)
 {
     if (!s_oled_initialized)
         return;
-    // If the QR code is not cached, generate it once.
-    if (!s_qr_code_cached)
-    {
-        i2c_oled_clear(s_oled_i2c_num); // Clear the main buffer to draw into it
-        esp_qrcode_config_t cfg = ESP_QRCODE_CONFIG_DEFAULT();
-        cfg.display_func = oled_display_qr_code; // This will draw to the main buffer
-        esp_qrcode_generate(&cfg, "https://github.com/maunope/DifferentiaPressureSensor/");
-        i2c_oled_get_buffer(s_qr_code_buffer, sizeof(s_qr_code_buffer)); // Copy to cache
-        s_qr_code_cached = true;
+
+    i2c_oled_clear(s_oled_i2c_num);
+
+    if (s_about_page_view == 0) { // QR Code View
+        // If the QR code is not cached, generate it once.
+        if (!s_qr_code_cached) {
+            esp_qrcode_config_t cfg = ESP_QRCODE_CONFIG_DEFAULT();
+            cfg.display_func = oled_display_qr_code; // This will draw to the main buffer
+            esp_qrcode_generate(&cfg, PROJECT_GITHUB_URL);
+            i2c_oled_get_buffer(s_qr_code_buffer, sizeof(s_qr_code_buffer)); // Copy to cache
+            s_qr_code_cached = true;
+        }
+        // Copy the cached QR code to the main screen buffer for display.
+        i2c_oled_load_buffer(s_qr_code_buffer, sizeof(s_qr_code_buffer));
+    } else if (s_about_page_view == 1) { // Text URL View
+        write_inverted_line(0, "About");
+        write_padded_line(2, "Project URL:");
+        write_padded_line(4, "github.com/maunope/");
+        write_padded_line(5, "DiffPressSensor");
+    } else { // Build Info View
+        write_inverted_line(0, "About");
+        write_padded_line(2, "Build Info");
+        write_padded_line(4, "Date: " __DATE__);
+        write_padded_line(5, "Time: " __TIME__);
     }
-    // Copy the cached QR code to the main screen buffer for display.
-    i2c_oled_load_buffer(s_qr_code_buffer, sizeof(s_qr_code_buffer));
 }
 
 // --- Web Server Page Rendering ---
-void render_web_server_callback(void) {
-    if (!s_oled_initialized) return;
+void render_web_server_callback(void)
+{
+    if (!s_oled_initialized)
+        return;
 
     int status = WEB_SERVER_STOPPED;
     char url[64] = {0};
 
-    if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50))) {
+    if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)))
+    {
         status = g_sensor_buffer.web_server_status;
         strncpy(url, g_sensor_buffer.web_server_url, sizeof(url) - 1);
         xSemaphoreGive(g_sensor_buffer_mutex);
@@ -255,53 +284,59 @@ void render_web_server_callback(void) {
 
     i2c_oled_clear(s_oled_i2c_num);
 
-    switch (status) {
-        case WEB_SERVER_STARTING:
-            write_inverted_line(0, "Web Server");
-            write_padded_line(2, "Starting...");
-            write_padded_line(3, "Please wait.");
-            break;
+    switch (status)
+    {
+    case WEB_SERVER_STARTING:
+        write_inverted_line(0, "Web Server");
+        write_padded_line(2, "Starting...");
+        write_padded_line(3, "Please wait.");
+        break;
 
-        case WEB_SERVER_RUNNING:
-            if (s_web_page_view == 0) { // QR Code View
-                if (!s_web_qr_code_cached) {
-                    esp_qrcode_config_t cfg = ESP_QRCODE_CONFIG_DEFAULT();
-                    cfg.display_func = oled_display_qr_code;
-                    esp_qrcode_generate(&cfg, url);
-                    i2c_oled_get_buffer(s_web_qr_code_buffer, sizeof(s_web_qr_code_buffer));
-                    s_web_qr_code_cached = true;
-                }
-                i2c_oled_load_buffer(s_web_qr_code_buffer, sizeof(s_web_qr_code_buffer));
-            } else { // Text URL View
-                write_inverted_line(0, "Web Server");
-                write_padded_line(2, "Connect to:");
-                write_padded_line(3, url);
-                write_padded_line(6, "Press btn to exit");
+    case WEB_SERVER_RUNNING:
+        if (s_web_page_view == 0)
+        { // QR Code View
+            if (!s_web_qr_code_cached)
+            {
+                esp_qrcode_config_t cfg = ESP_QRCODE_CONFIG_DEFAULT();
+                cfg.display_func = oled_display_qr_code;
+                esp_qrcode_generate(&cfg, url);
+                i2c_oled_get_buffer(s_web_qr_code_buffer, sizeof(s_web_qr_code_buffer));
+                s_web_qr_code_cached = true;
             }
-            break;
-
-        case WEB_SERVER_FAILED:
+            i2c_oled_load_buffer(s_web_qr_code_buffer, sizeof(s_web_qr_code_buffer));
+        }
+        else
+        { // Text URL View
             write_inverted_line(0, "Web Server");
-            write_padded_line(2, "Failed to start.");
-            write_padded_line(3, "Check WiFi config.");
+            write_padded_line(2, "Connect to:");
+            write_padded_line(3, url);
             write_padded_line(6, "Press btn to exit");
-            break;
+        }
+        break;
 
-        case WEB_SERVER_USB_CONNECTED:
-            write_inverted_line(0, "Web Server");
-            write_padded_line(2, "Blocked by USB");
-            write_padded_line(3, "connection.");
-            write_padded_line(6, "Press btn to exit");
-            break;
+    case WEB_SERVER_FAILED:
+        write_inverted_line(0, "Web Server");
+        write_padded_line(2, "Failed to start.");
+        write_padded_line(3, "Check WiFi config.");
+        write_padded_line(6, "Press btn to exit");
+        break;
 
-        default: // WEB_SERVER_STOPPED or unknown
-            write_inverted_line(0, "Web Server");
-            write_padded_line(2, "Stopped.");
-            break;
+    case WEB_SERVER_USB_CONNECTED:
+        write_inverted_line(0, "Web Server");
+        write_padded_line(2, "Blocked by USB");
+        write_padded_line(3, "connection.");
+        write_padded_line(6, "Press btn to exit");
+        break;
+
+    default: // WEB_SERVER_STOPPED or unknown
+        write_inverted_line(0, "Web Server");
+        write_padded_line(2, "Stopped.");
+        break;
     }
 }
 
-void page_web_server_on_btn(void) {
+void page_web_server_on_btn(void)
+{
     app_command_t cmd = APP_CMD_STOP_WEB_SERVER;
     xQueueSend(g_app_cmd_queue, &cmd, 0);
     s_web_qr_code_cached = false; // Invalidate cache for next time
@@ -317,8 +352,10 @@ void page_web_server_on_btn(void) {
  *
  * @param qrcode Handle to the generated QR code data.
  */
-static void oled_display_qr_code(esp_qrcode_handle_t qrcode) {
-    if (qrcode == NULL) {
+static void oled_display_qr_code(esp_qrcode_handle_t qrcode)
+{
+    if (qrcode == NULL)
+    {
         return;
     }
 
@@ -328,9 +365,12 @@ static void oled_display_qr_code(esp_qrcode_handle_t qrcode) {
     int x_offset = (128 - image_size) / 2;
     int y_offset = (64 - image_size) / 2;
 
-    for (int y = 0; y < qr_size; y++) {
-        for (int x = 0; x < qr_size; x++) {
-            if (esp_qrcode_get_module(qrcode, x, y)) {
+    for (int y = 0; y < qr_size; y++)
+    {
+        for (int x = 0; x < qr_size; x++)
+        {
+            if (esp_qrcode_get_module(qrcode, x, y))
+            {
                 i2c_oled_fill_rect(s_oled_i2c_num, x_offset + x * module_size, y_offset + y * module_size, module_size, module_size, true);
             }
         }
@@ -354,62 +394,67 @@ void render_sensor_callback(void)
 {
     if (!s_oled_initialized)
         return;
-    char new_lines[8][21] = {{0}};
+    char line_buf[21];
+    char uptime_str[21];
 
-    // Use the local copy of the sensor buffer
-    struct tm local_tm;
-    convert_gmt_to_cet(s_local_sensor_buffer.timestamp, &local_tm);
-    char time_str[20];
-    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &local_tm);
+    i2c_oled_clear(s_oled_i2c_num);        // Clear screen buffer before drawing
+    write_inverted_line(0, "Sensor Data"); // Set a consistent title
 
-    // new_lines[1] is intentionally left blank
-    snprintf(new_lines[0], sizeof(new_lines[0]), "Sensors Data");
-    snprintf(new_lines[2], sizeof(new_lines[2]), "%s", s_local_sensor_buffer.timestamp > 0 ? time_str : "Time not set");
-
-    if (isnan(s_local_sensor_buffer.temperature_c)) {
-        snprintf(new_lines[3], sizeof(new_lines[3]), "T: N/A");
-    } else {
-        snprintf(new_lines[3], sizeof(new_lines[3]), "T: %.2f C", s_local_sensor_buffer.temperature_c);
-    }
-
-    if (s_local_sensor_buffer.pressure_pa == 0) {
-        snprintf(new_lines[4], sizeof(new_lines[4]), "P: N/A");
-    } else {
-        snprintf(new_lines[4], sizeof(new_lines[4]), "P: %.0f Pa", (float)s_local_sensor_buffer.pressure_pa);
-    }
-
-    if (isnan(s_local_sensor_buffer.diff_pressure_pa)) {
-        snprintf(new_lines[5], sizeof(new_lines[5]), "DP: N/A");
-    } else {
-        snprintf(new_lines[5], sizeof(new_lines[5]), "DP: %.2f Pa", s_local_sensor_buffer.diff_pressure_pa);
-    }
-
-    char write_status_str[4];
-    if (s_local_sensor_buffer.writeStatus == WRITE_STATUS_OK)
+    if (s_sensor_page_num == 0)
     {
-        strcpy(write_status_str, "OK");
-    }
-    else if (s_local_sensor_buffer.writeStatus == WRITE_STATUS_FAIL)
-    {
-        strcpy(write_status_str, "KO");
+        // Page 1: Main sensor data
+        // Current Time
+        struct tm local_tm;
+        convert_gmt_to_cet(s_local_sensor_buffer.timestamp, &local_tm);
+        strftime(line_buf, sizeof(line_buf), "%Y-%m-%d %H:%M:%S", &local_tm);
+        write_padded_line(2, s_local_sensor_buffer.timestamp > 0 ? line_buf : "Time not set");
+
+        // Temperature
+        snprintf(line_buf, sizeof(line_buf), "T: %.2f C", s_local_sensor_buffer.temperature_c);
+        write_padded_line(4, isnan(s_local_sensor_buffer.temperature_c) ? "T: N/A" : line_buf);
+
+        // Pressure
+        snprintf(line_buf, sizeof(line_buf), "P: %ld Pa", s_local_sensor_buffer.pressure_pa);
+        write_padded_line(5, s_local_sensor_buffer.pressure_pa == 0 ? "P: N/A" : line_buf);
+
+        // Differential Pressure
+        snprintf(line_buf, sizeof(line_buf), "DP: %.2f Pa", s_local_sensor_buffer.diff_pressure_pa);
+        write_padded_line(6, isnan(s_local_sensor_buffer.diff_pressure_pa) ? "DP: N/A" : line_buf);
     }
     else
-    { // WRITE_STATUS_UNKNOWN
-        strcpy(write_status_str, "?");
-    }
-    snprintf(new_lines[7], sizeof(new_lines[7]), "Last write: %s", write_status_str);
+    { // s_sensor_page_num == 1
+        // Page 2: System Info (Uptime, Last Write)
+        // Uptime
+        format_uptime(s_local_sensor_buffer.uptime_seconds, uptime_str, sizeof(uptime_str));
+        snprintf(line_buf, sizeof(line_buf), "Uptime: %.12s", uptime_str);
+        write_padded_line(2, line_buf);
 
-    if (isnan(s_local_sensor_buffer.battery_voltage)) {
-        snprintf(new_lines[6], sizeof(new_lines[6]), "Batt: N/A");
-    } else {
-        snprintf(new_lines[6], sizeof(new_lines[6]), "Batt: %.2fV-%d%% %s", s_local_sensor_buffer.battery_voltage, s_local_sensor_buffer.battery_percentage, s_local_sensor_buffer.battery_externally_powered == 1 ? "(C)" : "");
+        // Last successful write
+        if (s_local_sensor_buffer.last_successful_write_ts > 0)
+        {
+            struct tm local_tm;
+            convert_gmt_to_cet(s_local_sensor_buffer.last_successful_write_ts, &local_tm);
+            char time_buf[10];
+            strftime(time_buf, sizeof(time_buf), "%H:%M:%S", &local_tm);
+            snprintf(line_buf, sizeof(line_buf), "Last wr.: %s", time_buf);
+        }
+        else
+        {
+            snprintf(line_buf, sizeof(line_buf), "Last wr.: None");
+        }
+        write_padded_line(3, line_buf);
+
+        if (isnan(s_local_sensor_buffer.battery_voltage))
+        {
+            snprintf(line_buf, sizeof(line_buf), "Batt: N/A");
+        }
+        else
+        {
+            snprintf(line_buf, sizeof(line_buf), "Batt: %.2fV %d%% %s", s_local_sensor_buffer.battery_voltage, s_local_sensor_buffer.battery_percentage, s_local_sensor_buffer.battery_externally_powered == 1 ? "(C)" : "");
+        }
+        write_padded_line(4, line_buf);
     }
 
-    write_inverted_line(0, new_lines[0]);
-    for (uint8_t row = 1; row < 8; ++row)
-    {
-        write_padded_line(row, new_lines[row]);
-    }
 }
 
 void page_fs_stats_render_callback(void)
@@ -571,11 +616,15 @@ void render_cmd_feedback_screen(void)
     else if (current_status == CMD_STATUS_SUCCESS)
     {
         write_padded_line(3, "Success");
-        if (s_cmd_feedback_display_start_ms == 0) {
+        if (s_cmd_feedback_display_start_ms == 0)
+        {
             s_cmd_feedback_display_start_ms = now;
-        } else if (now - s_cmd_feedback_display_start_ms > 300) { // Show for 300ms
+        }
+        else if (now - s_cmd_feedback_display_start_ms > 300)
+        {                               // Show for 300ms
             s_cmd_pending_mode = false; // Exit loading mode
-            if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY)) {
+            if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY))
+            {
                 g_command_status = CMD_STATUS_IDLE;
                 xSemaphoreGive(g_command_status_mutex);
             }
@@ -589,11 +638,15 @@ void render_cmd_feedback_screen(void)
     else if (current_status == CMD_STATUS_FAIL)
     {
         write_padded_line(3, "Failed");
-        if (s_cmd_feedback_display_start_ms == 0) {
+        if (s_cmd_feedback_display_start_ms == 0)
+        {
             s_cmd_feedback_display_start_ms = now;
-        } else if (now - s_cmd_feedback_display_start_ms > 500) { // Show for 500ms
+        }
+        else if (now - s_cmd_feedback_display_start_ms > 500)
+        {                               // Show for 500ms
             s_cmd_pending_mode = false; // Exit loading mode
-            if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY)) {
+            if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY))
+            {
                 g_command_status = CMD_STATUS_IDLE;
                 xSemaphoreGive(g_command_status_mutex);
             }
@@ -624,7 +677,8 @@ void render_cmd_feedback_screen(void)
  * This function handles the positioning and rendering of all status icons,
  * ensuring they are correctly aligned and do not overlap.
  */
-static void draw_status_icons(void) {
+static void draw_status_icons(void)
+{
     if (!s_oled_initialized)
         return;
 
@@ -644,8 +698,10 @@ static void draw_status_icons(void) {
     // --- Clear the entire status icon area ---
     // This prevents flickering and artifacts from previous frames.
     int clear_start_x = 90; // Start clearing from the left of where any icon could be.
-    for (int y = 0; y < 8; ++y) {
-        for (int x = clear_start_x; x < 128; ++x) {
+    for (int y = 0; y < 8; ++y)
+    {
+        for (int x = clear_start_x; x < 128; ++x)
+        {
             i2c_oled_draw_pixel(s_oled_i2c_num, x, y, is_inverted);
         }
     }
@@ -663,12 +719,14 @@ static void draw_status_icons(void) {
 
         // Draw fill level
         int fill_width = (body_width - 2) * percentage / 100;
-        if (fill_width > 0) {
+        if (fill_width > 0)
+        {
             i2c_oled_fill_rect(s_oled_i2c_num, icon_x + 1, icon_y + 1, fill_width, body_height - 2, !is_inverted);
         }
 
         // If charging, draw a small lightning bolt symbol inside
-        if (is_charging) {
+        if (is_charging)
+        {
             int bolt_x = icon_x + 4;
             int bolt_y = icon_y + 1;
             i2c_oled_draw_pixel(s_oled_i2c_num, bolt_x + 1, bolt_y, is_inverted);
@@ -684,7 +742,8 @@ static void draw_status_icons(void) {
     int current_icon_x = 114; // Start from the left edge of the battery icon
 
     // If SD card write failed, draw "!!"
-    if (sd_write_failed) {
+    if (sd_write_failed)
+    {
         current_icon_x -= 8; // Move left to make space
         int warning_y = 1;
         // Draw "!!" using pixel-based rectangles
@@ -695,7 +754,8 @@ static void draw_status_icons(void) {
     }
 
     // If HF mode is enabled, draw ">>"
-    if (hf_mode_enabled) {
+    if (hf_mode_enabled)
+    {
         current_icon_x -= 8; // Move left again
         int hf_icon_y = 1;
         // Draw ">>" using pixels
@@ -715,13 +775,15 @@ static void draw_status_icons(void) {
     }
 }
 
-static void enter_cmd_pending_mode(uint32_t timeout_ms, post_cmd_action_t post_action) {
+static void enter_cmd_pending_mode(uint32_t timeout_ms, post_cmd_action_t post_action)
+{
     s_cmd_pending_mode = true;
     s_cmd_start_time_ms = esp_timer_get_time() / 1000;
     s_cmd_timeout_ms = timeout_ms;
     s_post_cmd_action = post_action;
     s_cmd_feedback_display_start_ms = 0; // Reset feedback timer
-    if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY)) {
+    if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY))
+    {
         g_command_status = CMD_STATUS_PENDING;
         xSemaphoreGive(g_command_status_mutex);
     }
@@ -824,7 +886,8 @@ void uiRender_task(void *pvParameters)
         }
 
         // Centralized buffer copy for rendering
-        if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
+        {
             s_local_sensor_buffer = g_sensor_buffer;
             xSemaphoreGive(g_sensor_buffer_mutex);
         }
@@ -870,12 +933,19 @@ void uiRender_task(void *pvParameters)
 // --- About event handlers (to be referenced in ui_menudef.h) ---
 void menu_about_on_btn(void)
 {
-    s_qr_code_cached = false; 
+    s_qr_code_cached = false;
+    s_about_page_view = 0; // Reset to default view (QR code)
     s_menu_mode = false;
     s_current_page = &about_page;
 }
 void menu_sensor_on_btn(void)
 {
+    // When entering sensor page, always reset to the first page
+    s_sensor_page_num = 0;
+    // Also trigger a refresh of SD card stats to ensure page 2 is up-to-date
+    app_command_t cmd_file_count = APP_CMD_GET_SD_FILE_COUNT;
+    xQueueSend(g_app_cmd_queue, &cmd_file_count, 0);
+
     s_menu_mode = false;
     // Force a refresh when entering the page to get immediate data.
     // ESP_LOGI(TAG, "menu_sensor_on_btn called, returning to sensor page. 3");
@@ -897,7 +967,8 @@ void menu_fs_stats_on_btn(void)
     if (g_app_cmd_queue != NULL)
     {
         // Set buffer to "loading" state before sending commands
-        if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY)) {
+        if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY))
+        {
             g_sensor_buffer.sd_card_file_count = -2; // -2 indicates loading
             g_sensor_buffer.sd_card_free_bytes = -2; // -2 indicates loading
             xSemaphoreGive(g_sensor_buffer_mutex);
@@ -932,7 +1003,9 @@ void menu_sync_rtc_ntp_on_btn(void)
         app_command_t cmd = APP_CMD_SYNC_RTC_NTP;
         xQueueSend(g_app_cmd_queue, &cmd, 0);
         enter_cmd_pending_mode(45000, POST_ACTION_NONE); // 45s timeout
-    } else {
+    }
+    else
+    {
         ESP_LOGE(TAG, "App command queue not initialized!");
     }
 }
@@ -974,15 +1047,32 @@ void page_about_on_btn(void)
     s_menu_mode = true;
     s_current_page = NULL;
 }
-void page_about_on_cw(void) { /* Do nothing */ }
-void page_about_on_ccw(void) { /* Do nothing */ }
+void page_about_on_cw(void)
+{
+    s_about_page_view = (s_about_page_view + 1) % 3; // Cycle through 0, 1, 2
+}
+void page_about_on_ccw(void)
+{
+    s_about_page_view = (s_about_page_view > 0) ? (s_about_page_view - 1) : 2; // Cycle through 2, 1, 0
+}
 void page_sensor_on_btn(void)
 {
+    // Button press on sensor page enters the menu
     s_menu_mode = true;
     s_current_page = NULL;
+    current_page = 0;
+    current_item = 0;
 }
-void page_sensor_on_cw(void) { /* Do nothing */ }
-void page_sensor_on_ccw(void) { /* Do nothing */ }
+void page_sensor_on_cw(void)
+{
+    // Rotation on sensor page toggles between sub-pages
+    s_sensor_page_num = (s_sensor_page_num + 1) % SENSOR_PAGE_COUNT;
+}
+void page_sensor_on_ccw(void)
+{
+    // Rotation on sensor page toggles between sub-pages
+    s_sensor_page_num = (s_sensor_page_num > 0) ? (s_sensor_page_num - 1) : (SENSOR_PAGE_COUNT - 1);
+}
 
 void page_fs_stats_on_cw(void) { /* Do nothing */ }
 void page_fs_stats_on_ccw(void) { /* Do nothing */ }
@@ -993,7 +1083,8 @@ void page_fs_stats_on_btn(void)
     s_current_page = NULL;
 }
 
-void menu_web_server_on_btn(void) {
+void menu_web_server_on_btn(void)
+{
     s_menu_mode = false;
     s_current_page = &web_server_page;
     s_web_qr_code_cached = false; // Invalidate QR cache on entry
@@ -1003,10 +1094,12 @@ void menu_web_server_on_btn(void) {
     xQueueSend(g_app_cmd_queue, &cmd, 0);
 }
 
-void page_web_server_on_cw(void) {
+void page_web_server_on_cw(void)
+{
     s_web_page_view = (s_web_page_view + 1) % 2; // Toggle between 0 and 1
 }
-void page_web_server_on_ccw(void) {
+void page_web_server_on_ccw(void)
+{
     s_web_page_view = (s_web_page_view + 1) % 2; // Toggle between 0 and 1
 }
 
@@ -1025,7 +1118,8 @@ void page_config_on_btn(void)
 }
 
 /* --- Config Page Callbacks --- */
-void page_config_on_cw(void) { 
+void page_config_on_cw(void)
+{
     int max_pages = (s_num_config_items + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE;
     s_config_current_page_index++;
     if (s_config_current_page_index >= max_pages)
@@ -1033,7 +1127,8 @@ void page_config_on_cw(void) {
         s_config_current_page_index = 0; // Wrap around to the first page
     }
 }
-void page_config_on_ccw(void) { 
+void page_config_on_ccw(void)
+{
     s_config_current_page_index--;
     if (s_config_current_page_index < 0)
     {
@@ -1060,13 +1155,16 @@ static void ui_config_page_prepare_data(void)
     snprintf(s_config_items[4].value, sizeof(s_config_items[4].value), "%lu", (unsigned long)params->log_interval_ms);
     s_config_items[5].full_key = s_config_keys[5]; // hf_log_int_ms
     snprintf(s_config_items[5].value, sizeof(s_config_items[5].value), "%lu", (unsigned long)params->hf_log_interval_ms);
-    
+
     // D6F-PH Model
     s_config_items[6].full_key = s_config_keys[6];
-    const char* model_str = "Unknown";
-    if (params->d6fph_model == D6FPH_MODEL_0025AD1) model_str = "0025AD1";
-    else if (params->d6fph_model == D6FPH_MODEL_0505AD3) model_str = "0505AD3";
-    else if (params->d6fph_model == D6FPH_MODEL_5050AD4) model_str = "5050AD4";
+    const char *model_str = "Unknown";
+    if (params->d6fph_model == D6FPH_MODEL_0025AD1)
+        model_str = "0025AD1";
+    else if (params->d6fph_model == D6FPH_MODEL_0505AD3)
+        model_str = "0505AD3";
+    else if (params->d6fph_model == D6FPH_MODEL_5050AD4)
+        model_str = "5050AD4";
     snprintf(s_config_items[6].value, sizeof(s_config_items[6].value), "%s (%d)", model_str, params->d6fph_model);
 
     // WiFi SSID
@@ -1075,9 +1173,12 @@ static void ui_config_page_prepare_data(void)
 
     // WiFi Password (masked)
     s_config_items[8].full_key = s_config_keys[8];
-    if (strlen(params->wifi_password) > 0) {
+    if (strlen(params->wifi_password) > 0)
+    {
         snprintf(s_config_items[8].value, sizeof(s_config_items[8].value), "********");
-    } else {
+    }
+    else
+    {
         snprintf(s_config_items[8].value, sizeof(s_config_items[8].value), "(not set)");
     }
 }

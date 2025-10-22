@@ -96,14 +96,13 @@ void datalogger_task(void *pvParameters)
     const uint32_t LOG_INTERVAL_MS_NORMAL = params->log_interval_ms;
     const uint32_t LOG_INTERVAL_MS_HF = params->hf_log_interval_ms;
     ESP_LOGI(TAG, "Datalogger task started with intervals: Normal=%lu ms, HF=%lu ms", (unsigned long)LOG_INTERVAL_MS_NORMAL, (unsigned long)LOG_INTERVAL_MS_HF);
-    static bool is_paused = false;
 
     // Wait until the main app signals that all initialization is complete.
     ESP_LOGI(TAG, "Waiting for initialization to complete...");
     xEventGroupWaitBits(g_init_event_group, INIT_DONE_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
 
     // Set the CSV header for all new log files.
-    spi_sdcard_set_csv_header("timestamp_gmt,datetime_cet,temperature_c,pressure_pa,diff_pressure_pa,battery_voltage,battery_percentage");
+    spi_sdcard_set_csv_header("timestamp_gmt,datetime_cet,temperature_c,pressure_pa,diff_pressure_pa,battery_voltage,battery_percentage,uptime_seconds");
 
     // Perform an initial sensor update right after startup.
     update_sensor_buffer(bmp280_dev, params->d6fph_dev);
@@ -126,51 +125,38 @@ void datalogger_task(void *pvParameters)
             else if (cmd == DATALOGGER_CMD_PAUSE_WRITES)
             {
                 ESP_LOGI(TAG, "Pausing writes to SD card.");
-                is_paused = true;
-                if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY)) {
-                    g_sensor_buffer.datalogger_status = DATA_LOGGER_PAUSED;
-                    xSemaphoreGive(g_sensor_buffer_mutex);
-                }
-            }
-            else if (cmd == DATALOGGER_CMD_ROTATE_FILE)
-            {
-                ESP_LOGI(TAG, "Rotating log file on request.");
-                spi_sdcard_rotate_file();
-            }
-            else if (cmd == DATALOGGER_CMD_RESUME_WRITES)
-            {
-                ESP_LOGI(TAG, "Resuming writes to SD card.");
-                is_paused = false;
-                if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY)) {
-                    g_sensor_buffer.datalogger_status = DATA_LOGGER_RUNNING;
-                    xSemaphoreGive(g_sensor_buffer_mutex);
-                }
+                vTaskSuspend(NULL); // Suspend self. Execution resumes here after vTaskResume.
+
+                ESP_LOGI(TAG, "Resumed. Performing warm-up read.");
                 // After resuming (especially after sleep), perform an initial read
                 // to ensure the sensor has fresh data and is fully awake. This "primes"
                 // the sensor before the next timed read occurs.
-                ESP_LOGI(TAG, "Performing warm-up read after resuming.");
                 float temp, diff_press;
-                long press; 
+                long press;
                 if (xSemaphoreTake(g_i2c_bus_mutex, portMAX_DELAY))
                 {
                     // Use the new blocking function to guarantee a fresh reading
                     esp_err_t force_read_err = bmp280_force_read(bmp280_dev, &temp, &press);
-                    if (params->d6fph_dev && params->d6fph_dev->is_initialized) {
+                    if (params->d6fph_dev && params->d6fph_dev->is_initialized)
+                    {
                         // Also read the D6F-PH sensor
                         d6fph_read_pressure(params->d6fph_dev, &diff_press);
-                    } else {
+                    }
+                    else
+                    {
                         diff_press = NAN;
                     }
                     xSemaphoreGive(g_i2c_bus_mutex);
 
-                    if (force_read_err == ESP_OK) {
+                    if (force_read_err == ESP_OK)
+                    {
                         // Now update the global buffer with this guaranteed fresh data
-                        if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY)) {
+                        if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY))
+                        {
                             g_sensor_buffer.temperature_c = temp;
                             g_sensor_buffer.pressure_pa = press;
                             g_sensor_buffer.diff_pressure_pa = diff_press;
                             g_sensor_buffer.timestamp = time(NULL);
-                            // Also update battery stats here
                             g_sensor_buffer.battery_voltage = battery_reader_get_voltage();
                             g_sensor_buffer.battery_percentage = battery_reader_get_percentage();
                             xSemaphoreGive(g_sensor_buffer_mutex);
@@ -178,22 +164,28 @@ void datalogger_task(void *pvParameters)
                     }
                 }
             }
+            else if (cmd == DATALOGGER_CMD_ROTATE_FILE)
+            {
+                ESP_LOGI(TAG, "Rotating log file on request.");
+                spi_sdcard_rotate_file();
+            }
         }
 
 
-        uint64_t current_time_ms = esp_timer_get_time() / 1000;
-        uint64_t last_write_ms = 0;
+        time_t current_ts = time(NULL);
+        time_t last_write_ts = 0;
         bool hf_mode_active = false;
 
         // Get the last write time from the shared buffer
         if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50))) {
-            last_write_ms = g_sensor_buffer.last_write_ms;
+            last_write_ts = g_sensor_buffer.last_successful_write_ts;
             hf_mode_active = g_sensor_buffer.high_freq_mode_enabled;
             xSemaphoreGive(g_sensor_buffer_mutex);
         }
 
         uint32_t current_log_interval = hf_mode_active ? LOG_INTERVAL_MS_HF : LOG_INTERVAL_MS_NORMAL;
-        if (current_time_ms - last_write_ms >= current_log_interval && !is_paused)
+        // Check if enough time (in seconds) has passed for the next log.
+        if ((current_ts - last_write_ts) * 1000 >= current_log_interval)
         {
             // It's time for a scheduled log. This takes priority.
             // Update sensors and write to SD card.
@@ -220,14 +212,15 @@ void datalogger_task(void *pvParameters)
             
             // Format the data into a CSV string
             char csv_line[200];
-            snprintf(csv_line, sizeof(csv_line), "%lld,%s,%.2f,%ld,%.2f,%.2f,%d",
+            snprintf(csv_line, sizeof(csv_line), "%lld,%s,%.2f,%ld,%.2f,%.2f,%d,%llu",
                      (long long)local_buffer.timestamp,
                      local_time_str,
                      isnan(local_buffer.temperature_c) ? 0.0f : local_buffer.temperature_c,
                      local_buffer.pressure_pa, // Already long, 0 is invalid
                      isnan(local_buffer.diff_pressure_pa) ? 0.0f : local_buffer.diff_pressure_pa,
                      local_buffer.battery_voltage,
-                     local_buffer.battery_percentage);
+                     local_buffer.battery_percentage,
+                     local_buffer.uptime_seconds);
 
             // Write the formatted string to the SD card
             esp_err_t write_err;
@@ -243,14 +236,21 @@ void datalogger_task(void *pvParameters)
 
             // Update the shared buffer with the final status and timestamps
             if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-                g_sensor_buffer.last_write_ms = esp_timer_get_time() / 1000;
                 if (write_err == ESP_OK) {
                     g_sensor_buffer.writeStatus = WRITE_STATUS_OK;
-                    g_sensor_buffer.last_successful_write_ts = time(NULL); // Mark successful write                    
+                    g_sensor_buffer.last_successful_write_ts = current_ts; // Mark successful write with current timestamp
                     ESP_LOGI(TAG, "Successfully wrote to SD card.");
                 } else {
                     g_sensor_buffer.writeStatus = WRITE_STATUS_FAIL;
                     ESP_LOGE(TAG, "Failed to write to SD card after all retries.");
+                }
+
+                // If the write was successful, signal to the main task that it's safe to sleep.
+                if (write_err == ESP_OK) {
+                    if (g_app_cmd_queue != NULL) {
+                        app_command_t sleep_cmd = APP_CMD_LOG_COMPLETE_SLEEP_NOW;
+                        xQueueSend(g_app_cmd_queue, &sleep_cmd, 0);
+                    }
                 }
                 xSemaphoreGive(g_sensor_buffer_mutex);
             }
@@ -264,6 +264,6 @@ void datalogger_task(void *pvParameters)
         }
 
         // This is the main delay for the task loop.
-        vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }

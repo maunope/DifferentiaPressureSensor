@@ -85,9 +85,9 @@ There are three components that can access the SD card:
 
 The access rules are as follows:
 
-*   **USB Mass Storage has the highest priority.** If the device is connected to a PC and the SD card is mounted, the `main_task` will automatically stop the web server (if running) and keep the datalogger paused. It will also prevent the web server from being started. This gives the host computer exclusive control to ensure a stable connection.
-*   **The Web Server has the next highest priority.** When the user chooses to start the web server, the `main_task` first commands the `datalogger_task` to pause. Only after the datalogger confirms it is paused does the web server start. When the web server is stopped, the `main_task` commands the datalogger to resume.
-*   **The Datalogger runs when no other component needs access.** It is the default state. It is paused whenever the Web Server or USB MSC needs to access the file system.
+*   **USB Mass Storage has absolute priority.** If the device is connected to a PC and the SD card is mounted by the host computer, the `main_task` will automatically stop the web server (if it's running) and will prevent both the web server and the datalogger from starting. This gives the host computer exclusive control to ensure a stable connection and prevent data corruption.
+*   **The Web Server has the next priority.** When the user starts the web server, the `main_task` first commands the `datalogger_task` to pause. Only after the datalogger is suspended does the web server start. When the web server is stopped, the `main_task` resumes the datalogger.
+*   **The Datalogger runs by default.** It operates whenever no other component needs exclusive access to the file system.
 
 This state management ensures that there is only ever one "writer" or "manager" for the SD card, guaranteeing data integrity. As an additional safety measure, the `spi_sdcard_write_line` function inside the `spi-sdcard` library also performs its own check (`spi_sdcard_is_usb_connected()`) before any write operation. This provides a final safeguard against writes, since the activation of the USB MSC stack is handled by the TinyUSB component and is not directly controlled by the application tasks.
 
@@ -99,21 +99,22 @@ The device is designed for low-power operation by using a deep sleep cycle. The 
 
 The device will enter deep sleep when all of the following conditions are met:
 
-1.  The UI has been inactive for a configurable period (`inactivity_timeout_ms`).
-2.  A new data log has been successfully written to the SD card.
-3.  The web server is not active.
+1.  The UI has been inactive for a configurable period (`inactivity_timeout_ms`), which causes the UI task to suspend.
+2.  The `datalogger_task` has completed a write to the SD card and sent an `APP_CMD_LOG_COMPLETE_SLEEP_NOW` command to the `main_task`.
+3.  The web server is not active at the time the sleep command is processed.
 
 The sleep sequence is as follows:
 
-1.  The `main_task` detects that the sleep conditions have been met.
-2.  It suspends the `uiRender_task` and powers off the OLED display to save power.
-3.  It sends a `DATALOGGER_CMD_PAUSE_WRITES` command to the `datalogger_task` to ensure no data is being written to the SD card.
-4.  It waits in a non-blocking loop, periodically checking the shared buffer until the `datalogger_task` confirms it has paused.
-5.  Once paused, it de-initializes the SD card and cuts power to the main peripheral power rail.
-6.  It saves critical state variables (e.g., the timestamp of the last write) to RTC memory, which persists through deep sleep.
-7.  It configures two wakeup sources:
+1.  The `main_task` receives the `APP_CMD_LOG_COMPLETE_SLEEP_NOW` command.
+2.  It verifies that the UI is suspended and the web server is inactive.
+3.  It sends a `DATALOGGER_CMD_PAUSE_WRITES` command to the `datalogger_task`.
+4.  It waits for the `datalogger_task` to confirm it has suspended itself.
+5.  Once paused, it de-initializes the SD card, Wi-Fi, and cuts power to the main peripheral power rail.
+6.  It saves critical state variables (e.g., the timestamp of the last write, total uptime) to RTC memory, which persists through deep sleep.
+7.  It configures two wakeup sources for the ESP32-S3:
     *   **GPIO**: A press on the rotary encoder button.
     *   **Timer**: A timer set by the `sleep_duration_ms` configuration value.
+    *   **Timer**: A "smart" timer. It calculates the time remaining until the next log is due and will sleep for the configured `sleep_duration_ms` or the remaining time, whichever is shorter. This ensures the device wakes up on time for the next log without oversleeping.
 8.  It calls `esp_deep_sleep_start()` to enter deep sleep.
 
 ### Waking Up

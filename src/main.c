@@ -74,10 +74,11 @@
 
 // --- RTC Memory for State Persistence ---
 // These variables retain their values across deep sleep cycles.
-static RTC_DATA_ATTR uint64_t rtc_last_write_ms = 0;
 static RTC_DATA_ATTR write_status_t rtc_last_write_status = WRITE_STATUS_UNKNOWN;
 static RTC_DATA_ATTR time_t rtc_last_successful_write_ts = 0;
 static RTC_DATA_ATTR bool rtc_high_freq_mode_enabled = false;
+static RTC_DATA_ATTR uint64_t rtc_total_awake_time_s = 0;
+static RTC_DATA_ATTR uint64_t rtc_last_boot_time_ms = 0;
 
 static const char *TAG = "main";
 
@@ -87,6 +88,7 @@ ds3231_t g_rtc;    // Global RTC device handle
 bmp280_t g_bmp280; // Global BMP280 device handle
 d6fph_t g_d6fph;   // Global D6F-PH device handle
 
+TaskHandle_t g_datalogger_task_handle = NULL;
 TaskHandle_t g_uiRender_task_handle = NULL;
 i2c_master_bus_handle_t g_i2c_bus0_handle = NULL;
 i2c_master_bus_handle_t g_i2c_bus1_handle = NULL;
@@ -98,12 +100,8 @@ static bool is_usb_connected_state = false;
 
 static web_server_fsm_state_t s_web_server_state = WEB_SERVER_FSM_IDLE;
 
-typedef enum
-{
-    SLEEP_FSM_IDLE,
-    SLEEP_FSM_WAIT_DATALOGGER_PAUSE,
-} sleep_fsm_state_t;
-static sleep_fsm_state_t s_sleep_state = SLEEP_FSM_IDLE;
+// Forward declaration to resolve implicit declaration warning
+static void handle_stop_web_server(void);
 
 /**
  * @brief Callback for clockwise rotation from the rotary encoder.
@@ -274,18 +272,24 @@ static void oled_power_on(void)
 
 static void go_to_deep_sleep(void)
 {
-    ESP_LOGI(TAG, "Entering deep sleep.");
+    ESP_LOGI(TAG, "Saving state and entering deep sleep.");
 
     // --- Persist State to RTC Memory ---
-    // Save the current datalogger state before sleeping.
+    // Save the current datalogger state just before sleeping.
+    // This is done AFTER the datalogger is confirmed to be paused to ensure we save the very last state.
     if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(100)))
     {
-        rtc_last_write_ms = g_sensor_buffer.last_write_ms;
-        rtc_last_write_status = g_sensor_buffer.writeStatus;
+        // The most critical value is the timestamp of the last successful write.
+        // Saving this correctly prevents the race condition where the device wakes
+        // and immediately tries to sleep again.
         rtc_last_successful_write_ts = g_sensor_buffer.last_successful_write_ts;
         rtc_high_freq_mode_enabled = g_sensor_buffer.high_freq_mode_enabled;
+        rtc_last_write_status = g_sensor_buffer.writeStatus;
         xSemaphoreGive(g_sensor_buffer_mutex);
-        ESP_LOGI(TAG, "Saved last write time (%llu) and status (%d) to RTC memory.", rtc_last_write_ms, rtc_last_write_status);
+
+        uint64_t current_awake_time_s = (esp_timer_get_time() - rtc_last_boot_time_ms * 1000) / 1000000ULL;
+        rtc_total_awake_time_s += current_awake_time_s;
+        ESP_LOGI(TAG, "Saved last write time and status (%d) to RTC memory.", rtc_last_write_status);
     }
     else
     {
@@ -296,12 +300,30 @@ static void go_to_deep_sleep(void)
     // This uses the RTC peripheral, which is required for deep sleep.
     rotaryencoder_enable_wakeup_source();
 
-    bool hf_mode_active = false;
+    sensor_buffer_t local_buffer;
     if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50))) {
-        hf_mode_active = g_sensor_buffer.high_freq_mode_enabled;
+        local_buffer = g_sensor_buffer;
         xSemaphoreGive(g_sensor_buffer_mutex);
+    } else {
+        // In case of failure, assume default mode to be safe.
+        local_buffer.high_freq_mode_enabled = false;
+        local_buffer.last_successful_write_ts = 0;
     }
-    uint64_t sleep_duration = hf_mode_active ? g_cfg->hf_sleep_duration_ms : g_cfg->sleep_duration_ms;
+
+    // --- Smart Sleep Duration Calculation ---
+    uint64_t configured_sleep_duration_ms = local_buffer.high_freq_mode_enabled ? g_cfg->hf_sleep_duration_ms : g_cfg->sleep_duration_ms;
+    uint32_t log_interval_ms = local_buffer.high_freq_mode_enabled ? g_cfg->hf_log_interval_ms : g_cfg->log_interval_ms;
+
+    time_t current_ts = time(NULL);
+    time_t next_log_ts = local_buffer.last_successful_write_ts + (log_interval_ms / 1000);
+    int64_t time_to_next_log_ms = (next_log_ts > current_ts) ? (next_log_ts - current_ts) * 1000 : 0;
+
+    // Sleep for the configured duration, but no longer than the time remaining until the next log.
+    // This prevents oversleeping and ensures timely writes. Add a small buffer (e.g., 100ms) to wake up just before.
+    uint64_t sleep_duration = configured_sleep_duration_ms;
+    if (time_to_next_log_ms > 100 && time_to_next_log_ms < configured_sleep_duration_ms) {
+        sleep_duration = time_to_next_log_ms - 100;
+    }
     esp_sleep_enable_timer_wakeup(sleep_duration * 1000);
 
     // IMPORTANT: Ensure the wakeup pin has a pull-up enabled to prevent floating.
@@ -320,45 +342,9 @@ static void go_to_deep_sleep(void)
     gpio_hold_en(ROTARY_ENCODER_PIN_B);
     gpio_deep_sleep_hold_en();
 
-    ESP_LOGI(TAG, "Entering deep sleep now.");
+    ESP_LOGI(TAG, "Entering deep sleep for %llu ms.", sleep_duration);
     esp_deep_sleep_start();
     // --- Execution stops here, device will restart on wakeup ---
-}
-
-static void handle_sleep_fsm(void)
-{
-    if (s_sleep_state != SLEEP_FSM_WAIT_DATALOGGER_PAUSE)
-    {
-        return;
-    }
-
-    // Check if the datalogger has confirmed it's paused.
-    int datalogger_status = 0;
-    if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)))
-    {
-        datalogger_status = g_sensor_buffer.datalogger_status;
-        xSemaphoreGive(g_sensor_buffer_mutex);
-    }
-
-    if (datalogger_status == DATA_LOGGER_PAUSED)
-    {
-        ESP_LOGI(TAG, "Datalogger paused. Preparing to sleep.");
-
-        // De-initialize peripherals that will be powered down.
-        ESP_LOGI(TAG, "De-initializing peripherals before sleep.");
-        spi_sdcard_deinit();
-        // De-initialize Wi-Fi to ensure it's fully powered down.
-        wifi_manager_deinit();
-
-        // Cut power to the main peripheral power rail.
-        ESP_LOGI(TAG, "Powering down external devices.");
-        gpio_set_level(DEVICES_POWER_PIN, 0);
-
-        go_to_deep_sleep();
-        // Execution will not return from go_to_deep_sleep()
-    }
-    // If not paused, the FSM will check again on the next loop iteration.
-    // A timeout could be added here if necessary.
 }
 
 static void handle_start_web_server(void)
@@ -375,15 +361,40 @@ static void handle_start_web_server(void)
         return;
     }
 
-    s_web_server_state = WEB_SERVER_FSM_WAIT_DATALOGGER_PAUSE;
     if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY))
     {
         g_sensor_buffer.web_server_status = WEB_SERVER_STARTING;
         xSemaphoreGive(g_sensor_buffer_mutex);
     }
     ESP_LOGI(TAG, "Requesting datalogger to pause for web server...");
-    datalogger_command_t logger_cmd = DATALOGGER_CMD_PAUSE_WRITES;
-    xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
+    xQueueSend(g_datalogger_cmd_queue, &(datalogger_command_t){DATALOGGER_CMD_PAUSE_WRITES}, 0);
+
+    // Wait for the datalogger to suspend itself.
+    ESP_LOGI(TAG, "Waiting for datalogger to pause for web server...");
+    int wait_cycles = 0;
+    const int max_wait_cycles = 150; // 150 * 20ms = 3 seconds timeout
+    while (g_datalogger_task_handle != NULL && eTaskGetState(g_datalogger_task_handle) != eSuspended && wait_cycles < max_wait_cycles) {
+        vTaskDelay(pdMS_TO_TICKS(20));
+        wait_cycles++;
+    }
+
+    if (wait_cycles >= max_wait_cycles) {
+        ESP_LOGE(TAG, "Timeout waiting for datalogger to pause for web server. Aborting web server start.");
+        handle_stop_web_server(); // Clean up and reset status
+        return;
+    }
+
+    ESP_LOGI(TAG, "Datalogger paused. Proceeding to start Wi-Fi and Web Server.");
+    s_web_server_state = WEB_SERVER_FSM_CONNECTING;
+    if (wifi_manager_connect(g_cfg->wifi_ssid, g_cfg->wifi_password) == ESP_OK)
+    {
+        // Wi-Fi connection process will be handled by the FSM in WEB_SERVER_FSM_CONNECTING
+    }
+    else
+    {
+        ESP_LOGE(TAG, "Failed to initiate Wi-Fi connection for web server.");
+        handle_stop_web_server(); // Clean up on failure
+    }
 }
 
 static void handle_stop_web_server(void)
@@ -391,48 +402,29 @@ static void handle_stop_web_server(void)
     s_web_server_state = WEB_SERVER_FSM_IDLE;
     ESP_LOGI(TAG, "Stopping web server and Wi-Fi.");
     stop_web_server();
-    wifi_manager_disconnect();
     if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY))
     {
         g_sensor_buffer.web_server_status = WEB_SERVER_STOPPED;
         g_sensor_buffer.web_server_url[0] = '\0';
         xSemaphoreGive(g_sensor_buffer_mutex);
     }
+
+    // Disconnect from Wi-Fi only if it's actually connected
+    if (wifi_manager_is_connected()) {
+        wifi_manager_disconnect();
+    }
+
     // Resume datalogger
-    datalogger_command_t logger_cmd = DATALOGGER_CMD_RESUME_WRITES;
-    xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
+    if (g_datalogger_task_handle != NULL && eTaskGetState(g_datalogger_task_handle) == eSuspended) {
+        vTaskResume(g_datalogger_task_handle);
+    }
 }
 
 static void handle_web_server_fsm(void)
 {
     // --- Web Server State Machine ---
-    if (s_web_server_state == WEB_SERVER_FSM_WAIT_DATALOGGER_PAUSE)
-    {
-        bool is_paused = false;
-        if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)))
-        {
-            if (g_sensor_buffer.datalogger_status == DATA_LOGGER_PAUSED)
-            {
-                is_paused = true;
-            }
-            xSemaphoreGive(g_sensor_buffer_mutex);
-        }
-
-        if (is_paused)
-        {
-            ESP_LOGI(TAG, "Datalogger paused. Starting Wi-Fi and Web Server...");
-            if (wifi_manager_connect(g_cfg->wifi_ssid, g_cfg->wifi_password) == ESP_OK)
-            {
-                s_web_server_state = WEB_SERVER_FSM_CONNECTING;
-            }
-            else
-            {
-                ESP_LOGE(TAG, "Failed to start Wi-Fi connection.");
-                handle_stop_web_server(); // Clean up on failure
-            }
-        }
-    }
-    else if (s_web_server_state == WEB_SERVER_FSM_CONNECTING)
+    // This state is entered after the datalogger has successfully paused.
+    if (s_web_server_state == WEB_SERVER_FSM_CONNECTING)
     {
         if (wifi_manager_is_connected())
         {
@@ -497,22 +489,31 @@ static esp_err_t i2c_bus_init(void)
 void main_task(void *pvParameters)
 {
     ESP_LOGI(TAG, "Deep sleep configured. Inactivity timeout: %lums, Sleep duration: %llums", (unsigned long)g_cfg->inactivity_timeout_ms, g_cfg->sleep_duration_ms);
-    time_t last_processed_write_ts = 0;
-    bool is_ui_suspended = (g_uiRender_task_handle == NULL);
-    uint64_t boot_time_ms = esp_timer_get_time() / 1000ULL;
 
     while (1)
     {
+        // --- Create a local, consistent snapshot of the shared buffer ---
+        sensor_buffer_t local_buffer;
+        if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50))) {
+            // Copy the global buffer to a local struct to work with consistent data.
+            local_buffer = g_sensor_buffer;
+
+            // --- Periodic Uptime Update ---
+            // This is the best place to update uptime, as main_task is always running.
+            // Calculate current session's awake time and add to total persistent uptime
+            uint64_t current_session_awake_s = (esp_timer_get_time() - rtc_last_boot_time_ms * 1000) / 1000000ULL;
+            g_sensor_buffer.uptime_seconds = rtc_total_awake_time_s + current_session_awake_s;
+            
+            xSemaphoreGive(g_sensor_buffer_mutex);
+        } else {
+            ESP_LOGE(TAG, "Failed to get sensor buffer snapshot. Loop will use stale data.");
+        }
+
         // --- Process commands from other tasks ---
         app_command_t cmd;
         if (xQueueReceive(g_app_cmd_queue, &cmd, 0) == pdPASS)
         {
             // Any command from the UI means it's active
-            if (g_uiRender_task_handle != NULL && eTaskGetState(g_uiRender_task_handle) == eSuspended)
-            {
-                ESP_LOGI(TAG, "Activity detected, waking up UI.");
-                // This will fall through to the activity detected command
-            }
             switch (cmd)
             {
             case APP_CMD_SET_RTC_BUILD_TIME:
@@ -529,8 +530,33 @@ void main_task(void *pvParameters)
                 break;
             case APP_CMD_FORMAT_SD_CARD:
                 ESP_LOGI(TAG, "CMD: Format SD card");
-                spi_sdcard_format();
-                // Status is now handled inside spi_sdcard_format
+                // Pause the datalogger before formatting to prevent conflicts.
+                ESP_LOGI(TAG, "Pausing datalogger for SD format...");
+                xQueueSend(g_datalogger_cmd_queue, &(datalogger_command_t){DATALOGGER_CMD_PAUSE_WRITES}, 0);
+
+                int wait_cycles = 0;
+                const int max_wait_cycles = 150; // 3-second timeout
+                while (g_datalogger_task_handle != NULL && eTaskGetState(g_datalogger_task_handle) != eSuspended && wait_cycles < max_wait_cycles) {
+                    vTaskDelay(pdMS_TO_TICKS(20));
+                    wait_cycles++;
+                }
+
+                if (wait_cycles >= max_wait_cycles) {
+                    ESP_LOGE(TAG, "Timeout waiting for datalogger to pause for format. Aborting.");
+                    if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY)) {
+                        g_command_status = CMD_STATUS_FAIL;
+                        xSemaphoreGive(g_command_status_mutex);
+                    }
+                } else {
+                    ESP_LOGI(TAG, "Datalogger paused. Formatting SD card...");
+                    spi_sdcard_format();
+                }
+
+                // Always resume the datalogger afterward.
+                ESP_LOGI(TAG, "Resuming datalogger after format attempt.");
+                if (g_datalogger_task_handle != NULL && eTaskGetState(g_datalogger_task_handle) == eSuspended) {
+                    vTaskResume(g_datalogger_task_handle);
+                }
                 break;
             case APP_CMD_SYNC_RTC_NTP:
                 ESP_LOGI(TAG, "CMD: Sync RTC with NTP");
@@ -538,12 +564,23 @@ void main_task(void *pvParameters)
                 break;
             case APP_CMD_ACTIVITY_DETECTED:
                 ESP_LOGD(TAG, "CMD: Activity Detected");
-                last_activity_ms = esp_timer_get_time() / 1000;
-                if (g_uiRender_task_handle != NULL)
+                if (g_uiRender_task_handle != NULL && eTaskGetState(g_uiRender_task_handle) == eSuspended)
                 {
-                    // Only power on the OLED and change state if the UI task actually exists.
+                    ESP_LOGI(TAG, "Activity detected, waking up UI.");
+                }
+                last_activity_ms = esp_timer_get_time() / 1000;
+                if (g_uiRender_task_handle != NULL) {
+                    // UI task exists, it's either running or suspended.
+                    // oled_power_on() will handle resuming it if suspended.
                     oled_power_on();
-                    is_ui_suspended = false;
+                } else {
+                    // UI task does not exist (e.g., after a timer wakeup).
+                    // We need to create it for the first time.
+                    ESP_LOGI(TAG, "UI task not running. Creating it now.");
+                    gpio_set_level(OLED_POWER_PIN, 1); // Ensure OLED has power
+                    vTaskDelay(pdMS_TO_TICKS(100)); // Wait for OLED to stabilize
+                    i2c_oled_send_init_commands(I2C_OLED_NUM);
+                    xTaskCreate(uiRender_task, "uiRender", 4096, NULL, 6, &g_uiRender_task_handle);
                 }
                 break;
             case APP_CMD_REFRESH_SENSOR_DATA:
@@ -551,22 +588,6 @@ void main_task(void *pvParameters)
                 if (g_datalogger_cmd_queue != NULL)
                 {
                     datalogger_command_t logger_cmd = DATALOGGER_CMD_FORCE_REFRESH;
-                    xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
-                }
-                break;
-            case APP_CMD_PAUSE_DATALOGGER:
-                ESP_LOGI(TAG, "CMD: Pause datalogger");
-                if (g_datalogger_cmd_queue != NULL)
-                {
-                    datalogger_command_t logger_cmd = DATALOGGER_CMD_PAUSE_WRITES;
-                    xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
-                }
-                break;
-            case APP_CMD_RESUME_DATALOGGER:
-                ESP_LOGI(TAG, "CMD: Resume datalogger");
-                if (g_datalogger_cmd_queue != NULL)
-                {
-                    datalogger_command_t logger_cmd = DATALOGGER_CMD_RESUME_WRITES;
                     xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
                 }
                 break;
@@ -602,6 +623,44 @@ void main_task(void *pvParameters)
                     xSemaphoreGive(g_sensor_buffer_mutex);
                 }
                 break;
+            case APP_CMD_LOG_COMPLETE_SLEEP_NOW:
+                ESP_LOGI(TAG, "CMD: Log complete, checking sleep conditions.");
+                bool is_ui_suspended = (g_uiRender_task_handle == NULL || eTaskGetState(g_uiRender_task_handle) == eSuspended);
+                bool web_server_active = (local_buffer.web_server_status == WEB_SERVER_RUNNING || local_buffer.web_server_status == WEB_SERVER_STARTING);
+
+                if (is_ui_suspended && !web_server_active) {
+                    ESP_LOGI(TAG, "UI is inactive and log is complete. Initiating sleep.");
+                    
+                    // The UI is already off and the task suspended due to the inactivity timer,
+                    // so we don't need to call oled_power_off() again here.
+                    //oled_power_off();
+                    
+                    // --- Step 1: Tell the logger to pause---
+                    xQueueSend(g_datalogger_cmd_queue, &(datalogger_command_t){DATALOGGER_CMD_PAUSE_WRITES}, 0);
+
+                    // --- Step 2: Wait for the datalogger to suspend itself ---
+                    ESP_LOGI(TAG, "Waiting for datalogger to pause...");
+                    int wait_cycles = 0;
+                    const int max_wait_cycles = 150; // 3 seconds timeout
+                    while (g_datalogger_task_handle != NULL && eTaskGetState(g_datalogger_task_handle) != eSuspended && wait_cycles < max_wait_cycles) {
+                        vTaskDelay(pdMS_TO_TICKS(20));
+                        wait_cycles++;
+                    }
+
+                    if (wait_cycles >= max_wait_cycles) {
+                        ESP_LOGE(TAG, "Timeout waiting for datalogger to pause. Aborting sleep.");
+                        oled_power_on(); // Wake the UI back up
+                    } else {
+                        ESP_LOGI(TAG, "Datalogger paused. De-initializing peripherals and sleeping.");
+                        spi_sdcard_deinit();
+                        wifi_manager_deinit();
+                        gpio_set_level(DEVICES_POWER_PIN, 0);
+                        go_to_deep_sleep();
+                    }
+                } else {
+                    ESP_LOGI(TAG, "Sleep conditions not met (UI active or Web Server running).");
+                }
+                break;
             default:
                 ESP_LOGW(TAG, "Unknown command received: %d", cmd);
                 break;
@@ -610,10 +669,10 @@ void main_task(void *pvParameters)
 
         handle_web_server_fsm();
 
-        handle_sleep_fsm();
+        bool web_server_active = (local_buffer.web_server_status == WEB_SERVER_RUNNING || local_buffer.web_server_status == WEB_SERVER_STARTING);
 
         // Handle Wi-Fi disconnect when web server should be active
-        if (g_sensor_buffer.web_server_status == WEB_SERVER_RUNNING && !wifi_manager_is_connected())
+        if (web_server_active && !wifi_manager_is_connected())
         {
             ESP_LOGW(TAG, "Web server is active but Wi-Fi disconnected. Attempting to reconnect...");
             // Update UI status
@@ -625,17 +684,10 @@ void main_task(void *pvParameters)
             wifi_manager_connect(g_cfg->wifi_ssid, g_cfg->wifi_password);
         }
 
-        // Check if the web server is active
-        bool web_server_active = false;
-        if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)))
-        {
-            web_server_active = (g_sensor_buffer.web_server_status == WEB_SERVER_RUNNING || g_sensor_buffer.web_server_status == WEB_SERVER_STARTING);
-            xSemaphoreGive(g_sensor_buffer_mutex);
-        }
-
         // --- Main Sleep/Wake Logic ---
         // --- Power Saving & UI Inactivity Logic ---
         uint64_t current_time_ms = esp_timer_get_time() / 1000ULL;
+        bool is_ui_suspended = (g_uiRender_task_handle == NULL || eTaskGetState(g_uiRender_task_handle) == eSuspended);
         bool ui_is_inactive = (current_time_ms - last_activity_ms > g_cfg->inactivity_timeout_ms);
 
         // Update the UI suspended state
@@ -644,131 +696,45 @@ void main_task(void *pvParameters)
             is_ui_suspended = (eTaskGetState(g_uiRender_task_handle) == eSuspended);
         }
 
-        // Check if a new data entry has been successfully written to the SD card.
-        time_t current_write_ts = 0;
-        if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)))
+        // --- OLED Power-Off Logic ---
+        // If UI is inactive but the screen is still on, turn it off.
+        if (g_uiRender_task_handle != NULL && ui_is_inactive && !is_ui_suspended && !web_server_active)
         {
-            current_write_ts = g_sensor_buffer.last_successful_write_ts;
-            xSemaphoreGive(g_sensor_buffer_mutex);
+            // UI timeout occurred, but no new write yet. Just turn off the screen.
+            oled_power_off();
         }
+
         // --- USB Connection Logic ---
+        // This block handles the transition between SD card only mode and USB Mass Storage mode.
         bool is_externally_powered = battery_is_externally_powered();
 
         if (is_externally_powered && !is_usb_connected_state)
         {
-            // USB was just connected (or was connected at boot)
+            // USB was just connected (or was connected at boot).
+            // Switch to full USB MSC mode.
             ESP_LOGI(TAG, "USB power detected. Initializing for MSC.");
-            // De-init SD card first to release resources
+            // De-init SD card first to release resources for TinyUSB to use.
             spi_sdcard_deinit();
-            // Now, do a full init which includes TinyUSB
+            // Now, do a full init which includes TinyUSB.
             spi_sdcard_full_init();
             is_usb_connected_state = true;
         }
         else if (!is_externally_powered && is_usb_connected_state)
         {
-            // USB was just disconnected. We keep the TinyUSB stack running
-            // in case it's plugged back in. It will be de-initialized before sleep.
-            ESP_LOGI(TAG, "USB disconnected. TinyUSB stack remains active until sleep.");
+            // USB was just disconnected.
+            ESP_LOGI(TAG, "USB disconnected. Re-initializing SD card for logging.");
+            // De-init everything to be safe.
+            spi_sdcard_deinit();
+            // Re-init in SD-only mode for the datalogger.
+            spi_sdcard_init_sd_only();
             is_usb_connected_state = false;
         }
 
         // If USB is mounted by a host, treat it as continuous activity to prevent sleep.
+        // This is a critical safeguard.
         if (spi_sdcard_is_usb_connected())
         {
             last_activity_ms = current_time_ms;
-
-            // If web server is running while USB is connected, stop it.
-            bool web_server_was_active = false;
-            if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)))
-            {
-                web_server_was_active = (g_sensor_buffer.web_server_status == WEB_SERVER_RUNNING || g_sensor_buffer.web_server_status == WEB_SERVER_STARTING);
-                xSemaphoreGive(g_sensor_buffer_mutex);
-            }
-            if (web_server_was_active)
-            {
-                ESP_LOGI(TAG, "USB connection detected, stopping web server to prevent conflict.");
-                handle_stop_web_server();
-            }
-        }
-
-        // Determine if it's time to sleep. Conditions are:
-        // 1. The UI has been inactive for the timeout period.
-        // 2. EITHER a new data log has occurred OR a self-wakeup timeout has been reached
-        //    (to ensure the device sleeps even if SD card writes are failing).
-        bool can_sleep = false;
-        if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)))
-        {
-            // Conditions to sleep:
-            // 1. A new write has been successfully completed since the last check.
-            // 2. The UI is suspended.
-            if (g_sensor_buffer.last_successful_write_ts > last_processed_write_ts && is_ui_suspended)
-            {
-                can_sleep = true;
-                last_processed_write_ts = g_sensor_buffer.last_successful_write_ts; // Mark this write as processed
-            }
-            xSemaphoreGive(g_sensor_buffer_mutex);
-        }
-
-        // --- Deep Sleep Logic ---
-        // Conditions: UI must be inactive AND suspended, and a new log must have been written.
-        if (can_sleep && !web_server_active)
-        {
-            ESP_LOGI(TAG, "UI inactive and new data log detected. Initiating sleep.");
-    last_processed_write_ts = current_write_ts; // Mark this write as processed
-            // --- Step 1: Prepare UI and Peripherals for Sleep ---
-            // Suspend UI task and power down OLED to save power.
-            oled_power_off(); // This will suspend the task and power down the OLED
-            // Tell the datalogger task to pause writes to the SD card.
-            ESP_LOGI(TAG, "Requesting datalogger to pause...");
-            datalogger_command_t logger_cmd = DATALOGGER_CMD_PAUSE_WRITES;
-            xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
-
-            // 3. Wait for the datalogger to confirm it's paused
-            int datalogger_status = 0;
-            int wait_cycles = 0;
-            // Wait for the datalogger to update its status to PAUSED.
-            do
-            {
-                vTaskDelay(pdMS_TO_TICKS(20));
-                if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)))
-                {
-                    datalogger_status = g_sensor_buffer.datalogger_status;
-                    xSemaphoreGive(g_sensor_buffer_mutex);
-                }
-                wait_cycles++;
-            } while (datalogger_status != DATA_LOGGER_PAUSED && wait_cycles < 120); // Max 3 sec wait
-
-            if (datalogger_status != DATA_LOGGER_PAUSED)
-            {
-                ESP_LOGE(TAG, "Timeout waiting for datalogger to pause. Aborting sleep.");
-                // Reset activity timer and try again later
-                last_activity_ms = esp_timer_get_time() / 1000;
-                // Tell UI to wake up again
-                uiRender_send_event(UI_EVENT_WAKE_UP, NULL, 0);
-                continue;
-            }
-
-            ESP_LOGI(TAG, "Datalogger paused. Preparing to sleep.");
-
-            // De-initialize peripherals that will be powered down.
-            ESP_LOGI(TAG, "De-initializing peripherals before sleep.");
-            spi_sdcard_deinit(); // Inlined from peripherals_deinit
-
-            // Cut power to the main peripheral power rail.
-            ESP_LOGI(TAG, "Powering down external devices.");
-            gpio_set_level(DEVICES_POWER_PIN, 0);
-
-            uint64_t awake_time_ms = (esp_timer_get_time() / 1000ULL) - boot_time_ms;
-            ESP_LOGI(TAG, "Device was awake for %llu ms.", awake_time_ms);
-
-            go_to_deep_sleep();
-        }
-        // --- OLED Power-Off Logic ---
-        // If UI is inactive but the screen is still on, turn it off.
-        else if (g_uiRender_task_handle != NULL && ui_is_inactive && !is_ui_suspended && !web_server_active)
-        {
-            // UI timeout occurred, but no new write yet. Just turn off the screen.
-            oled_power_off();
         }
 
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -885,19 +851,20 @@ void app_main(void)
     {
         // This is a cold boot, not a wakeup from sleep. Initialize RTC variables.
         ESP_LOGI(TAG, "First boot, initializing RTC state.");
-        rtc_last_write_ms = 0; // Ensures first log happens immediately
         rtc_last_write_status = WRITE_STATUS_UNKNOWN;
         rtc_last_successful_write_ts = 0;
         rtc_high_freq_mode_enabled = false; // HF mode is off on cold boot
+        rtc_total_awake_time_s = 0;
     }
+    rtc_last_boot_time_ms = esp_timer_get_time() / 1000;
 
     // Restore the persisted state into the global buffer.
     if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY))
     {
-        g_sensor_buffer.last_write_ms = rtc_last_write_ms;
         g_sensor_buffer.writeStatus = rtc_last_write_status;
         g_sensor_buffer.last_successful_write_ts = rtc_last_successful_write_ts;
         g_sensor_buffer.high_freq_mode_enabled = rtc_high_freq_mode_enabled;
+        // Uptime is calculated dynamically in main_task
         xSemaphoreGive(g_sensor_buffer_mutex);
     }
 
@@ -1057,7 +1024,7 @@ void app_main(void)
     {
         g_uiRender_task_handle = NULL; // Ensure handle is null if task is not created
     }
-    xTaskCreate(datalogger_task, "datalogger", 4096, datalogger_params, 5, NULL); // Pass pointer to heap-allocated struct
+    xTaskCreate(datalogger_task, "datalogger", 4096, datalogger_params, 5, &g_datalogger_task_handle); // Pass pointer to heap-allocated struct
     xTaskCreate(main_task, "main_task", 4096, NULL, 5, NULL);                     // Main command processing task at priority 5
 
     // Signal that all initialization is done

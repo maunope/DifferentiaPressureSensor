@@ -9,8 +9,15 @@
 typedef enum {
     DATALOGGER_CMD_NONE,
     DATALOGGER_CMD_FORCE_REFRESH,
+    /**
+     * @brief Command to request the datalogger task to pause its operations and suspend itself.
+     *
+     * This command-based approach is used instead of forcefully suspending the task from
+     * an external context (e.g., from main_task). It allows the datalogger task to finish
+     * any critical operations (like an SD card write) and suspend itself at a predictable
+     * point in its loop, preventing race conditions, deadlocks, and ensuring data integrity.
+     */
     DATALOGGER_CMD_PAUSE_WRITES,
-    DATALOGGER_CMD_RESUME_WRITES,
     DATALOGGER_CMD_ROTATE_FILE,
 } datalogger_command_t;
 

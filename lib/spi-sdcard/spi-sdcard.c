@@ -111,7 +111,7 @@ void spi_sdcard_full_init()
 
         tinyusb_msc_storage_config_t sd_storage_config = {
             .medium = {
-                .wl_handle = (long)s_card,
+                .card = s_card, // Correctly assign the sdmmc_card_t pointer
             },
         };
         ESP_ERROR_CHECK(tinyusb_msc_new_storage_sdmmc(&sd_storage_config, &s_msc_storage_handle));
@@ -138,22 +138,20 @@ void spi_sdcard_deinit(void)
     if (s_msc_storage_handle)
     {
         tinyusb_msc_delete_storage(s_msc_storage_handle);
-        ESP_LOGI("TAG", "1");
         s_msc_storage_handle = NULL;
     }
     if (s_tinyusb_is_initialized)
     {
         tinyusb_driver_uninstall();
-          ESP_LOGI("TAG", "2");
         s_tinyusb_is_initialized = false;
     }
-    esp_vfs_fat_sdcard_unmount("/sdcard", s_card); // Unmount the filesystem
-      ESP_LOGI("TAG", "3");
-    // De-initialize the SPI bus to ensure it's powered down during deep sleep.
-    
-    spi_bus_free(host.slot);
-      ESP_LOGI("TAG", "4");
-    ESP_LOGI(TAG, "SPI bus freed.");
+
+    // Unmount the filesystem
+    esp_vfs_fat_sdcard_unmount("/sdcard", s_card);
+
+    // The SPI bus is not de-initialized here to allow for faster re-init.
+    // If full power savings were needed, spi_bus_free(host.slot) could be called,
+    // but it can cause instability on wakeup if not handled carefully.
     mounted = false;
     s_card = NULL;
     current_filepath[0] = '\0'; // Reset current file path
@@ -191,20 +189,22 @@ void spi_sdcard_set_csv_header(const char* header) {
  */
 esp_err_t spi_sdcard_write_line(const char *line, bool is_hf_mode)
 {
-    if (spi_sdcard_is_usb_connected())
-    {
-        ESP_LOGI(TAG, "TinyUSB is connected and mounted, cannot write to SD card directly.");
-        return ESP_ERR_INVALID_STATE;
-    }
-
     if (!mounted)
     {
         ESP_LOGE(TAG, "SD card not mounted, cannot write.");
         return ESP_ERR_INVALID_STATE;
     }
 
+    // The application logic (main_task) ensures that this function is not called
+    // when the USB is connected by pausing the datalogger task.
+    if (spi_sdcard_is_usb_connected())
+    {
+        ESP_LOGI(TAG, "TinyUSB is connected and mounted, cannot write to SD card directly.");
+        return ESP_ERR_INVALID_STATE;
+    }
     // --- File Rotation Logic ---
     struct stat st;
+
 
     // If a rotation was explicitly requested, force a new file immediately.
     if (s_force_new_file) {
@@ -272,8 +272,14 @@ esp_err_t spi_sdcard_write_line(const char *line, bool is_hf_mode)
         return ESP_ERR_NOT_FOUND;
     }
 
+    // Write the data to the file stream.
     fprintf(f, "%s\n", line);
+
+    // Flush the C library buffer to the underlying filesystem. This ensures the
+    // data is passed to the FATFS layer.
     fflush(f);
+    // Closing the file ensures that all buffered data and filesystem metadata (like
+    // file size) are physically written to the SD card.
     fclose(f);
     return ESP_OK;
 }
@@ -422,11 +428,12 @@ void spi_sdcard_format(void)
     }
     else
     {
+        // The main_task is responsible for pausing the datalogger before calling this.
         ret = esp_vfs_fat_sdcard_format("/sdcard", s_card);
         if (ret != ESP_OK)
         {
             ESP_LOGE(TAG, "Failed to format SD card: %s", esp_err_to_name(ret));
-            spi_sdcard_full_init(); // Attempt to remount to restore state
+            // We don't try to remount here as the filesystem is in an unknown state.
         }
         else
         {
