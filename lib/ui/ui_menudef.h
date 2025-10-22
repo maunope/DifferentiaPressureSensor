@@ -101,7 +101,7 @@ const ui_menu_page_t ui_menu_tree[] = {
     CONFIRM_MENU_PAGE("Sync RTC w/ NTP?", menu_sync_rtc_ntp_on_btn),       // Page 4
     CONFIRM_MENU_PAGE("Build ts to RTC?", menu_set_time_on_btn),        // Page 5
     CONFIRM_MENU_PAGE("Format SD Card?", menu_format_sd_confirm_on_btn),  // Page 6
-    CONFIRM_MENU_PAGE("Start Web Server?", menu_web_server_on_btn),       // Page 7
+    CONFIRM_MENU_PAGE("Start Server?", menu_web_server_on_btn),       // Page 7
     { // Page 8: High Freq. Mode
         .title = "High Freq. Mode",
         .items = {
