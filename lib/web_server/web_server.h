@@ -2,6 +2,7 @@
 #define WEB_SERVER_H
 
 #include "esp_err.h"
+#include "esp_http_server.h"
 
 /**
  * @brief Starts the web server.

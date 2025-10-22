@@ -18,7 +18,7 @@ This project is a datalogger built on the ESP32-S3 platform using the ESP-IDF fr
     *   Persistent status icons for battery level, charging status, and SD card write errors.
     *   A settings menu to manage the RTC, SD card, view configuration, and display a QR code linking to the project repository.
 *   **NTP Time Sync**: Can synchronize the RTC with an NTP server over Wi-Fi.
-*   **Web Server**: Can strt a web server to allow downloading logged data files directly from a web browser.
+*   **Web Server**: Can start a web server to allow downloading and previewing logged data files directly from a web browser.
 *   **High-Frequency Mode**: An optional mode for more frequent data logging and shorter sleep intervals, useful for capturing more granular data.
 *   **Robust Power Management**: Implements a command-driven deep sleep cycle to conserve battery. The datalogger task explicitly signals when it's safe to sleep, preventing race conditions and ensuring data integrity. The device wakes up on a timer for the next log or via user interaction.
 *   **Power Management**: Implements deep sleep to conserve battery, waking up on a timer or via user interaction (rotary encoder button). The OLED screen also powers down after a period of inactivity.

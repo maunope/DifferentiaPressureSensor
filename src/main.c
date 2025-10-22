@@ -101,44 +101,52 @@ static bool is_usb_connected_state = false;
 static web_server_fsm_state_t s_web_server_state = WEB_SERVER_FSM_IDLE;
 
 // Forward declaration to resolve implicit declaration warning
-static void handle_stop_web_server(void);
+static bool handle_stop_web_server(void);
 
 /**
  * @brief Callback for clockwise rotation from the rotary encoder.
+ * this method is executed in the rotary econder task, hence it makes sense to send a message to main task here
  */
 static void on_encoder_rotate_cw(void)
 {
     uiRender_send_event(UI_EVENT_CW, NULL, 0);
-    uiRender_reset_activity_timer();
+    app_command_t cmd = APP_CMD_ACTIVITY_DETECTED;
+    xQueueSend(g_app_cmd_queue, &cmd, 0);
 }
 
 /**
  * @brief Callback for counter-clockwise rotation from the rotary encoder.
+ * this method is executed in the rotary econder task, hence it makes sense to send a message to main task here
  */
 static void on_encoder_rotate_ccw(void)
 {
 
     uiRender_send_event(UI_EVENT_CCW, NULL, 0);
-    uiRender_reset_activity_timer();
+    app_command_t cmd = APP_CMD_ACTIVITY_DETECTED;
+    xQueueSend(g_app_cmd_queue, &cmd, 0);
 }
 
 /**
  * @brief Callback for button press from the rotary encoder.
+ * this method is executed in the rotary econder task, hence it makes sense to send a message to main task here
  */
 static void on_encoder_button_press(void)
 {
 
     uiRender_send_event(UI_EVENT_BTN, NULL, 0);
-    uiRender_reset_activity_timer();
+    app_command_t cmd = APP_CMD_ACTIVITY_DETECTED;
+    xQueueSend(g_app_cmd_queue, &cmd, 0);
 }
 
 /**
  * @brief Callback for button long press from the rotary encoder.
+ * this method is executed in the rotary econder task, hence it makes sense to send a message to main task here
  */
 static void on_encoder_button_long_press(void)
 {
     uiRender_send_event(UI_EVENT_BTN_LONG, NULL, 0);
-    uiRender_reset_activity_timer();
+    app_command_t cmd = APP_CMD_ACTIVITY_DETECTED;
+    xQueueSend(g_app_cmd_queue, &cmd, 0);
 }
 
 /**
@@ -397,7 +405,7 @@ static void handle_start_web_server(void)
     }
 }
 
-static void handle_stop_web_server(void)
+static bool handle_stop_web_server(void)
 {
     s_web_server_state = WEB_SERVER_FSM_IDLE;
     ESP_LOGI(TAG, "Stopping web server and Wi-Fi.");
@@ -418,6 +426,7 @@ static void handle_stop_web_server(void)
     if (g_datalogger_task_handle != NULL && eTaskGetState(g_datalogger_task_handle) == eSuspended) {
         vTaskResume(g_datalogger_task_handle);
     }
+    return true;
 }
 
 static void handle_web_server_fsm(void)
@@ -597,7 +606,9 @@ void main_task(void *pvParameters)
                 break;
             case APP_CMD_STOP_WEB_SERVER:
                 ESP_LOGI(TAG, "CMD: Stop web server");
-                handle_stop_web_server();
+                if (handle_stop_web_server()) {
+                    local_buffer.web_server_status = WEB_SERVER_STOPPED;
+                }
                 break;
             case APP_CMD_ENABLE_HF_MODE:
                 ESP_LOGI(TAG, "CMD: Enable High-Frequency Mode");
@@ -624,10 +635,14 @@ void main_task(void *pvParameters)
                 }
                 break;
             case APP_CMD_LOG_COMPLETE_SLEEP_NOW:
+                //checks here are partially redundant, I could just use the main loop to check all the "no sleep" conditions and update variables accordingly. 
+                //or I could just raise a flag, "sleep now requested" and have the main loop handle it. but since debugging sleep issues is a pain in the *ss, 
+                // I'll keep the detailed albeit redundant checks and logging here for now. :-P
                 ESP_LOGI(TAG, "CMD: Log complete, checking sleep conditions.");
                 bool web_server_active = (local_buffer.web_server_status == WEB_SERVER_RUNNING || local_buffer.web_server_status == WEB_SERVER_STARTING);
                 uint64_t current_time_ms_for_sleep_check = esp_timer_get_time() / 1000ULL;
-                bool ui_is_inactive = (current_time_ms_for_sleep_check - last_activity_ms > g_cfg->inactivity_timeout_ms);
+                //last_activity_ms== 0 means no command was received since boot
+                bool ui_is_inactive = (current_time_ms_for_sleep_check - last_activity_ms > g_cfg->inactivity_timeout_ms || last_activity_ms == 0);
                 if (ui_is_inactive && !web_server_active) {
                     ESP_LOGI(TAG, "UI is inactive and log is complete. Initiating sleep.");
                     //in case it's already off, this does no harm
@@ -730,6 +745,7 @@ void main_task(void *pvParameters)
             is_usb_connected_state = false;
         }
 
+        //IMPORTANT, this also affect s the handler of SLEEP NOW message
         // If USB is mounted by a host, treat it as continuous activity to prevent sleep.
         // This is a critical safeguard.
         if (spi_sdcard_is_usb_connected())

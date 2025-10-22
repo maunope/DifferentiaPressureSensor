@@ -19,6 +19,9 @@ typedef struct {
     char *scratch;
 } file_server_data_t;
 
+/* Forward declarations */
+static esp_err_t api_preview_handler(httpd_req_t *req);
+
 /* Handler to serve the main index.html page */
 static esp_err_t index_html_handler(httpd_req_t *req) {
     httpd_resp_set_type(req, "text/html");
@@ -36,12 +39,22 @@ static esp_err_t index_html_handler(httpd_req_t *req) {
                 "h1 { color: #bb86fc; border-bottom: 2px solid #373737; padding-bottom: 10px; }"
                 "ul { list-style-type: none; padding: 0; }"
                 "li { background-color: #2c2c2c; margin-bottom: 10px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; }"
-                ".file-info { padding: 12px 15px; }"
+                ".file-info { padding: 12px 15px; flex-grow: 1; }"
                 ".file-info a { text-decoration: none; color: #03dac6; font-weight: 500; font-size: 1.1em; display: block; }"
                 ".file-info a:hover { text-decoration: underline; }"
                 ".file-metadata { font-size: 0.8em; color: #aaa; margin-top: 4px; }"
-                "button.delete-btn { background-color: #cf6679; color: #121212; border: none;  padding: 0 15px; align-self: stretch; cursor: pointer; border-radius: 0 4px 4px 0; font-weight: bold; transition: background-color 0.2s ease-in-out; }"
+                ".actions { display: flex; align-items: stretch; }"
+                "button, .btn { background-color: #373737; color: #e0e0e0; border: none; padding: 12px 15px; cursor: pointer; font-weight: bold; transition: background-color 0.2s ease-in-out; }"
+                "button.preview-btn { background-color: #03dac6; color: #121212; border-radius: 0; }"
+                "button.preview-btn:hover { background-color: #33ffe7; }"
+                "button.delete-btn { background-color: #cf6679; color: #121212; border-radius: 0 4px 4px 0; }"
                 "button.delete-btn:hover { background-color: #ff7991; }"
+                "#preview-container { display: none; margin-top: 20px; background-color: #2c2c2c; padding: 15px; border-radius: 8px; }"
+                "#preview-box { background-color: #121212; border: 1px solid #373737; max-height: 60vh; overflow-y: auto; position: relative; }"
+                "#preview-table { width: 100%; border-collapse: collapse; font-family: monospace; font-size: 0.9em; }"
+                "#preview-table thead { position: sticky; top: 0; background-color: #3a3a3a; }"
+                "#preview-table th, #preview-table td { padding: 6px 8px; border: 1px solid #373737; text-align: left; white-space: nowrap; }"
+                "#preview-buttons { margin-top: 10px; }"
                 "footer { text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #373737; font-size: 0.9em; color: #888; }"
                 "footer a { color: #03dac6; text-decoration: none; }"
                 "footer a:hover { text-decoration: underline; }"
@@ -51,20 +64,72 @@ static esp_err_t index_html_handler(httpd_req_t *req) {
         "<body>"
             "<div class=\"container\">"
                 "<h1>Available Data Files</h1>"
+                "<div id=\"preview-container\">"
+                    "<h2>File Preview</h2>"
+                    "<div id=\"preview-box\">"
+                        "<table id=\"preview-table\">"
+                            "<thead></thead>"
+                            "<tbody></tbody>"
+                        "</table>"
+                    "</div>"
+                    "<div id=\"preview-buttons\">"
+                        "<button onclick=\"scrollToPreview('top')\">Scroll to Top</button>"
+                        "<button onclick=\"scrollToPreview('bottom')\">Scroll to Bottom</button>"
+                        "<button id=\"load-more-btn\">Load More</button>"
+                        "<button id=\"close-preview-btn\">Close</button>"
+                    "</div>"
+                "</div>"
                 "<ul id=\"file-list\"><p id=\"file-list-status\">Loading files...</p></ul>"
                 "<footer>"
-                    "<p><a href=\"" PROJECT_GITHUB_URL "\" target=\"_blank\">DifferentialPressureSensor</a> project on GitHub</p>"
+                    "<p><a href=\"" PROJECT_GITHUB_URL "\" target=\"_blank\">DifferentialPressureSensor Project on GitHub</a></p>"
                 "</footer>"
             "</div>"
             "<script>"
                 "document.addEventListener('DOMContentLoaded', function() {"
+                    "let currentFile = ''; let nextLine = 0; const chunkSize = 50;"
+                    "const previewContainer = document.getElementById('preview-container');"
                     "const fileList = document.getElementById('file-list');"
+                    "const previewBox = document.getElementById('preview-box');"
+                    "const previewTable = document.getElementById('preview-table');"
+                    "const maxRows = 200;"
                     "function formatSize(bytes) {"
                         "if (bytes === 0) return '0 B';"
                         "const k = 1024;"
                         "const sizes = ['B', 'KB', 'MB', 'GB'];"
                         "const i = Math.floor(Math.log(bytes) / Math.log(k));"
-                        "return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];"
+                        "return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];\n"
+                    "};\n"
+                    "window.scrollToPreview = function(position) {"
+                        "if (position === 'top') {"
+                            "previewBox.scrollTop = 0;"
+                        "} else {"
+                            "previewBox.scrollTop = previewBox.scrollHeight;"
+                        "}\n"
+                    "};\n"
+                    "window.previewFile = function(file, start = 0, append = false) {"
+                        "currentFile = file; nextLine = start + chunkSize;"
+                        "fetch(`/api/preview?file=${file}&start=${start}&count=${chunkSize}`)"
+                            ".then(res => res.text())"
+                            ".then(data => {"
+                                "previewContainer.style.display = 'block';"
+                                "const lines = data.trim().split('\\n');"
+                                "const tbody = previewTable.querySelector('tbody');"
+                                "if (!append) {"
+                                    "previewTable.querySelector('thead').innerHTML = `<tr>${lines[0].split(',').map(h => `<th>${h}</th>`).join('')}</tr>`;"
+                                    "tbody.innerHTML = '';"
+                                    "lines.slice(1).forEach(line => addRow(tbody, line));"
+                                "} else {"
+                                    "lines.forEach(line => addRow(tbody, line));"
+                                    "while (tbody.rows.length > maxRows) { tbody.deleteRow(0); }"
+                                "}"
+                                "document.getElementById('load-more-btn').onclick = () => previewFile(currentFile, nextLine, true);"
+                                "document.getElementById('close-preview-btn').onclick = () => { previewContainer.style.display = 'none'; };"
+                            "});\n"
+                    "};\n"
+                    "function addRow(tbody, line) {"
+                        "if (!line) return;"
+                        "const row = tbody.insertRow();"
+                        "line.split(',').forEach(cell => { row.insertCell().textContent = cell; });"
                     "}"
                     "function loadFiles() {"
                         "fileList.innerHTML = '<p id=\"file-list-status\">Loading files...</p>';"
@@ -81,6 +146,12 @@ static esp_err_t index_html_handler(httpd_req_t *req) {
                                         "a.href = '/download?file=' + encodeURIComponent(file.name);"
                                         "a.textContent = file.name;"
                                         "const meta = document.createElement('div');"
+                                        "const actionsDiv = document.createElement('div');"
+                                        "actionsDiv.className = 'actions';"
+                                        "const previewBtn = document.createElement('button');"
+                                        "previewBtn.textContent = 'Preview';"
+                                        "previewBtn.className = 'preview-btn';"
+                                        "previewBtn.onclick = () => previewFile(file.name);"
                                         "meta.className = 'file-metadata';"
                                         "const date = new Date(file.mtime * 1000).toLocaleString();"
                                         "meta.textContent = formatSize(file.size) + ' - ' + date;"
@@ -101,8 +172,10 @@ static esp_err_t index_html_handler(httpd_req_t *req) {
                                         "};"
                                         "infoDiv.appendChild(a);"
                                         "infoDiv.appendChild(meta);"
+                                        "actionsDiv.appendChild(previewBtn);"
+                                        "actionsDiv.appendChild(deleteBtn);"
                                         "li.appendChild(infoDiv);"
-                                        "li.appendChild(deleteBtn);"
+                                        "li.appendChild(actionsDiv);"
                                         "fileList.appendChild(li);"
                                     "});"
                                 "} else {"
@@ -116,8 +189,13 @@ static esp_err_t index_html_handler(httpd_req_t *req) {
                                 "console.error('Error fetching file list:', error);"
                                 "alert('Failed to load file list. The web server may have been turned off or disconnected from Wi-Fi.');"
                                 "fileList.innerHTML = '<p>Error loading file list. Please refresh the page.</p>';"
-                            "});"
+                            "});\n"
                     "}"
+                    "previewBox.addEventListener('scroll', () => {"
+                        "if (previewBox.scrollTop + previewBox.clientHeight >= previewBox.scrollHeight - 50) {"
+                           "document.getElementById('load-more-btn').click();"
+                        "}\n"
+                    "});\n"
                     "loadFiles();"
                 "});"
             "</script>"
@@ -139,7 +217,7 @@ static esp_err_t api_files_handler(httpd_req_t *req) {
     // Start building the JSON response
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send_chunk(req, "{\"files\":[", 10);
-
+    
     bool first_entry = true;
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
@@ -151,7 +229,7 @@ static esp_err_t api_files_handler(httpd_req_t *req) {
             if (stat(full_path, &st) != 0) {
                 continue; // Skip if we can't get file stats
             }
-
+            
             if (!first_entry) {
                 httpd_resp_send_chunk(req, ",", 1);
             }
@@ -284,6 +362,68 @@ static esp_err_t download_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
+static esp_err_t api_preview_handler(httpd_req_t *req)
+{
+    char filepath[FILE_PATH_MAX];
+    char filename[64] = {0};
+    int start_line = 0;
+    int line_count = 100; // Default line count
+
+    // Get the length of the query string
+    size_t query_len = httpd_req_get_url_query_len(req) + 1;
+    if (query_len > 1) {
+        char* query_buf = malloc(query_len);
+        if (httpd_req_get_url_query_str(req, query_buf, query_len) == ESP_OK) {
+            char param[64];
+            if (httpd_query_key_value(query_buf, "file", param, sizeof(param)) == ESP_OK) {
+                strncpy(filename, param, sizeof(filename) - 1);
+            }
+            if (httpd_query_key_value(query_buf, "start", param, sizeof(param)) == ESP_OK) {
+                start_line = atoi(param);
+            }
+            if (httpd_query_key_value(query_buf, "count", param, sizeof(param)) == ESP_OK) {
+                line_count = atoi(param);
+            }
+        }
+        free(query_buf);
+    }
+
+    if (strlen(filename) == 0) {
+        httpd_resp_send_404(req);
+        return ESP_FAIL;
+    }
+
+    snprintf(filepath, sizeof(filepath), "/sdcard/%s", filename);
+    FILE *f = fopen(filepath, "r");
+    if (f == NULL) {
+        httpd_resp_send_404(req);
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "text/plain");
+
+    char line[256];
+    int current_line = 0;
+
+    // Skip to start_line. If it's the first chunk, the header is line 0.
+    // For subsequent chunks, we don't need to re-read the header.
+    if (start_line > 0) {
+        while (current_line < start_line && fgets(line, sizeof(line), f) != NULL) {
+            current_line++;
+        }
+    }
+    // Send lines
+    int lines_sent = 0;
+    while (fgets(line, sizeof(line), f) != NULL && lines_sent < line_count) {
+        httpd_resp_send_chunk(req, line, strlen(line));
+        lines_sent++;
+    }
+
+    fclose(f);
+    httpd_resp_send_chunk(req, NULL, 0); // Finalize response
+    return ESP_OK;
+}
+
 esp_err_t start_web_server(void) {
     if (server) {
         ESP_LOGI(TAG, "Web server already running");
@@ -338,6 +478,14 @@ esp_err_t start_web_server(void) {
         .user_ctx  = server_data
     };
     httpd_register_uri_handler(server, &api_delete_uri);
+
+    httpd_uri_t api_preview_uri = {
+        .uri       = "/api/preview",
+        .method    = HTTP_GET,
+        .handler   = api_preview_handler,
+        .user_ctx  = server_data
+    };
+    httpd_register_uri_handler(server, &api_preview_uri);
 
     httpd_uri_t download_uri = {
         .uri       = "/download",

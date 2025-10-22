@@ -790,17 +790,13 @@ static void enter_cmd_pending_mode(uint32_t timeout_ms, post_cmd_action_t post_a
     }
 }
 
-void uiRender_reset_activity_timer(void)
-{
-    app_command_t cmd = APP_CMD_ACTIVITY_DETECTED;
-    xQueueSend(g_app_cmd_queue, &cmd, 0);
-}
+
 
 // --- UI task ---
 void uiRender_task(void *pvParameters)
 {
     ui_event_queue = xQueueCreate(UI_QUEUE_LEN, sizeof(ui_event_msg_t));
-    uiRender_reset_activity_timer();
+   
 
     uint64_t last_sensor_refresh_ms = 0;
     const uint32_t sensor_refresh_interval_ms = 5000; // 5 seconds

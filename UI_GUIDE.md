@@ -147,7 +147,7 @@ High Frequency polling sunmenu allows to enable/disable high frequency polling, 
 
 ### Web Server page
 
-Selecting "Web Server" from the Main Menu and confirming will display a QR code. Scan this with your phone to visit the data file download page, scroll the rotary encoder to access the plain text URL
+When you start the web server from the menu, the device will connect to your Wi-Fi and display a QR code and a URL on the OLED screen. You can scan the QR code or enter the URL into a web browser on a device connected to the same network.
 
 ```
 +--------------------+
@@ -159,6 +159,10 @@ Selecting "Web Server" from the Main Menu and confirming will display a QR code.
 |                    |
 +--------------------+
 ```
+
+*   **Download**: Click the "Download" button to save a CSV file to your device.
+*   **Delete**: Click the "Delete" button to permanently remove a file from the SD card.
+*   **Preview**: Click the "Preview" button to view the contents of a CSV file directly in your browser. This feature loads the file in chunks, making it fast and mobile-friendly. It includes a "sticky" header so you always see the column titles, and "Load More" / "Load All" buttons for viewing large files.
 
 
 ### Options Menu

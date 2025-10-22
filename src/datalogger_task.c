@@ -15,9 +15,7 @@
 #include "../lib/spi-sdcard/spi-sdcard.h"
 #include "../lib/ui/time_utils.h"
 
-
 static const char *TAG = "DataloggerTask";
-
 
 /**
  * @brief Reads all relevant sensors and updates the global sensor buffer.
@@ -43,23 +41,29 @@ static void update_sensor_buffer(bmp280_t *bmp280_dev, d6fph_t *d6fph_dev)
 
         // Use forced mode to ensure sensor is correctly configured for each read.
         // This is more robust, especially after waking from deep sleep.
-        if (bmp280_force_read(bmp280_dev, &temperature_c, &pressure_pa) != ESP_OK) {
-          //  ESP_LOGE(TAG, "BMP280 force read failed.");
+        if (bmp280_force_read(bmp280_dev, &temperature_c, &pressure_pa) != ESP_OK)
+        {
+            //  ESP_LOGE(TAG, "BMP280 force read failed.");
             temperature_c = NAN;
             pressure_pa = 0;
         }
 
         if (d6fph_dev && d6fph_dev->is_initialized)
         {
-            for (int retries = 0; retries < MAX_I2C_RETRIES; retries++) {
+            for (int retries = 0; retries < MAX_I2C_RETRIES; retries++)
+            {
                 d6fph_err = d6fph_read_pressure(d6fph_dev, &diff_pressure_pa);
-                if (d6fph_err == ESP_OK) break; // Success, exit retry loop
+                if (d6fph_err == ESP_OK)
+                    break; // Success, exit retry loop
                 vTaskDelay(pdMS_TO_TICKS(RETRY_DELAY_MS));
             }
-            if (d6fph_err != ESP_OK) {
+            if (d6fph_err != ESP_OK)
+            {
                 ESP_LOGE(TAG, "D6F-PH read failed after %d attempts.", MAX_I2C_RETRIES);
             }
-        } else { // d6fph_dev is not initialized
+        }
+        else
+        { // d6fph_dev is not initialized
             diff_pressure_pa = NAN;
         }
 
@@ -92,7 +96,7 @@ void datalogger_task(void *pvParameters)
 {
     // The BMP280 device handle is passed as the task parameter.
     datalogger_task_params_t *params = (datalogger_task_params_t *)pvParameters;
-    bmp280_t *bmp280_dev = params->bmp280_dev;    
+    bmp280_t *bmp280_dev = params->bmp280_dev;
     const uint32_t LOG_INTERVAL_MS_NORMAL = params->log_interval_ms;
     const uint32_t LOG_INTERVAL_MS_HF = params->hf_log_interval_ms;
     ESP_LOGI(TAG, "Datalogger task started with intervals: Normal=%lu ms, HF=%lu ms", (unsigned long)LOG_INTERVAL_MS_NORMAL, (unsigned long)LOG_INTERVAL_MS_HF);
@@ -171,32 +175,61 @@ void datalogger_task(void *pvParameters)
             }
         }
 
-
         time_t current_ts = time(NULL);
-        time_t last_write_ts = 0;
+
         bool hf_mode_active = false;
 
+        time_t last_write_ts = 0;
+        uint32_t current_log_interval = LOG_INTERVAL_MS_NORMAL;
         // Get the last write time from the shared buffer
-        if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50))) {
-            last_write_ts = g_sensor_buffer.last_successful_write_ts;
+        if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)))
+        {
             hf_mode_active = g_sensor_buffer.high_freq_mode_enabled;
+            current_log_interval = hf_mode_active ? LOG_INTERVAL_MS_HF : LOG_INTERVAL_MS_NORMAL;
+            // fake write time if actual is 0 (no write  made since boot) to avoid issues on first iteration (if it is 0, it will trigger immediately)
+            // does no harm to "last write display" on UI because it wont' go to shared buffer until after first write,
+            // kind of sucks, but that's that
+            if (g_sensor_buffer.last_successful_write_ts == 0)
+            {
+                // This is the first check after boot.
+                // If the device has been awake for less than a log interval,
+                // pretend the last write just happened to prevent an immediate log.
+                if ((esp_timer_get_time() / 1000) < current_log_interval)
+                {
+                    last_write_ts = current_ts;
+                }
+                else
+                {
+                    // Device has been awake longer than an interval, so allow the write.
+                    last_write_ts = 0;
+                }
+            }
+            else
+            {
+                last_write_ts = g_sensor_buffer.last_successful_write_ts;
+            }
+
             xSemaphoreGive(g_sensor_buffer_mutex);
         }
 
-        uint32_t current_log_interval = hf_mode_active ? LOG_INTERVAL_MS_HF : LOG_INTERVAL_MS_NORMAL;
         // Check if enough time (in seconds) has passed for the next log.
+        // ESP_LOGI(TAG, "Current TS: %lld, Last Write TS: %lld, Interval: %lu ms", (long long)current_ts, (long long)last_write_ts, (unsigned long)current_log_interval);
         if ((current_ts - last_write_ts) * 1000 >= current_log_interval)
         {
+            //  ESP_LOGI(TAG, "Scheduled log interval reached. Logging data.");
             // It's time for a scheduled log. This takes priority.
             // Update sensors and write to SD card.
             update_sensor_buffer(bmp280_dev, params->d6fph_dev);
 
             // Create a local copy of the buffer for logging and writing to SD
             sensor_buffer_t local_buffer;
-            if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+            if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(100)) == pdTRUE)
+            {
                 local_buffer = g_sensor_buffer;
                 xSemaphoreGive(g_sensor_buffer_mutex); // Release mutex immediately after copy
-            } else {
+            }
+            else
+            {
                 ESP_LOGE(TAG, "Failed to get sensor buffer for logging.");
                 continue; // Skip this logging cycle
             }
@@ -208,8 +241,8 @@ void datalogger_task(void *pvParameters)
             strftime(local_time_str, sizeof(local_time_str), "%Y-%m-%d %H:%M:%S %Z", &local_tm);
 
             // Log to console
-            ESP_LOGI(TAG, "TS: %s, Temp: %.2fC, Press: %ldPa, Diff: %.2fPa Batt: %d%% (%.2fV), Charging: %d, WriteSD: %d", local_time_str, local_buffer.temperature_c, local_buffer.pressure_pa,local_buffer.diff_pressure_pa,local_buffer.battery_percentage, local_buffer.battery_voltage, local_buffer.battery_externally_powered, local_buffer.writeStatus);
-            
+            ESP_LOGI(TAG, "TS: %s, Temp: %.2fC, Press: %ldPa, Diff: %.2fPa Batt: %d%% (%.2fV), Charging: %d, WriteSD: %d", local_time_str, local_buffer.temperature_c, local_buffer.pressure_pa, local_buffer.diff_pressure_pa, local_buffer.battery_percentage, local_buffer.battery_voltage, local_buffer.battery_externally_powered, local_buffer.writeStatus);
+
             // Format the data into a CSV string
             char csv_line[200];
             snprintf(csv_line, sizeof(csv_line), "%lld,%s,%.2f,%ld,%.2f,%.2f,%d,%llu",
@@ -225,9 +258,11 @@ void datalogger_task(void *pvParameters)
             // Write the formatted string to the SD card
             esp_err_t write_err;
             const int MAX_SD_RETRIES = 3;
-            for (int i = 0; i < MAX_SD_RETRIES; i++) {
+            for (int i = 0; i < MAX_SD_RETRIES; i++)
+            {
                 write_err = spi_sdcard_write_line(csv_line, hf_mode_active);
-                if (write_err == ESP_OK) {
+                if (write_err == ESP_OK)
+                {
                     break; // Success
                 }
                 ESP_LOGE(TAG, "Failed to write to SD card (attempt %d/%d). Retrying...", i + 1, MAX_SD_RETRIES);
@@ -235,24 +270,29 @@ void datalogger_task(void *pvParameters)
             }
 
             // Update the shared buffer with the final status and timestamps
-            if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-                if (write_err == ESP_OK) {
+            if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(100)) == pdTRUE)
+            {
+                if (write_err == ESP_OK)
+                {
                     g_sensor_buffer.writeStatus = WRITE_STATUS_OK;
                     g_sensor_buffer.last_successful_write_ts = current_ts; // Mark successful write with current timestamp
                     ESP_LOGI(TAG, "Successfully wrote to SD card.");
-                } else {
+                }
+                else
+                {
                     g_sensor_buffer.writeStatus = WRITE_STATUS_FAIL;
                     ESP_LOGE(TAG, "Failed to write to SD card after all retries.");
                 }
-
-                // If the write was successful, signal to the main task that it's safe to sleep.
-                if (write_err == ESP_OK) {
-                    if (g_app_cmd_queue != NULL) {
-                        app_command_t sleep_cmd = APP_CMD_LOG_COMPLETE_SLEEP_NOW;
-                        xQueueSend(g_app_cmd_queue, &sleep_cmd, 0);
-                    }
-                }
                 xSemaphoreGive(g_sensor_buffer_mutex);
+            }
+            // If the write was successful, signal to the main task that it's safe to sleep.
+            if (write_err == ESP_OK)
+            {
+                if (g_app_cmd_queue != NULL)
+                {
+                    app_command_t sleep_cmd = APP_CMD_LOG_COMPLETE_SLEEP_NOW;
+                    xQueueSend(g_app_cmd_queue, &sleep_cmd, 0);
+                }
             }
         }
         else if (refresh_requested)
