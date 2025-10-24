@@ -32,7 +32,7 @@ static bool mounted = false;
 static sdmmc_card_t *s_card = NULL;
 static tinyusb_msc_storage_handle_t s_msc_storage_handle = NULL;
 static char current_filepath[264] = "";        // 8 for "/sdcard/" + 255 for d_name + 1 for null
-#define MAX_FILE_SIZE_BYTES (10 * 1024 * 1024) // 10 MB
+#define MAX_FILE_SIZE_BYTES (5 * 1024 * 1024) // 5 MB
 static char s_csv_header[200] = ""; // Buffer to store the CSV header
 
 static bool s_force_new_file = false; // Flag to force creation of a new file

@@ -215,6 +215,7 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "const cells = line.split(',');"
         "row.dataset.line = (chunkStartLine + i).toString();"
         "for (var j = 0; j < cells.length; j++) {"
+        "if (j === 0) { row.dataset.timestamp = cells[j]; }"
         "const td = document.createElement('td');"
         "td.textContent = cells[j];"
         "row.appendChild(td);"
@@ -344,7 +345,7 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "window.navigateTime = function(offset) {"
         "const firstVisibleRow = tbody.rows[0];"
         "if (!firstVisibleRow) return;"
-        "const currentTimestamp = parseInt(firstVisibleRow.dataset.line, 10);"
+        "const currentTimestamp = parseInt(firstVisibleRow.dataset.timestamp, 10);"
         "const targetTimestamp = currentTimestamp + offset;"
         "window.fetchChunk(currentFile, null, chunkSize, targetTimestamp, function(response) {"
         "if (!response.isCsv) return;"
@@ -370,7 +371,7 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "window.fetchChunk(currentFile, nextStart, chunkSize, null, function(r) { if(r.isCsv){renderRows(r.data.lines, r.data.start_line, false);} });"
         "}"
         "});"
-        "loadFiles();"   
+        "loadFiles();"
         "});"
         "</script>"
         "</body>"
@@ -655,29 +656,76 @@ static int count_lines(FILE *f)
 
 /**
  * @brief Finds the line number (0-indexed after header) corresponding to or after a target timestamp.
- * Assumes the first column of each line is a UNIX timestamp.
+ * Assumes the first column of each line is a UNIX timestamp. uses binary search for efficiency.
  * @param f The file pointer (should be positioned after the header).
  * @param target_timestamp The UNIX timestamp to search for.
  * @return The 0-indexed line number relative to the start of data, or -1 if not found.
  */
-static int find_line_by_timestamp(FILE *f, time_t target_timestamp)
+static int find_line_by_timestamp(FILE *f, time_t target_timestamp, long header_offset)
 {
     char line_buf[256];
-    long initial_pos = ftell(f);
-    int line_idx = 0;
 
-    while (fgets(line_buf, sizeof(line_buf), f) != NULL)
+    // Get file size for binary search
+    fseek(f, 0, SEEK_END);
+    long file_size = ftell(f);
+
+    long low = header_offset;
+    long high = file_size;
+    long best_pos = header_offset;
+
+    // Binary search on file offsets
+    while (low < high)
     {
-        time_t line_timestamp = atol(line_buf); // Assuming first column is UNIX timestamp
-        if (line_timestamp >= target_timestamp)
+        long mid = low + (high - low) / 2;
+        if (mid <= header_offset) { // Ensure we don't search in the header
+            low = mid + 1;
+            continue;
+        }
+        fseek(f, mid, SEEK_SET);
+
+        // Align to the start of the next line to avoid reading partial lines
+        if (fgets(line_buf, sizeof(line_buf), f) == NULL) {
+            high = mid; // EOF, search lower half
+            continue;
+        }
+
+        long current_pos = ftell(f);
+        if (current_pos >= file_size || fgets(line_buf, sizeof(line_buf), f) == NULL)
         {
-            fseek(f, initial_pos, SEEK_SET); // Rewind to after header
-            skip_lines(f, line_idx);         // Seek to the found line
-            return line_idx;
+            high = mid; // EOF, search lower half
+            continue;
+        }
+
+        time_t line_timestamp = atoll(line_buf);
+
+        if (line_timestamp < target_timestamp)
+        {
+            low = current_pos;
+            best_pos = current_pos;
+        }
+        else
+        {
+            high = mid;
+        }
+    }
+
+    // Now, linear scan from the best position found
+    fseek(f, best_pos, SEEK_SET);
+    int line_idx = 0;
+    // First, count lines up to best_pos
+    fseek(f, header_offset, SEEK_SET);
+    while(ftell(f) < best_pos && fgets(line_buf, sizeof(line_buf), f) != NULL) {
+        line_idx++;
+    }
+
+    while (fgets(line_buf, sizeof(line_buf), f) != NULL) {
+        if (atoll(line_buf) > target_timestamp) {
+            return (line_idx > 0) ? (line_idx - 1) : 0;
         }
         line_idx++;
     }
-    return -1; // Timestamp not found
+
+    return line_idx > 0 ? line_idx - 1 : 0; // Return last line if target is > all timestamps
 }
 
 /**
@@ -735,7 +783,8 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
             }
             if (httpd_query_key_value(query_buf, "timestamp", param, sizeof(param)) == ESP_OK)
             {
-                requested_timestamp = atol(param);
+                // ESP_LOGI(TAG, "Preview request with timestamp: %s", param);
+                requested_timestamp = atoll(param);
             }
         }
         free(query_buf);
@@ -819,18 +868,24 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
 
     // --- Proceed with JSON CSV Preview ---
     int actual_start_line_idx = 0;
-
+    // ESP_LOGI(TAG, "Preparing CSV preview for file");
     if (requested_timestamp != 0)
     {
-        // Search by timestamp takes precedence
-        int found_line_idx = find_line_by_timestamp(f, requested_timestamp);
+        long header_end_pos = ftell(f); // Position after reading header
+        // ESP_LOGI(TAG, "Searching for timestamp %lld in file ", requested_timestamp);
+        //  Search by timestamp takes precedence
+        int found_line_idx = find_line_by_timestamp(f, requested_timestamp, header_end_pos);
         if (found_line_idx != -1)
         {
+            ESP_LOGI(TAG, "Found timestamp at or before line index %d", found_line_idx);
+            fseek(f, 0, SEEK_SET); // Rewind to start of file
+            skip_lines(f, 1 + found_line_idx); // Skip header + lines to get to the target
             actual_start_line_idx = found_line_idx;
         }
         else
         {
-            // If timestamp not found, default to start of file
+            // If timesta
+            // ESP_LOGI(TAG, "Timesta p not found, default to start of file");
             fseek(f, 0, SEEK_SET);
             skip_lines(f, 1); // Skip header
             actual_start_line_idx = 0;
@@ -838,8 +893,7 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
     }
     else if (requested_start_line == -1)
     {
-        // Request for end of file
-        int total_lines = count_lines(f) - 1; // Subtract header line
+        int total_lines = count_lines(f) - 1; // Subtract header line, f is already past header
         actual_start_line_idx = (total_lines > line_count) ? (total_lines - line_count) : 0;
         fseek(f, 0, SEEK_SET);
         skip_lines(f, 1 + actual_start_line_idx); // Skip header + lines
@@ -851,7 +905,6 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
         skip_lines(f, 1 + requested_start_line); // Skip header + lines
         actual_start_line_idx = requested_start_line;
     }
-
     httpd_resp_set_type(req, "application/json");
     char json_start[512];
     snprintf(json_start, sizeof(json_start), "{\"header\":\"%s\",\"start_line\":%d,\"lines\":[", header_line, actual_start_line_idx);
