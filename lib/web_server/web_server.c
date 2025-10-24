@@ -12,6 +12,8 @@
 #include <ctype.h> // For isspace
 #include <regex.h> // For regular expressions
 #include <stdlib.h>
+#include <math.h> // For isnan()
+#include "../ui/time_utils.h"
 
 static const char *TAG = "web_server";
 static httpd_handle_t server = NULL;
@@ -28,6 +30,7 @@ typedef struct
 
 /* Forward declarations */
 static esp_err_t api_preview_handler(httpd_req_t *req);
+static esp_err_t api_sensordata_handler(httpd_req_t *req);
 
 /**
  * @brief Trims leading and trailing whitespace from a string.
@@ -118,6 +121,10 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "h1 { color: #bb86fc; border-bottom: 2px solid #373737; padding-bottom: 10px; }"
         "ul { list-style-type: none; padding: 0; }"
         "li { background-color: #2c2c2c; margin-bottom: 10px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; }"
+        ".sensor-panel { background-color: #2c2c2c; margin-bottom: 20px; padding: 15px; border-radius: 8px; }"
+        ".sensor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }"
+        ".sensor-item { background-color: #373737; padding: 10px; border-radius: 4px; }"
+        ".sensor-item h3 { margin-top: 0; font-size: 0.9em; color: #aaa; text-transform: uppercase; }"
         ".file-info { padding: 12px 15px; flex-grow: 1; min-width: 0; }"
         ".file-info a { text-decoration: none; color: #03dac6; font-weight: 500; font-size: 1.1em; display: block; word-break: break-all; }"
         ".file-info a:hover { text-decoration: underline; }"
@@ -141,6 +148,16 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "</style>"
         "</head>"
         "<body>"
+        "<div class=\"container\">"
+        "<h1>Live Sensor Data</h1>"
+        "<div class=\"sensor-panel\">"
+        "<div class=\"sensor-grid\">"
+        "<div class=\"sensor-item\"><h3>Timestamp</h3><p id=\"sensor-timestamp\">-</p></div>"
+        "<div class=\"sensor-item\"><h3>Temperature</h3><p id=\"sensor-temp\">-</p></div>"
+        "<div class=\"sensor-item\"><h3>Pressure</h3><p id=\"sensor-press\">-</p></div>"
+        "<div class=\"sensor-item\"><h3>Diff. Pressure</h3><p id=\"sensor-diff-press\">-</p></div>"
+        "<div class=\"sensor-item\"><h3>Battery</h3><p id=\"sensor-batt\">-</p></div>"
+        "</div></div>"
         "<div class=\"container\">"
         "<h1>Available Data Files</h1>"
         "<div id=\"preview-container\" style=\"display: none;\">"
@@ -174,6 +191,22 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "const previewContainer = document.getElementById('preview-container');"
         "const fileList = document.getElementById('file-list');"
         "const previewBox = document.getElementById('preview-box');"
+        "function updateSensorData() {"
+        "    fetch('/api/sensordata').then(r => r.json()).then(data => {"
+        "        document.getElementById('sensor-timestamp').textContent = data.datetime_local || 'N/A';"
+        "        document.getElementById('sensor-temp').textContent = data.temperature_c !== null ? data.temperature_c.toFixed(2) + ' C' : 'N/A';"
+        "        document.getElementById('sensor-press').textContent = data.pressure_pa !== 0 ? data.pressure_pa + ' Pa' : 'N/A';"
+        "        document.getElementById('sensor-diff-press').textContent = data.diff_pressure_pa !== null ? data.diff_pressure_pa.toFixed(2) + ' Pa' : 'N/A';"
+        "        let batt_str = 'N/A';"
+        "        if (data.battery_voltage !== null) {"
+        "           batt_str = `${data.battery_voltage.toFixed(2)}V ${data.battery_percentage}%`;"
+        "           if (data.battery_externally_powered) { batt_str += ' (Charging)'; }"
+        "        }"
+        "        document.getElementById('sensor-batt').textContent = batt_str;"
+        "    }).catch(err => console.error('Error fetching sensor data:', err));"
+        "}"
+        "updateSensorData();"
+        "setInterval(updateSensorData, 5000);"
         "const loadingIndicator = document.getElementById('loading-indicator');"
         "const previewTable = document.getElementById('preview-table');"
         "const tbody = previewTable.querySelector('tbody');"
@@ -964,6 +997,67 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+/**
+ * @brief HTTP GET handler for the `/api/sensordata` endpoint.
+ *
+ * Triggers a sensor data refresh and returns the latest data from the
+ * global buffer as a JSON object.
+ * @param req The HTTP request.
+ * @return ESP_OK on success.
+ */
+static esp_err_t api_sensordata_handler(httpd_req_t *req)
+{
+    // 1. Request a data refresh from the datalogger task
+    if (g_datalogger_cmd_queue != NULL)
+    {
+        datalogger_command_t logger_cmd = DATALOGGER_CMD_FORCE_REFRESH;
+        xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
+    }
+
+    // 2. Give a moment for the refresh to potentially happen.
+    // The datalogger task itself throttles requests, so this is safe.
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    // 3. Read the latest data from the shared buffer
+    sensor_buffer_t data;
+    if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(100)))
+    {
+        data = g_sensor_buffer;
+        xSemaphoreGive(g_sensor_buffer_mutex);
+    }
+    else
+    {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    // 4. Format and send the JSON response
+    httpd_resp_set_type(req, "application/json");
+    char json_buffer[512];
+    char local_time_str[32];
+    struct tm local_tm;
+    convert_gmt_to_cet(data.timestamp, &local_tm);
+    strftime(local_time_str, sizeof(local_time_str), "%Y-%m-%d %H:%M:%S", &local_tm);
+
+    // Handle potential NaN values by printing "null" for JSON compatibility.
+    char temp_str[16], diff_press_str[16], batt_volt_str[16];
+    snprintf(temp_str, sizeof(temp_str), isnan(data.temperature_c) ? "null" : "%.2f", data.temperature_c);
+    snprintf(diff_press_str, sizeof(diff_press_str), isnan(data.diff_pressure_pa) ? "null" : "%.2f", data.diff_pressure_pa);
+    snprintf(batt_volt_str, sizeof(batt_volt_str), isnan(data.battery_voltage) ? "null" : "%.2f", data.battery_voltage);
+
+    snprintf(json_buffer, sizeof(json_buffer),
+             "{\"timestamp\":%lld,\"datetime_local\":\"%s\",\"temperature_c\":%s,\"pressure_pa\":%ld,\"diff_pressure_pa\":%s,\"battery_voltage\":%s,\"battery_percentage\":%d,\"battery_externally_powered\":%s}",
+             (long long)data.timestamp,
+             local_time_str,
+             temp_str,
+             data.pressure_pa,
+             diff_press_str,
+             batt_volt_str,
+             data.battery_percentage,
+             data.battery_externally_powered ? "true" : "false");
+    return httpd_resp_send(req, json_buffer, HTTPD_RESP_USE_STRLEN);
+}
+
 esp_err_t start_web_server(void)
 {
     if (server)
@@ -1034,6 +1128,13 @@ esp_err_t start_web_server(void)
         .handler = api_file_delete_handler,
         .user_ctx = server_data};
     httpd_register_uri_handler(server, &api_delete_uri);
+
+    httpd_uri_t api_sensordata_uri = {
+        .uri = "/api/sensordata",
+        .method = HTTP_GET,
+        .handler = api_sensordata_handler,
+        .user_ctx = server_data};
+    httpd_register_uri_handler(server, &api_sensordata_uri);
 
     httpd_uri_t api_preview_uri = {
         .uri = "/api/preview",

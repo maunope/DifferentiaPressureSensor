@@ -125,8 +125,8 @@ void datalogger_task(void *pvParameters)
 
     // Perform an initial sensor update right after startup.
     update_sensor_buffer(params);
-
-    bool refresh_requested = false;
+    // Track the last refresh time to avoid polling sensors too frequently.
+    static uint64_t last_refresh_time_ms = 0;
 
     while (1)
     {
@@ -139,7 +139,17 @@ void datalogger_task(void *pvParameters)
             {
                 // UI requested a refresh. Just update the buffer, don't write to SD.
                 ESP_LOGD(TAG, "UI refresh requested.");
-                refresh_requested = true;
+                uint64_t now = esp_timer_get_time() / 1000;
+                if (now - last_refresh_time_ms > 2000)
+                {
+                    update_sensor_buffer(params);
+                    last_refresh_time_ms = now;
+                }
+                else
+                {
+                    ESP_LOGD(TAG, "Skipping sensor refresh, too recent.");
+                }
+                // No need to set refresh_requested as we handle it immediately
             }
             else if (cmd == DATALOGGER_CMD_PAUSE_WRITES)
             {
@@ -257,6 +267,7 @@ void datalogger_task(void *pvParameters)
             // It's time for a scheduled log. This takes priority.
             // Update sensors and write to SD card.
             update_sensor_buffer(params);
+            last_refresh_time_ms = esp_timer_get_time() / 1000;
 
             // Create a local copy of the buffer for logging and writing to SD
             sensor_buffer_t local_buffer;
@@ -285,10 +296,10 @@ void datalogger_task(void *pvParameters)
             snprintf(csv_line, sizeof(csv_line), "%lld,%s,%.2f,%ld,%.2f,%.2f,%d,%llu",
                      (long long)local_buffer.timestamp,
                      local_time_str,
-                     isnan(local_buffer.temperature_c) ? 0.0f : local_buffer.temperature_c,
+                     local_buffer.temperature_c, // snprintf handles nan
                      local_buffer.pressure_pa, // Already long, 0 is invalid
-                     isnan(local_buffer.diff_pressure_pa) ? 0.0f : local_buffer.diff_pressure_pa,
-                     local_buffer.battery_voltage,
+                     local_buffer.diff_pressure_pa, // snprintf handles nan
+                     local_buffer.battery_voltage, // snprintf handles nan
                      local_buffer.battery_percentage,
                      local_buffer.uptime_seconds);
 
@@ -331,13 +342,6 @@ void datalogger_task(void *pvParameters)
                     xQueueSend(g_app_cmd_queue, &sleep_cmd, 0);
                 }
             }
-        }
-        else if (refresh_requested)
-        {
-            // A UI refresh was requested and a timed log is not due.
-            // Just update the sensor buffer without writing to SD.
-            update_sensor_buffer(params);
-            refresh_requested = false; // Reset the flag
         }
 
         // This is the main delay for the task loop.
