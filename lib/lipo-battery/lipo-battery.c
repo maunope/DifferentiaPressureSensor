@@ -27,13 +27,23 @@ static float s_voltage_divider_ratio = 2.0f; // Default to a 1:1 divider (ratio 
 // This is a simplified table. For higher accuracy, you might need a more detailed curve.
 static const int s_voltage_map[][2] = {
     {4200, 100}, // 4.20V
+    {4180, 100},  // 4.10V //this to account for minor fluctuations at full charge
+    {4150, 98},  // 4.15V
+    {4050,95},  // 4.05V
     {4100, 90},  // 4.10V
+    {4050, 85},  // 4.05V
     {4000, 80},  // 4.00V
+    {3950, 75},  // 3.95V
     {3900, 70},  // 3.90V
+    {3850, 65},  // 3.85V
     {3800, 60},  // 3.80V
+    {3750, 55},  // 3.75V
     {3700, 50},  // 3.70V (Nominal)
+    {3650, 40},  // 3.65V
     {3600, 30},  // 3.60V
+    {3550, 20},  // 3.55V
     {3500, 15},  // 3.50V
+    {3400, 8},  // 3.40V
     {3300, 5},   // 3.30V
     {3200, 0}    // 3.20V (Cutoff)
 };
