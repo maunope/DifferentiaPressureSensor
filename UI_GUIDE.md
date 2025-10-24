@@ -42,6 +42,15 @@ The top-right corner of the screen displays persistent icons that provide at-a-g
     +--------------------+
     ```
 
+*   **Paused Icon**: When data logging is paused via the "Sampling Mode" menu, a **P** icon will appear to the left of the battery icon. In this mode, the device will not write any new data to the SD card and will not enter deep sleep automatically.
+
+    ```
+    +--------------------+
+    | Main Menu    P [[]] <-- Paused Icon
+    | ...                |
+    +--------------------+
+    ```
+
 *   **High-Frequency Mode**: When enabled, a `>>` symbol appears in the top-left corner. This indicates that the device is using shorter logging and sleep intervals.
     If an SD card error occurs, the `>>` icon will shift to the right to make space for the `!!` warning icon.
 
@@ -125,19 +134,21 @@ A short press on the button from the main data screen enters the menu system.
 
 *   **Sensor data**: Returns to the main data display screen.
 *   **High Freq. Mode**: Enters a menu to enable or disable high-frequency logging mode. This mode is temporary and resets on reboot.
+*   **Sampling Mode**: Enters a submenu to control the data logging behavior. These modes persist through deep sleep cycles but are reset to "Normal" on a full reboot.
 *   **Web Server**: Enables a web server to allow data files download through WiFi, pauses data logging and disables sleep.
 *   **Options**: Enters the `Options` submenu for device settings.
 *   **About**: Displays a QR code and a short link to the project's GitHub repository.
 
-### High Freq. Mode Submenu
+### Sampling Mode Submenu
 
-High Frequency polling sunmenu allows to enable/disable high frequency polling, the default HF logging interval is 5 seconds. 
+This menu allows you to change how the datalogger operates for the current session.
 
 ```
 +--------------------+
-| High Freq. Mode    |
-|> Enable            |
-|  Disable           |
+| Sample Mode        |
+|> High Frequency    |
+|  Normal            |
+|  Paused            |
 |                    |
 |                    |
 |                    |

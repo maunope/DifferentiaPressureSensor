@@ -19,11 +19,13 @@ This project is a datalogger built on the ESP32-S3 platform using the ESP-IDF fr
     *   A settings menu to manage the RTC, SD card, view configuration, and display a QR code linking to the project repository.
 *   **NTP Time Sync**: Can synchronize the RTC with an NTP server over Wi-Fi.
 *   **Web Server**: Can start a web server to allow downloading and previewing logged data files directly from a web browser.
-*   **High-Frequency Mode**: An optional mode for more frequent data logging and shorter sleep intervals, useful for capturing more granular data.
+*   **Multiple Sampling Modes**: Supports "Normal", "High Frequency", and "Paused" logging modes, selectable via the UI.
 *   **Robust Power Management**: Implements a command-driven deep sleep cycle to conserve battery. The datalogger task explicitly signals when it's safe to sleep, preventing race conditions and ensuring data integrity. The device wakes up on a timer for the next log or via user interaction.
 *   **Web File Management**: The web interface allows users to list, preview, download, and delete log files directly from the device.
 *   **Exclusive File System Access**: To prevent data corruption, the system ensures that only one component (Datalogger, Web Server, or USB Mass Storage) can access the SD card at a time. For example, starting the web server will pause the datalogger, and connecting the device to a PC will disable both the web server and the datalogger.
-*   **Configuration via INI file**: Key parameters like sleep intervals, Wi-Fi credentials, and sensor models can be configured via a `config.ini` file on the SD card. The device does not go to sleep while the web server is active.
+*   **Configuration & Persistence**:
+    *   **Permanent Settings**: Key parameters like sleep intervals, Wi-Fi credentials, and sensor models can be configured via a `config.ini` file on the SD card. These settings are loaded into flash memory and persist across reboots.
+    *   **Session Settings**: UI-selected modes (like "High Frequency" or "Paused") are stored in RTC memory and persist through deep sleep cycles, but will be reset to their default values after a full power cycle or reboot.
 *   **RTOS-based**: Built on FreeRTOS, with separate tasks for data logging and UI rendering for a responsive and robust application.
 
 ### Hardware Components

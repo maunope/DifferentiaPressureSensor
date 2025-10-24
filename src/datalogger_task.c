@@ -34,10 +34,12 @@ static void update_sensor_buffer(datalogger_task_params_t *params)
     float temperature_c = NAN;
     long pressure_pa = 0; // Use 0 as the sentinel for an invalid integer reading
     float diff_pressure_pa = NAN;
+    bool read_error = false;
 
     if (xSemaphoreTake(g_i2c_bus_mutex, pdMS_TO_TICKS(2000)) == pdTRUE)
     {
-        esp_err_t i2c_err = ESP_FAIL;
+        esp_err_t bmp_err = ESP_FAIL;
+        esp_err_t d6fph_err = ESP_FAIL;
 
         temperature_c = NAN;
         pressure_pa = 0;
@@ -48,13 +50,14 @@ static void update_sensor_buffer(datalogger_task_params_t *params)
 
             for (int retries = 0; retries < MAX_I2C_RETRIES; retries++)
             {
-                i2c_err = bmp280_force_read(params->bmp280_dev, &temperature_c, &pressure_pa);
-                if (i2c_err == ESP_OK)
+                bmp_err = bmp280_force_read(params->bmp280_dev, &temperature_c, &pressure_pa);
+                if (bmp_err == ESP_OK)
                     break; // Success, exit retry loop
                 vTaskDelay(pdMS_TO_TICKS(RETRY_DELAY_MS));
             }
-            if (i2c_err != ESP_OK)
+            if (bmp_err != ESP_OK)
             {
+                read_error = true;
                 ESP_LOGE(TAG, "BMP280 read failed after %d attempts.", MAX_I2C_RETRIES);
             }
         }
@@ -68,13 +71,14 @@ static void update_sensor_buffer(datalogger_task_params_t *params)
         {
             for (int retries = 0; retries < MAX_I2C_RETRIES; retries++)
             {
-                i2c_err = d6fph_read_pressure(params->d6fph_dev, &diff_pressure_pa);
-                if (i2c_err == ESP_OK)
+                d6fph_err = d6fph_read_pressure(params->d6fph_dev, &diff_pressure_pa);
+                if (d6fph_err == ESP_OK)
                     break; // Success, exit retry loop
                 vTaskDelay(pdMS_TO_TICKS(RETRY_DELAY_MS));
             }
-            if (i2c_err != ESP_OK)
+            if (d6fph_err != ESP_OK)
             {
+                read_error = true;
                 ESP_LOGE(TAG, "D6F-PH read failed after %d attempts.", MAX_I2C_RETRIES);
             }
         }
@@ -87,6 +91,7 @@ static void update_sensor_buffer(datalogger_task_params_t *params)
     }
     else
     {
+        read_error = true;
         ESP_LOGE(TAG, "Failed to acquire I2C mutex for sensor readings.");
     }
 
@@ -100,6 +105,7 @@ static void update_sensor_buffer(datalogger_task_params_t *params)
         g_sensor_buffer.battery_voltage = battery_reader_get_voltage();
         g_sensor_buffer.battery_percentage = battery_reader_get_percentage();
         g_sensor_buffer.battery_externally_powered = battery_is_externally_powered();
+        g_sensor_buffer.sensor_read_error = read_error;
         xSemaphoreGive(g_sensor_buffer_mutex);
     }
     else

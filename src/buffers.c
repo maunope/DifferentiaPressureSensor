@@ -23,6 +23,7 @@ sensor_buffer_t g_sensor_buffer = {
     .bmp280_available = false,
     .d6fph_available = false,
     .ds3231_available = false,
+    .sensor_read_error = false,
     .datalogger_paused = false,
 };
 

@@ -716,6 +716,10 @@ static void draw_status_icons(void)
     bool is_charging = s_local_sensor_buffer.battery_externally_powered;
     bool sd_write_failed = (s_local_sensor_buffer.writeStatus == WRITE_STATUS_FAIL);
     bool hf_mode_enabled = s_local_sensor_buffer.high_freq_mode_enabled;
+    bool sensors_ok = s_local_sensor_buffer.bmp280_available &&
+                        !s_local_sensor_buffer.sensor_read_error &&
+                        s_local_sensor_buffer.d6fph_available &&
+                        s_local_sensor_buffer.ds3231_available;
     bool is_paused = s_local_sensor_buffer.datalogger_paused;
 
     // The title bar is inverted on most screens. We render the icon with a non-inverted
@@ -771,8 +775,8 @@ static void draw_status_icons(void)
     // --- Draw Conditional Icons (SD Error and HF Mode) ---
     int current_icon_x = 114; // Start from the left edge of the battery icon
 
-    // If SD card write failed, draw "!!"
-    if (sd_write_failed)
+    // If SD card write failed or a sensor is missing, draw "!!"
+    if (sd_write_failed || !sensors_ok)
     {
         current_icon_x -= 8; // Move left to make space
         int warning_y = 1;

@@ -53,6 +53,7 @@ typedef struct {
     bool bmp280_available;
     bool d6fph_available;
     bool ds3231_available;
+    bool sensor_read_error;
     command_status_t delete_file_status;
     bool datalogger_paused;
     uint32_t sd_card_free_space_mb;
