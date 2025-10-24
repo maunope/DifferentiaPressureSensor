@@ -592,7 +592,7 @@ void menu_cancel_on_btn(void)
 
 void render_cmd_feedback_screen(void)
 {
-    write_inverted_line(0, " "); // Inverted title bar
+    static command_status_t last_rendered_status = CMD_STATUS_IDLE;
     uint64_t now = esp_timer_get_time() / 1000;
 
     command_status_t current_status = CMD_STATUS_IDLE;
@@ -600,6 +600,11 @@ void render_cmd_feedback_screen(void)
     {
         current_status = g_command_status;
         xSemaphoreGive(g_command_status_mutex);
+    }
+
+    // If the status hasn't changed, don't redraw anything.
+    if (current_status == last_rendered_status && current_status == CMD_STATUS_PENDING) {
+        return;
     }
 
     // --- Polling and State Transition Logic ---
@@ -620,6 +625,7 @@ void render_cmd_feedback_screen(void)
         else
         {
             write_padded_line(3, "Loading...");
+            write_inverted_line(0, " "); // Inverted title bar
         }
     }
     else if (current_status == CMD_STATUS_SUCCESS)
@@ -647,6 +653,7 @@ void render_cmd_feedback_screen(void)
     else if (current_status == CMD_STATUS_FAIL)
     {
         write_padded_line(3, "Failed");
+        write_inverted_line(0, " "); // Inverted title bar
         if (s_cmd_feedback_display_start_ms == 0)
         {
             s_cmd_feedback_display_start_ms = now;
@@ -681,7 +688,8 @@ void render_cmd_feedback_screen(void)
             write_padded_line(i, ""); // Clear other non-title lines
         }
     }
-    i2c_oled_update_screen(s_oled_i2c_num);
+
+    last_rendered_status = current_status;
 }
 
 /**
