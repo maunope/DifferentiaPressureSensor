@@ -84,13 +84,14 @@ static RTC_DATA_ATTR uint64_t rtc_last_boot_time_ms = 0;
 
 static const char *TAG = "main";
 
-typedef enum {
+typedef enum
+{
     I2C_BUS_SENSORS, // I2C_NUM_0 for main peripherals
     I2C_BUS_OLED,    // I2C_NUM_1 for the display
     I2C_BUS_ALL      // Both buses
 } i2c_bus_target_t;
 
-bool rtc_available = false;
+
 
 ds3231_t g_rtc;    // Global RTC device handle
 bmp280_t g_bmp280; // Global BMP280 device handle
@@ -115,7 +116,8 @@ static void handle_battery_refresh(void)
     if (g_datalogger_cmd_queue != NULL)
     {
         datalogger_command_t logger_cmd = DATALOGGER_CMD_FORCE_REFRESH;
-        if (xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0) != pdPASS) {
+        if (xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0) != pdPASS)
+        {
             ESP_LOGE(TAG, "Failed to send battery refresh command to datalogger queue");
         }
     }
@@ -179,12 +181,7 @@ static void on_encoder_button_long_press(void)
  */
 static void handle_set_rtc_to_build_time(void)
 {
-    if (!rtc_available)
-    {
-        ESP_LOGE(TAG, "Cannot set time, RTC not available.");
-        g_command_status = CMD_STATUS_FAIL;
-        return;
-    }
+ 
 
     esp_err_t ret = ESP_FAIL;
     if (xSemaphoreTake(g_i2c_bus_mutex, portMAX_DELAY))
@@ -329,10 +326,13 @@ static void go_to_deep_sleep(void)
     rotaryencoder_enable_wakeup_source();
 
     sensor_buffer_t local_buffer;
-    if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50))) {
+    if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)))
+    {
         local_buffer = g_sensor_buffer;
         xSemaphoreGive(g_sensor_buffer_mutex);
-    } else {
+    }
+    else
+    {
         // In case of failure, assume default mode to be safe.
         local_buffer.high_freq_mode_enabled = false;
         local_buffer.last_successful_write_ts = 0;
@@ -349,7 +349,8 @@ static void go_to_deep_sleep(void)
     // Sleep for the configured duration, but no longer than the time remaining until the next log.
     // This prevents oversleeping and ensures timely writes. Add a small buffer (e.g., 100ms) to wake up just before.
     uint64_t sleep_duration = configured_sleep_duration_ms;
-    if (time_to_next_log_ms > 100 && time_to_next_log_ms < configured_sleep_duration_ms) {
+    if (time_to_next_log_ms > 100 && time_to_next_log_ms < configured_sleep_duration_ms)
+    {
         sleep_duration = time_to_next_log_ms - 100;
     }
     esp_sleep_enable_timer_wakeup(sleep_duration * 1000);
@@ -419,7 +420,8 @@ static bool handle_stop_web_server(void)
     }
 
     // Disconnect from Wi-Fi only if it's actually connected
-    if (wifi_manager_is_connected()) {
+    if (wifi_manager_is_connected())
+    {
         wifi_manager_disconnect();
     }
     return true;
@@ -462,31 +464,44 @@ static void handle_web_server_fsm(void)
  *
  * Configures and installs the I2C driver for the main peripheral bus (I2C_NUM_0).
  */
-static esp_err_t i2c_bus_init(void)
-{
-    // --- Init I2C Bus 0 for Sensors ---
-    i2c_master_bus_config_t i2c_mst0_config = {
-        .clk_source = I2C_CLK_SRC_DEFAULT,
-        .i2c_port = I2C_MASTER_NUM,
-        .sda_io_num = I2C_MASTER_SDA_IO,
-        .scl_io_num = I2C_MASTER_SCL_IO,
-        .glitch_ignore_cnt = 7,
-        .flags.enable_internal_pullup = true,
-    };
-    ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst0_config, &g_i2c_bus0_handle));
+static esp_err_t i2c_bus_init(void) {
+    esp_err_t ret = ESP_OK;
 
-    // --- Init I2C Bus 1 for OLED ---
-    i2c_master_bus_config_t i2c_mst1_config = {
-        .clk_source = I2C_CLK_SRC_DEFAULT,
-        .i2c_port = I2C_OLED_NUM,
-        .sda_io_num = I2C_OLED_SDA_IO,
-        .scl_io_num = I2C_OLED_SCL_IO,
-        .glitch_ignore_cnt = 7,
-        .flags.enable_internal_pullup = true,
-    };
-    ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst1_config, &g_i2c_bus1_handle));
+    // --- Init I2C Bus 0 for Sensors (if not already initialized) ---
+    if (g_i2c_bus0_handle == NULL) {
+        i2c_master_bus_config_t i2c_mst0_config = {
+            .clk_source = I2C_CLK_SRC_DEFAULT,
+            .i2c_port = I2C_MASTER_NUM,
+            .sda_io_num = I2C_MASTER_SDA_IO,
+            .scl_io_num = I2C_MASTER_SCL_IO,
+            .glitch_ignore_cnt = 7,
+            .flags.enable_internal_pullup = true,
+        };
+        ret = i2c_new_master_bus(&i2c_mst0_config, &g_i2c_bus0_handle);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to create I2C bus 0: %s", esp_err_to_name(ret));
+            return ret;
+        }
+    }
 
-    return ESP_OK;
+    // --- Init I2C Bus 1 for OLED (if not already initialized) ---
+    if (g_i2c_bus1_handle == NULL) {
+        i2c_master_bus_config_t i2c_mst1_config = {
+            .clk_source = I2C_CLK_SRC_DEFAULT,
+            .i2c_port = I2C_OLED_NUM,
+            .sda_io_num = I2C_OLED_SDA_IO,
+            .scl_io_num = I2C_OLED_SCL_IO,
+            .glitch_ignore_cnt = 7,
+            .flags.enable_internal_pullup = true,
+        };
+        ret = i2c_new_master_bus(&i2c_mst1_config, &g_i2c_bus1_handle);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to create I2C bus 1: %s", esp_err_to_name(ret));
+            return ret;
+        }
+    }
+
+    return ret;
 }
 
 /**
@@ -499,34 +514,41 @@ static void i2c_bus_deinit(i2c_bus_target_t bus_to_deinit)
 {
     ESP_LOGI(TAG, "De-initializing I2C bus(es)...");
 
-    if (bus_to_deinit == I2C_BUS_SENSORS || bus_to_deinit == I2C_BUS_ALL) {
+    if (bus_to_deinit == I2C_BUS_SENSORS || bus_to_deinit == I2C_BUS_ALL)
+    {
         ESP_LOGD(TAG, "Detaching devices from bus 0...");
         // --- Detach devices from bus 0 ---
-        if (g_rtc.i2c_dev_handle) {
+        if (g_rtc.i2c_dev_handle)
+        {
             i2c_master_bus_rm_device(g_rtc.i2c_dev_handle);
             g_rtc.i2c_dev_handle = NULL;
         }
-        if (g_bmp280.i2c_dev_handle) {
+        if (g_bmp280.i2c_dev_handle)
+        {
             i2c_master_bus_rm_device(g_bmp280.i2c_dev_handle);
             g_bmp280.i2c_dev_handle = NULL;
         }
-        if (g_d6fph.i2c_dev_handle) {
+        if (g_d6fph.i2c_dev_handle)
+        {
             i2c_master_bus_rm_device(g_d6fph.i2c_dev_handle);
             g_d6fph.i2c_dev_handle = NULL;
         }
         // --- Delete bus 0 handle ---
-        if (g_i2c_bus0_handle) {
+        if (g_i2c_bus0_handle)
+        {
             i2c_del_master_bus(g_i2c_bus0_handle);
             g_i2c_bus0_handle = NULL;
         }
     }
 
-    if (bus_to_deinit == I2C_BUS_OLED || bus_to_deinit == I2C_BUS_ALL) {
+    if (bus_to_deinit == I2C_BUS_OLED || bus_to_deinit == I2C_BUS_ALL)
+    {
         ESP_LOGD(TAG, "Detaching device from bus 1...");
         // --- Detach device from bus 1 ---
         i2c_oled_bus_deinit();
         // --- Delete bus 1 handle ---
-        if (g_i2c_bus1_handle) {
+        if (g_i2c_bus1_handle)
+        {
             i2c_del_master_bus(g_i2c_bus1_handle);
             g_i2c_bus1_handle = NULL;
         }
@@ -543,7 +565,8 @@ void main_task(void *pvParameters)
     {
         // --- Create a local, consistent snapshot of the shared buffer ---
         sensor_buffer_t local_buffer;
-        if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50))) {
+        if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)))
+        {
             // Copy the global buffer to a local struct to work with consistent data.
             local_buffer = g_sensor_buffer;
 
@@ -552,9 +575,11 @@ void main_task(void *pvParameters)
             // Calculate current session's awake time and add to total persistent uptime
             uint64_t current_session_awake_s = (esp_timer_get_time() - rtc_last_boot_time_ms * 1000) / 1000000ULL;
             g_sensor_buffer.uptime_seconds = rtc_total_awake_time_s + current_session_awake_s;
-            
+
             xSemaphoreGive(g_sensor_buffer_mutex);
-        } else {
+        }
+        else
+        {
             ESP_LOGE(TAG, "Failed to get sensor buffer snapshot. Loop will use stale data.");
         }
 
@@ -585,25 +610,31 @@ void main_task(void *pvParameters)
 
                 int wait_cycles = 0;
                 const int max_wait_cycles = 150; // 3-second timeout
-                while (g_datalogger_task_handle != NULL && eTaskGetState(g_datalogger_task_handle) != eSuspended && wait_cycles < max_wait_cycles) {
+                while (g_datalogger_task_handle != NULL && eTaskGetState(g_datalogger_task_handle) != eSuspended && wait_cycles < max_wait_cycles)
+                {
                     vTaskDelay(pdMS_TO_TICKS(20));
                     wait_cycles++;
                 }
 
-                if (wait_cycles >= max_wait_cycles) {
+                if (wait_cycles >= max_wait_cycles)
+                {
                     ESP_LOGE(TAG, "Timeout waiting for datalogger to pause for format. Aborting.");
-                    if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY)) {
+                    if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY))
+                    {
                         g_command_status = CMD_STATUS_FAIL;
                         xSemaphoreGive(g_command_status_mutex);
                     }
-                } else {
+                }
+                else
+                {
                     ESP_LOGI(TAG, "Datalogger paused. Formatting SD card...");
                     spi_sdcard_format();
                 }
 
                 // Always resume the datalogger afterward.
                 ESP_LOGI(TAG, "Resuming datalogger after format attempt.");
-                if (g_datalogger_task_handle != NULL && eTaskGetState(g_datalogger_task_handle) == eSuspended) {
+                if (g_datalogger_task_handle != NULL && eTaskGetState(g_datalogger_task_handle) == eSuspended)
+                {
                     vTaskResume(g_datalogger_task_handle);
                 }
                 break;
@@ -618,16 +649,19 @@ void main_task(void *pvParameters)
                     ESP_LOGI(TAG, "Activity detected, waking up UI.");
                 }
                 last_activity_ms = esp_timer_get_time() / 1000;
-                if (g_uiRender_task_handle != NULL) {
+                if (g_uiRender_task_handle != NULL)
+                {
                     // UI task exists, it's either running or suspended.
                     // oled_power_on() will handle resuming it if suspended.
                     oled_power_on();
-                } else {
+                }
+                else
+                {
                     // UI task does not exist (e.g., after a timer wakeup).
                     // We need to create it for the first time.
                     ESP_LOGI(TAG, "UI task not running. Creating it now.");
                     gpio_set_level(OLED_POWER_PIN, 1); // Ensure OLED has power
-                    vTaskDelay(pdMS_TO_TICKS(100)); // Wait for OLED to stabilize
+                    vTaskDelay(pdMS_TO_TICKS(100));    // Wait for OLED to stabilize
                     i2c_oled_send_init_commands(I2C_OLED_NUM);
                     xTaskCreate(uiRender_task, "uiRender", 4096, NULL, 6, &g_uiRender_task_handle);
                 }
@@ -646,14 +680,17 @@ void main_task(void *pvParameters)
                 break;
             case APP_CMD_STOP_WEB_SERVER:
                 ESP_LOGI(TAG, "CMD: Stop web server");
-                if (handle_stop_web_server()) {
+                if (handle_stop_web_server())
+                {
                     local_buffer.web_server_status = WEB_SERVER_STOPPED;
                 }
                 break;
             case APP_CMD_ENABLE_HF_MODE:
                 ESP_LOGI(TAG, "CMD: Enable High-Frequency Mode");
-                if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY)) {
-                    if (!g_sensor_buffer.high_freq_mode_enabled) {
+                if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY))
+                {
+                    if (!g_sensor_buffer.high_freq_mode_enabled)
+                    {
                         g_sensor_buffer.high_freq_mode_enabled = true;
                         // Force a new file on mode change
                         datalogger_command_t logger_cmd = DATALOGGER_CMD_ROTATE_FILE;
@@ -664,8 +701,10 @@ void main_task(void *pvParameters)
                 break;
             case APP_CMD_DISABLE_HF_MODE:
                 ESP_LOGI(TAG, "CMD: Disable High-Frequency Mode");
-                if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY)) {
-                    if (g_sensor_buffer.high_freq_mode_enabled) {
+                if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY))
+                {
+                    if (g_sensor_buffer.high_freq_mode_enabled)
+                    {
                         g_sensor_buffer.high_freq_mode_enabled = false;
                         // Force a new file on mode change
                         datalogger_command_t logger_cmd = DATALOGGER_CMD_ROTATE_FILE;
@@ -675,19 +714,20 @@ void main_task(void *pvParameters)
                 }
                 break;
             case APP_CMD_LOG_COMPLETE_SLEEP_NOW:
-                //checks here are partially redundant, I could just use the main loop to check all the "no sleep" conditions and update variables accordingly. 
-                //or I could just raise a flag, "sleep now requested" and have the main loop handle it. but since debugging sleep issues is a pain in the *ss, 
-                // I'll keep the detailed albeit redundant checks and logging here for now. :-P
+                // checks here are partially redundant, I could just use the main loop to check all the "no sleep" conditions and update variables accordingly.
+                // or I could just raise a flag, "sleep now requested" and have the main loop handle it. but since debugging sleep issues is a pain in the *ss,
+                //  I'll keep the detailed albeit redundant checks and logging here for now. :-P
                 ESP_LOGI(TAG, "CMD: Log complete, checking sleep conditions.");
                 bool web_server_active = (local_buffer.web_server_status == WEB_SERVER_RUNNING || local_buffer.web_server_status == WEB_SERVER_STARTING);
                 uint64_t current_time_ms_for_sleep_check = esp_timer_get_time() / 1000ULL;
-                //last_activity_ms== 0 means no command was received since boot
+                // last_activity_ms== 0 means no command was received since boot
                 bool ui_is_inactive = (current_time_ms_for_sleep_check - last_activity_ms > g_cfg->inactivity_timeout_ms || last_activity_ms == 0);
-                if (ui_is_inactive && !web_server_active) {
+                if (ui_is_inactive && !web_server_active)
+                {
                     ESP_LOGI(TAG, "UI is inactive and log is complete. Initiating sleep.");
-                    //in case it's already off, this does no harm
+                    // in case it's already off, this does no harm
                     oled_power_off();
-                    
+
                     // --- Step 1: Tell the logger to pause---
                     xQueueSend(g_datalogger_cmd_queue, &(datalogger_command_t){DATALOGGER_CMD_PAUSE_WRITES}, 0);
 
@@ -695,29 +735,37 @@ void main_task(void *pvParameters)
                     ESP_LOGI(TAG, "Waiting for datalogger to pause...");
                     int wait_cycles = 0;
                     const int max_wait_cycles = 150; // 3 seconds timeout
-                    while (g_datalogger_task_handle != NULL && eTaskGetState(g_datalogger_task_handle) != eSuspended && wait_cycles < max_wait_cycles) {
+                    while (g_datalogger_task_handle != NULL && eTaskGetState(g_datalogger_task_handle) != eSuspended && wait_cycles < max_wait_cycles)
+                    {
                         vTaskDelay(pdMS_TO_TICKS(20));
                         wait_cycles++;
                     }
 
-                    if (wait_cycles >= max_wait_cycles) {
+                    if (wait_cycles >= max_wait_cycles)
+                    {
                         ESP_LOGE(TAG, "Timeout waiting for datalogger to pause. Aborting sleep.");
-                    } else {
+                    }
+                    else
+                    {
                         ESP_LOGI(TAG, "Datalogger paused. De-initializing peripherals and sleeping.");
                         spi_sdcard_deinit();
                         wifi_manager_deinit();
                         gpio_set_level(DEVICES_POWER_PIN, 0);
                         go_to_deep_sleep();
                     }
-                } else {
+                }
+                else
+                {
                     // Detailed logging for why sleep was skipped.
-                    if (!ui_is_inactive) {
+                    if (!ui_is_inactive)
+                    {
                         uint64_t current_time_ms_for_log = esp_timer_get_time() / 1000ULL;
                         uint64_t inactivity_duration = current_time_ms_for_log - last_activity_ms;
-                        ESP_LOGW(TAG, "Sleep skipped: UI is active. Inactivity timer: %llu ms (timeout is %lu ms)", 
+                        ESP_LOGW(TAG, "Sleep skipped: UI is active. Inactivity timer: %llu ms (timeout is %lu ms)",
                                  inactivity_duration, (unsigned long)g_cfg->inactivity_timeout_ms);
                     }
-                    if (web_server_active) {
+                    if (web_server_active)
+                    {
                         ESP_LOGW(TAG, "Sleep skipped: Web server is active.");
                     }
                 }
@@ -763,7 +811,7 @@ void main_task(void *pvParameters)
 
         // --- OLED Power-Off Logic ---
         // If UI is inactive but the screen is still on, turn it off.
-        if (g_uiRender_task_handle != NULL && ui_is_inactive  && !web_server_active)
+        if (g_uiRender_task_handle != NULL && ui_is_inactive && !web_server_active)
         {
             // UI timeout occurred, but no new write yet. Just turn off the screen.
             oled_power_off();
@@ -961,9 +1009,11 @@ void app_main(void)
             ESP_LOGI(TAG, "Config loaded successfully. Renaming to %s", new_config_path);
             // Before renaming, check if the destination file exists and delete it.
             struct stat st_dest;
-            if (stat(new_config_path, &st_dest) == 0) {
+            if (stat(new_config_path, &st_dest) == 0)
+            {
                 ESP_LOGI(TAG, "Deleting old %s before renaming.", new_config_path);
-                if (unlink(new_config_path) != 0) {
+                if (unlink(new_config_path) != 0)
+                {
                     ESP_LOGE(TAG, "Failed to delete %s: %s", new_config_path, strerror(errno));
                 }
             }
@@ -988,87 +1038,141 @@ void app_main(void)
     config_params_init();
     g_cfg = config_params_get();
 
-
-
     // --- Step 4: Initialize hardware drivers and peripherals ---
     // Initialize Battery Reader first, as it uses ADC which can conflict if I2C is initialized first
     battery_reader_init(BATTERY_ADC_PIN, BATTERY_PWR_PIN, g_cfg->battery_voltage_divider_ratio);
 
-
     // --- Step 5: Initialize and validate the external Real-Time Clock (RTC) ---
-    ds3231_init(&g_rtc, g_i2c_bus0_handle, DS3231_I2C_ADDR);
+    bool local_ds3231_available = false;
+    err = ds3231_init(&g_rtc, g_i2c_bus0_handle, DS3231_I2C_ADDR);
     struct tm timeinfo;
     time_t rtc_ts = -1;
 
-    // Attempt to read the time from the RTC.
-    if (xSemaphoreTake(g_i2c_bus_mutex, portMAX_DELAY))
+ 
+    if (err != ESP_OK)
     {
-        if (ds3231_get_time(&g_rtc, &timeinfo) == ESP_OK)
-        {
-            // Since system TZ is UTC, mktime works like timegm.
-            rtc_ts = mktime(&timeinfo);
-        }
-        xSemaphoreGive(g_i2c_bus_mutex);
-    }
-
-    // If RTC read was successful, check if the time is valid.
-    if (rtc_ts != -1)
-    {
-        struct tm build_time;
-        sscanf(__DATE__, "%*s %*d %d", &build_time.tm_year);
-        build_time.tm_year -= 1900;
-
-        // If RTC year is before build year, set the time
-        if (timeinfo.tm_year < build_time.tm_year)
-        {
-            ESP_LOGW(TAG, "RTC time is invalid. Setting to build time.");
-            handle_set_rtc_to_build_time();
-        }
-
-        rtc_available = true;
-        ESP_LOGI(TAG, "RTC available, using DS3231 for timestamps.");
-        // Set system timezone to UTC and synchronize system time with RTC.
-        setenv("TZ", "UTC0", 1);
-        tzset();
-        struct timeval tv = {.tv_sec = rtc_ts};
-        settimeofday(&tv, NULL);
-        ESP_LOGI(TAG, "System time synchronized from DS3231 RTC to UTC.");
-    }
-    if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY))
-    {
-        g_sensor_buffer.ds3231_available = rtc_available;
-        xSemaphoreGive(g_sensor_buffer_mutex);
+        ESP_LOGE(TAG, "DS3231 RTC initialization failed with error: %s", esp_err_to_name(err));
+        i2c_bus_deinit(I2C_BUS_SENSORS);
+        i2c_bus_init();
+        g_rtc.i2c_dev_handle = NULL;
+        local_ds3231_available = false;
     }
     else
     {
-        rtc_available = false;
-        ESP_LOGW(TAG, "RTC not available, using ESP32 system time.");
-    }
+        local_ds3231_available = true;
+        ESP_LOGI(TAG, "DS3231 RTC initialized successfully.");
 
+        // Attempt to read the time from the RTC.
+        if (xSemaphoreTake(g_i2c_bus_mutex, portMAX_DELAY))
+        {
+            if (ds3231_get_time(&g_rtc, &timeinfo) == ESP_OK)
+            {
+                // Since system TZ is UTC, mktime works like timegm.
+                rtc_ts = mktime(&timeinfo);
+            }
+            xSemaphoreGive(g_i2c_bus_mutex);
+        }
+
+        // If RTC read was successful, check if the time is valid.
+        if (rtc_ts != -1)
+        {
+            struct tm build_time;
+            sscanf(__DATE__, "%*s %*d %d", &build_time.tm_year);
+            build_time.tm_year -= 1900;
+
+            // If RTC year is before build year, set the time
+            if (timeinfo.tm_year < build_time.tm_year)
+            {
+                ESP_LOGW(TAG, "RTC time is invalid. Setting to build time.");
+                handle_set_rtc_to_build_time();
+            }
+
+            local_ds3231_available= true;
+            ESP_LOGI(TAG, "RTC available, using DS3231 for timestamps.");
+            // Set system timezone to UTC and synchronize system time with RTC.
+            setenv("TZ", "UTC0", 1);
+            tzset();
+            struct timeval tv = {.tv_sec = rtc_ts};
+            settimeofday(&tv, NULL);
+            ESP_LOGI(TAG, "System time synchronized from DS3231 RTC to UTC.");
+        }
+
+        if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY))
+        {
+            g_sensor_buffer.ds3231_available = local_ds3231_available;
+            xSemaphoreGive(g_sensor_buffer_mutex);
+        }
+        else
+        {
+            local_ds3231_available = false;
+            ESP_LOGW(TAG, "RTC not available, using ESP32 system time.");
+        }
+    }
+    bool local_d6fph_available = false;
     // Initialize D6F-PH Sensor.
-    bool d6fph_available = (d6fph_init(&g_d6fph, g_i2c_bus0_handle, D6FPH_I2C_ADDR, g_cfg->d6fph_model) == ESP_OK);
-    if (!d6fph_available)
+    err = d6fph_init(&g_d6fph, g_i2c_bus0_handle, D6FPH_I2C_ADDR, g_cfg->d6fph_model);
+    if (err != ESP_OK)
     {
-        ESP_LOGE(TAG, "D6F-PH sensor initialization failed.");
+        ESP_LOGE(TAG, "D6F-PH sensor initialization failed with error: %s", esp_err_to_name(err));
+        i2c_bus_deinit(I2C_BUS_SENSORS); // Tear down the failed bus
+        i2c_bus_init(); // Re-create it
+        g_d6fph.i2c_dev_handle = NULL;
+        local_d6fph_available = false;
+        if (local_ds3231_available)
+        {
+            ESP_LOGI(TAG, "D6F-PH sensor not available, but RTC is available. Using DS3231 for timestamps.");
+            ds3231_init(&g_rtc, g_i2c_bus0_handle, DS3231_I2C_ADDR); // Re-attach RTC to the new bus
+          
+        }
     }
-    if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY))
+    else
     {
-        g_sensor_buffer.d6fph_available = d6fph_available;
-        xSemaphoreGive(g_sensor_buffer_mutex);
-    }
+        local_d6fph_available = true;
+        ESP_LOGI(TAG, "D6F-PH sensor initialized successfully.");
 
+        if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY))
+        {
+            g_sensor_buffer.d6fph_available = local_d6fph_available;
+            xSemaphoreGive(g_sensor_buffer_mutex);
+        }
+    }
+    
+    bool local_bmp280_available = false;
     // Initialize BMP280 Sensor.
-    bool bmp280_available = (bmp280_init(&g_bmp280, g_i2c_bus0_handle, BMP280_I2C_ADDR) == ESP_OK);
-    if (!bmp280_available)
+    err = bmp280_init(&g_bmp280, g_i2c_bus0_handle, BMP280_I2C_ADDR);
+   
+    if (err != ESP_OK)
     {
-        ESP_LOGE(TAG, "BMP280 sensor initialization failed, stopping.");
+        local_bmp280_available = false;
+        ESP_LOGE(TAG, "BMP280 sensor initialization failed with error: %s", esp_err_to_name(err));
+        i2c_bus_deinit(I2C_BUS_SENSORS); // Tear down the failed bus
+        i2c_bus_init(); // Re-create it
+        g_bmp280.i2c_dev_handle = NULL;
+        if (local_ds3231_available)
+        {
+            ESP_LOGI(TAG, "BMP280 sensor not available, but RTC is available. Using DS3231 for timestamps.");
+            ds3231_init(&g_rtc, g_i2c_bus0_handle, DS3231_I2C_ADDR); // Re-attach RTC
+          
+        }
+        if (local_d6fph_available)
+        {
+            ESP_LOGI(TAG, "BMP280 sensor not available, but D6F-PH is available. Using D6F-PH for pressure data.");
+            d6fph_init(&g_d6fph, g_i2c_bus0_handle, D6FPH_I2C_ADDR, g_cfg->d6fph_model); // Re-attach D6FPH
+          
+        }
+        
     }
-    if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY))
+    else
     {
-        g_sensor_buffer.bmp280_available = bmp280_available;
-        xSemaphoreGive(g_sensor_buffer_mutex);
+        local_bmp280_available = true;
+        ESP_LOGI(TAG, "BMP280 sensor initialized successfully.");
+        if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY))
+        {
+            g_sensor_buffer.bmp280_available = local_bmp280_available;
+            xSemaphoreGive(g_sensor_buffer_mutex);
+        }
     }
-
+    
 
     // --- Step 6: Initialize user input (Rotary Encoder) ---
     rotaryencoder_config_t encoder_cfg = {
@@ -1107,8 +1211,8 @@ void app_main(void)
     }
     datalogger_params->bmp280_dev = &g_bmp280;
     datalogger_params->d6fph_dev = &g_d6fph;
-    datalogger_params->bmp280_available = bmp280_available;
-    datalogger_params->d6fph_available = d6fph_available;
+    datalogger_params->bmp280_available = local_bmp280_available;
+    datalogger_params->d6fph_available = local_d6fph_available;
     datalogger_params->log_interval_ms = g_cfg->log_interval_ms;
     datalogger_params->hf_log_interval_ms = g_cfg->hf_log_interval_ms;
 
@@ -1121,7 +1225,7 @@ void app_main(void)
         g_uiRender_task_handle = NULL; // Ensure handle is null if task is not created
     }
     xTaskCreate(datalogger_task, "datalogger", 4096, datalogger_params, 5, &g_datalogger_task_handle); // Pass pointer to heap-allocated struct
-    xTaskCreate(main_task, "main_task", 4096, NULL, 5, NULL);                     // Main command processing task at priority 5
+    xTaskCreate(main_task, "main_task", 4096, NULL, 5, NULL);                                          // Main command processing task at priority 5
 
     // Signal that all initialization is done
     xEventGroupSetBits(g_init_event_group, INIT_DONE_BIT);

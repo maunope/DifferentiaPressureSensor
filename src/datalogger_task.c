@@ -37,36 +37,50 @@ static void update_sensor_buffer(datalogger_task_params_t *params)
 
     if (xSemaphoreTake(g_i2c_bus_mutex, pdMS_TO_TICKS(2000)) == pdTRUE)
     {
-        esp_err_t d6fph_err = ESP_FAIL;
+        esp_err_t i2c_err = ESP_FAIL;
 
+        temperature_c = NAN;
+        pressure_pa = 0;
         if (params->bmp280_available)
         {
             // Use forced mode to ensure sensor is correctly configured for each read.
             // This is more robust, especially after waking from deep sleep.
-            if (bmp280_force_read(params->bmp280_dev, &temperature_c, &pressure_pa) != ESP_OK)
+
+            for (int retries = 0; retries < MAX_I2C_RETRIES; retries++)
             {
-                temperature_c = NAN;
-                pressure_pa = 0;
+                i2c_err = bmp280_force_read(params->bmp280_dev, &temperature_c, &pressure_pa);
+                if (i2c_err == ESP_OK)
+                    break; // Success, exit retry loop
+                vTaskDelay(pdMS_TO_TICKS(RETRY_DELAY_MS));
+            }
+            if (i2c_err != ESP_OK)
+            {
+                ESP_LOGE(TAG, "BMP280 read failed after %d attempts.", MAX_I2C_RETRIES);
             }
         }
+        else
+        {
+            ESP_LOGI(TAG, "BMP280 not available, skipping temperature and pressure read.");
+        }
 
+        diff_pressure_pa = NAN;
         if (params->d6fph_available)
         {
             for (int retries = 0; retries < MAX_I2C_RETRIES; retries++)
             {
-                d6fph_err = d6fph_read_pressure(params->d6fph_dev, &diff_pressure_pa);
-                if (d6fph_err == ESP_OK)
+                i2c_err = d6fph_read_pressure(params->d6fph_dev, &diff_pressure_pa);
+                if (i2c_err == ESP_OK)
                     break; // Success, exit retry loop
                 vTaskDelay(pdMS_TO_TICKS(RETRY_DELAY_MS));
             }
-            if (d6fph_err != ESP_OK)
+            if (i2c_err != ESP_OK)
             {
                 ESP_LOGE(TAG, "D6F-PH read failed after %d attempts.", MAX_I2C_RETRIES);
             }
         }
         else
         { // d6fph_dev is not initialized
-            diff_pressure_pa = NAN;
+            ESP_LOGI(TAG, "D6F-PH not available, skipping differential pressure read.");
         }
 
         xSemaphoreGive(g_i2c_bus_mutex);
@@ -141,11 +155,17 @@ void datalogger_task(void *pvParameters)
                 if (xSemaphoreTake(g_i2c_bus_mutex, portMAX_DELAY))
                 {
                     esp_err_t force_read_err = ESP_FAIL;
-                    if (params->bmp280_available) {
+                    if (params->bmp280_available)
+                    {
                         // Use the new blocking function to guarantee a fresh reading
                         force_read_err = bmp280_force_read(params->bmp280_dev, &temp, &press);
                     }
-                    if (params->d6fph_available)
+                    else
+                    {
+                        temp = NAN;
+                        press = 0;
+                    }
+                    if (params->d6fph_available) // Check if D6F-PH is available
                     {
                         // Also read the D6F-PH sensor
                         d6fph_read_pressure(params->d6fph_dev, &diff_press);
@@ -177,12 +197,14 @@ void datalogger_task(void *pvParameters)
             {
                 ESP_LOGI(TAG, "File deletion requested.");
                 sensor_buffer_t local_buffer_copy;
-                if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(100))) {
+                if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(100)))
+                {
                     local_buffer_copy = g_sensor_buffer;
                     xSemaphoreGive(g_sensor_buffer_mutex);
 
                     esp_err_t delete_ret = spi_sdcard_delete_file(local_buffer_copy.file_to_delete);
-                    if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(100))) {
+                    if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(100)))
+                    {
                         g_sensor_buffer.delete_file_status = (delete_ret == ESP_OK) ? CMD_STATUS_SUCCESS : CMD_STATUS_FAIL;
                         xSemaphoreGive(g_sensor_buffer_mutex);
                     }
@@ -233,7 +255,7 @@ void datalogger_task(void *pvParameters)
         {
             //  ESP_LOGI(TAG, "Scheduled log interval reached. Logging data.");
             // It's time for a scheduled log. This takes priority.
-            // Update sensors and write to SD card.            
+            // Update sensors and write to SD card.
             update_sensor_buffer(params);
 
             // Create a local copy of the buffer for logging and writing to SD

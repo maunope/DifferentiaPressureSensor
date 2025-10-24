@@ -43,9 +43,6 @@ typedef struct {
     bool high_freq_mode_enabled;
     uint64_t uptime_seconds;
     char file_to_delete[64];
-    bool bmp280_available;
-    bool d6fph_available;
-    bool ds3231_available;
     command_status_t delete_file_status;
 } sensor_buffer_t;
 
