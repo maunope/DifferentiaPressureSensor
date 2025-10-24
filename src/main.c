@@ -21,6 +21,8 @@
 #include <sys/stat.h>
 #include "esp_sleep.h"
 #include "esp_sntp.h"
+#include <unistd.h> // For unlink()
+#include <errno.h>  // For errno
 #include "esp_netif.h"
 
 #include "../lib/i2c-bmp280/i2c-bmp280.h" // BMP280 sensor API
@@ -374,25 +376,6 @@ static void handle_start_web_server(void)
         g_sensor_buffer.web_server_status = WEB_SERVER_STARTING;
         xSemaphoreGive(g_sensor_buffer_mutex);
     }
-    ESP_LOGI(TAG, "Requesting datalogger to pause for web server...");
-    xQueueSend(g_datalogger_cmd_queue, &(datalogger_command_t){DATALOGGER_CMD_PAUSE_WRITES}, 0);
-
-    // Wait for the datalogger to suspend itself.
-    ESP_LOGI(TAG, "Waiting for datalogger to pause for web server...");
-    int wait_cycles = 0;
-    const int max_wait_cycles = 150; // 150 * 20ms = 3 seconds timeout
-    while (g_datalogger_task_handle != NULL && eTaskGetState(g_datalogger_task_handle) != eSuspended && wait_cycles < max_wait_cycles) {
-        vTaskDelay(pdMS_TO_TICKS(20));
-        wait_cycles++;
-    }
-
-    if (wait_cycles >= max_wait_cycles) {
-        ESP_LOGE(TAG, "Timeout waiting for datalogger to pause for web server. Aborting web server start.");
-        handle_stop_web_server(); // Clean up and reset status
-        return;
-    }
-
-    ESP_LOGI(TAG, "Datalogger paused. Proceeding to start Wi-Fi and Web Server.");
     s_web_server_state = WEB_SERVER_FSM_CONNECTING;
     if (wifi_manager_connect(g_cfg->wifi_ssid, g_cfg->wifi_password) == ESP_OK)
     {
@@ -420,11 +403,6 @@ static bool handle_stop_web_server(void)
     // Disconnect from Wi-Fi only if it's actually connected
     if (wifi_manager_is_connected()) {
         wifi_manager_disconnect();
-    }
-
-    // Resume datalogger
-    if (g_datalogger_task_handle != NULL && eTaskGetState(g_datalogger_task_handle) == eSuspended) {
-        vTaskResume(g_datalogger_task_handle);
     }
     return true;
 }
@@ -708,8 +686,18 @@ void main_task(void *pvParameters)
         // --- Main Sleep/Wake Logic ---
         // --- Power Saving & UI Inactivity Logic ---
         uint64_t current_time_ms = esp_timer_get_time() / 1000ULL;
-        
-        bool ui_is_inactive = (current_time_ms - last_activity_ms > g_cfg->inactivity_timeout_ms);
+
+        // IMPORTANT, this also affect s the handler of SLEEP NOW message
+        // If USB is mounted by a host, treat it as continuous activity to prevent deep sleep.
+        // This is a critical safeguard.
+        if (spi_sdcard_is_usb_connected())
+        {
+            // Keep resetting the activity timer to prevent the device from entering deep sleep.
+            last_activity_ms = current_time_ms;
+        }
+
+        // The UI inactivity check for turning off the OLED should be separate.
+        bool ui_is_inactive = (current_time_ms - last_activity_ms > g_cfg->inactivity_timeout_ms) && (last_activity_ms != 0);
 
         // --- OLED Power-Off Logic ---
         // If UI is inactive but the screen is still on, turn it off.
@@ -726,6 +714,13 @@ void main_task(void *pvParameters)
         if (is_externally_powered && !is_usb_connected_state)
         {
             // USB was just connected (or was connected at boot).
+            // USB has absolute priority. If the web server is running, stop it.
+            if (local_buffer.web_server_status == WEB_SERVER_RUNNING || local_buffer.web_server_status == WEB_SERVER_STARTING)
+            {
+                ESP_LOGI(TAG, "USB connected, stopping web server to grant exclusive access.");
+                handle_stop_web_server();
+            }
+
             // Switch to full USB MSC mode.
             ESP_LOGI(TAG, "USB power detected. Initializing for MSC.");
             // De-init SD card first to release resources for TinyUSB to use.
@@ -743,14 +738,6 @@ void main_task(void *pvParameters)
             // Re-init in SD-only mode for the datalogger.
             spi_sdcard_init_sd_only();
             is_usb_connected_state = false;
-        }
-
-        //IMPORTANT, this also affect s the handler of SLEEP NOW message
-        // If USB is mounted by a host, treat it as continuous activity to prevent sleep.
-        // This is a critical safeguard.
-        if (spi_sdcard_is_usb_connected())
-        {
-            last_activity_ms = current_time_ms;
         }
 
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -908,10 +895,18 @@ void app_main(void)
         if (config_load_from_sdcard_to_flash(config_path) == ESP_OK)
         {
             ESP_LOGI(TAG, "Config loaded successfully. Renaming to %s", new_config_path);
+            // Before renaming, check if the destination file exists and delete it.
+            struct stat st_dest;
+            if (stat(new_config_path, &st_dest) == 0) {
+                ESP_LOGI(TAG, "Deleting old %s before renaming.", new_config_path);
+                if (unlink(new_config_path) != 0) {
+                    ESP_LOGE(TAG, "Failed to delete %s: %s", new_config_path, strerror(errno));
+                }
+            }
             // Rename the file to prevent it from being loaded again on next boot.
             if (rename(config_path, new_config_path) != 0)
             {
-                ESP_LOGE(TAG, "Failed to rename config file!");
+                ESP_LOGE(TAG, "Failed to rename config file: %s", strerror(errno));
             }
         }
         else

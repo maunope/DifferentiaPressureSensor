@@ -13,7 +13,7 @@ This project is a datalogger built on the ESP32-S3 platform using the ESP-IDF fr
 *   **Real-Time Clock (RTC)**: Utilizes a DS3231 RTC for accurate timestamps. The system can synchronize its time from the RTC on startup.
 *   **OLED Display & UI**: Features a menu-driven user interface on an OLED display, controlled by a rotary encoder with a push-button. The UI displays:
     *   Real-time sensor data (temperature, pressure, differential pressure, battery status).
-    *   Current timestamp.
+    *   Current local timestamp (CET/CEST).
     *   SD card write status.
     *   Persistent status icons for battery level, charging status, and SD card write errors.
     *   A settings menu to manage the RTC, SD card, view configuration, and display a QR code linking to the project repository.
@@ -21,7 +21,7 @@ This project is a datalogger built on the ESP32-S3 platform using the ESP-IDF fr
 *   **Web Server**: Can start a web server to allow downloading and previewing logged data files directly from a web browser.
 *   **High-Frequency Mode**: An optional mode for more frequent data logging and shorter sleep intervals, useful for capturing more granular data.
 *   **Robust Power Management**: Implements a command-driven deep sleep cycle to conserve battery. The datalogger task explicitly signals when it's safe to sleep, preventing race conditions and ensuring data integrity. The device wakes up on a timer for the next log or via user interaction.
-*   **Power Management**: Implements deep sleep to conserve battery, waking up on a timer or via user interaction (rotary encoder button). The OLED screen also powers down after a period of inactivity.
+*   **Web File Management**: The web interface allows users to list, preview, download, and delete log files directly from the device.
 *   **Exclusive File System Access**: To prevent data corruption, the system ensures that only one component (Datalogger, Web Server, or USB Mass Storage) can access the SD card at a time. For example, starting the web server will pause the datalogger, and connecting the device to a PC will disable both the web server and the datalogger.
 *   **Configuration via INI file**: Key parameters like sleep intervals, Wi-Fi credentials, and sensor models can be configured via a `config.ini` file on the SD card. The device does not go to sleep while the web server is active.
 *   **RTOS-based**: Built on FreeRTOS, with separate tasks for data logging and UI rendering for a responsive and robust application.

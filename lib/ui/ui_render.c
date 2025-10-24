@@ -338,11 +338,19 @@ void render_web_server_callback(void)
 
 void page_web_server_on_btn(void)
 {
+    // This function is called when the button is pressed on the QR code/URL screen.
+    // It should stop the server and return to the main menu.
     app_command_t cmd = APP_CMD_STOP_WEB_SERVER;
     xQueueSend(g_app_cmd_queue, &cmd, 0);
     s_web_qr_code_cached = false; // Invalidate cache for next time
-    s_menu_mode = true;
-    s_current_page = NULL;
+    
+    // Go back to the main menu.
+    // We don't use menu_cancel_on_btn() here because we might not have come from a menu.
+    // This ensures we always land on the main menu screen.
+    current_page = 0;
+    current_item = 0;
+    s_menu_mode = true;     // Switch to menu mode
+    s_current_page = NULL;  // Let the main loop render the menu
 }
 
 /**
@@ -623,6 +631,11 @@ void render_cmd_feedback_screen(void)
         }
         else if (now - s_cmd_feedback_display_start_ms > 300)
         {                               // Show for 300ms
+            if (s_post_cmd_action == POST_ACTION_GO_BACK)
+            {
+                menu_cancel_on_btn();
+            }
+            s_post_cmd_action = POST_ACTION_NONE; // Clear action
             s_cmd_pending_mode = false; // Exit loading mode
             if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY))
             {
@@ -630,11 +643,6 @@ void render_cmd_feedback_screen(void)
                 xSemaphoreGive(g_command_status_mutex);
             }
         }
-        if (s_post_cmd_action == POST_ACTION_GO_BACK)
-        {
-            menu_cancel_on_btn();
-        }
-        s_post_cmd_action = POST_ACTION_NONE; // Clear action
     }
     else if (current_status == CMD_STATUS_FAIL)
     {
@@ -645,6 +653,11 @@ void render_cmd_feedback_screen(void)
         }
         else if (now - s_cmd_feedback_display_start_ms > 500)
         {                               // Show for 500ms
+            if (s_post_cmd_action == POST_ACTION_GO_BACK)
+            {
+                menu_cancel_on_btn();
+            }
+            s_post_cmd_action = POST_ACTION_NONE; // Clear action
             s_cmd_pending_mode = false; // Exit loading mode
             if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY))
             {
@@ -652,7 +665,6 @@ void render_cmd_feedback_screen(void)
                 xSemaphoreGive(g_command_status_mutex);
             }
         }
-        s_post_cmd_action = POST_ACTION_NONE; // Clear action
     }
     else
     {
@@ -672,6 +684,12 @@ void render_cmd_feedback_screen(void)
     i2c_oled_update_screen(s_oled_i2c_num);
 }
 
+/**
+ * @brief Draws all status icons (HF Mode, SD Error, Battery) in the top-right corner.
+ *
+ * This function handles the positioning and rendering of all status icons,
+ * ensuring they are correctly aligned and do not overlap.
+ */
 /*
  * @brief Draws all status icons (HF Mode, SD Error, Battery) in the top-right corner.
  *
@@ -776,6 +794,14 @@ static void draw_status_icons(void)
     }
 }
 
+/**
+ * @brief Enters the command feedback UI mode.
+ * 
+ * This function switches the UI to a "Loading..." screen and sets up a timeout.
+ * It's used for long-running, asynchronous operations like formatting the SD card.
+ * @param timeout_ms The timeout duration in milliseconds.
+ * @param post_action The action to perform after the command completes (e.g., go back).
+ */
 static void enter_cmd_pending_mode(uint32_t timeout_ms, post_cmd_action_t post_action)
 {
     s_cmd_pending_mode = true;
@@ -792,6 +818,11 @@ static void enter_cmd_pending_mode(uint32_t timeout_ms, post_cmd_action_t post_a
 
 
 
+/**
+ * @brief The main task for the user interface.
+ * 
+ * This task runs an infinite loop to process UI events from a queue, update the display state, and call the appropriate rendering functions.
+ */
 // --- UI task ---
 void uiRender_task(void *pvParameters)
 {
@@ -986,7 +1017,7 @@ void menu_format_sd_confirm_on_btn(void)
     {
         app_command_t cmd = APP_CMD_FORMAT_SD_CARD;
         xQueueSend(g_app_cmd_queue, &cmd, 0);
-        enter_cmd_pending_mode(30000, POST_ACTION_GO_BACK); // 30s timeout
+        enter_cmd_pending_mode(30000, POST_ACTION_GO_BACK); // 30s timeout, then go back
     }
     else
     {
@@ -1000,7 +1031,7 @@ void menu_sync_rtc_ntp_on_btn(void)
     {
         app_command_t cmd = APP_CMD_SYNC_RTC_NTP;
         xQueueSend(g_app_cmd_queue, &cmd, 0);
-        enter_cmd_pending_mode(45000, POST_ACTION_NONE); // 45s timeout
+        enter_cmd_pending_mode(45000, POST_ACTION_GO_BACK); // 45s timeout, then go back
     }
     else
     {
@@ -1014,7 +1045,7 @@ void menu_set_time_on_btn(void)
     {
         app_command_t cmd = APP_CMD_SET_RTC_BUILD_TIME;
         xQueueSend(g_app_cmd_queue, &cmd, 0);
-        enter_cmd_pending_mode(5000, POST_ACTION_NONE); // 5s timeout
+        enter_cmd_pending_mode(5000, POST_ACTION_GO_BACK); // 5s timeout, then go back
     }
     else
     {
@@ -1083,13 +1114,19 @@ void page_fs_stats_on_btn(void)
 
 void menu_web_server_on_btn(void)
 {
-    s_menu_mode = false;
-    s_current_page = &web_server_page;
-    s_web_qr_code_cached = false; // Invalidate QR cache on entry
-    s_web_page_view = 0;          // Default to QR view
-
-    app_command_t cmd = APP_CMD_START_WEB_SERVER;
-    xQueueSend(g_app_cmd_queue, &cmd, 0);
+    // Send the start command and enter a pending state.
+    // The main_task will handle the state transitions.
+    // The UI will show "Loading..." and then automatically switch to the
+    // web server page upon success, or show "Failed" and return.
+    if (g_app_cmd_queue != NULL)
+    {
+        app_command_t cmd = APP_CMD_START_WEB_SERVER;
+        xQueueSend(g_app_cmd_queue, &cmd, 0);
+        // We don't use enter_cmd_pending_mode here because the web server page
+        // has its own complex state rendering. We just need to switch to it.
+        s_menu_mode = false;
+        s_current_page = &web_server_page;
+    }
 }
 
 void page_web_server_on_cw(void)

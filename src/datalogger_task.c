@@ -106,7 +106,7 @@ void datalogger_task(void *pvParameters)
     xEventGroupWaitBits(g_init_event_group, INIT_DONE_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
 
     // Set the CSV header for all new log files.
-    spi_sdcard_set_csv_header("timestamp_gmt,datetime_cet,temperature_c,pressure_pa,diff_pressure_pa,battery_voltage,battery_percentage,uptime_seconds");
+    spi_sdcard_set_csv_header("timestamp_gmt,datetime_local,temperature_c,pressure_pa,diff_pressure_pa,battery_voltage,battery_percentage,uptime_seconds");
 
     // Perform an initial sensor update right after startup.
     update_sensor_buffer(bmp280_dev, params->d6fph_dev);
@@ -173,6 +173,21 @@ void datalogger_task(void *pvParameters)
                 ESP_LOGI(TAG, "Rotating log file on request.");
                 spi_sdcard_rotate_file();
             }
+            else if (cmd == DATALOGGER_CMD_DELETE_FILE)
+            {
+                ESP_LOGI(TAG, "File deletion requested.");
+                sensor_buffer_t local_buffer_copy;
+                if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(100))) {
+                    local_buffer_copy = g_sensor_buffer;
+                    xSemaphoreGive(g_sensor_buffer_mutex);
+
+                    esp_err_t delete_ret = spi_sdcard_delete_file(local_buffer_copy.file_to_delete);
+                    if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(100))) {
+                        g_sensor_buffer.delete_file_status = (delete_ret == ESP_OK) ? CMD_STATUS_SUCCESS : CMD_STATUS_FAIL;
+                        xSemaphoreGive(g_sensor_buffer_mutex);
+                    }
+                }
+            }
         }
 
         time_t current_ts = time(NULL);
@@ -238,7 +253,7 @@ void datalogger_task(void *pvParameters)
             char local_time_str[32];
             struct tm local_tm;
             convert_gmt_to_cet(local_buffer.timestamp, &local_tm);
-            strftime(local_time_str, sizeof(local_time_str), "%Y-%m-%d %H:%M:%S %Z", &local_tm);
+            strftime(local_time_str, sizeof(local_time_str), "%Y-%m-%d %H:%M:%S", &local_tm);
 
             // Log to console
             ESP_LOGI(TAG, "TS: %s, Temp: %.2fC, Press: %ldPa, Diff: %.2fPa Batt: %d%% (%.2fV), Charging: %d, WriteSD: %d", local_time_str, local_buffer.temperature_c, local_buffer.pressure_pa, local_buffer.diff_pressure_pa, local_buffer.battery_percentage, local_buffer.battery_voltage, local_buffer.battery_externally_powered, local_buffer.writeStatus);

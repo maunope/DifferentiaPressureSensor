@@ -8,7 +8,7 @@
 #include "nvs.h"
 
 static const char *TAG = "ConfigManager";
-static const char *NVS_NAMESPACE = "app_config";
+static const char *NVS_NAMESPACE = "config";
 
 // --- Helper Functions ---
 
@@ -17,12 +17,17 @@ static const char *NVS_NAMESPACE = "app_config";
  */
 static char* trim_whitespace(char *str) {
     char *end;
+    // Trim leading space
     while (isspace((unsigned char)*str)) str++;
-    if (*str == 0) return str;
+
+    if (*str == 0)  // All spaces?
+        return str;
+
+    // Trim trailing space
     end = str + strlen(str) - 1;
     while (end > str && isspace((unsigned char)*end)) end--;
-    
-    // Add null terminator
+
+    // Write new null terminator
     *(end + 1) = '\0';
 
     return str;
@@ -40,7 +45,7 @@ static esp_err_t parse_and_store_line(nvs_handle_t nvs_handle, char *line)
         key = trim_whitespace(key);
         value = trim_whitespace(value);
         if (strlen(key) > 0) {
-            ESP_LOGI(TAG, "Storing to NVS: key='%s', value='%s'", key, value);
+            ESP_LOGD(TAG, "Storing to NVS: key='%s', value='%s'", key, value);
             return nvs_set_str(nvs_handle, key, value);
         }
     }
@@ -49,10 +54,12 @@ static esp_err_t parse_and_store_line(nvs_handle_t nvs_handle, char *line)
 
 // --- Public API Implementation ---
 
-esp_err_t config_init(void) {
+esp_err_t config_init(void)
+{
     // Initialize NVS
     esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
+    {
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
     }
@@ -67,6 +74,8 @@ esp_err_t config_load_from_sdcard_to_flash(const char* config_filepath) {
         return ESP_FAIL;
     }
 
+    ESP_LOGI(TAG, "Loading config from %s and writing to NVS...", config_filepath);
+
     nvs_handle_t nvs_handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
     if (err != ESP_OK) {
@@ -74,9 +83,6 @@ esp_err_t config_load_from_sdcard_to_flash(const char* config_filepath) {
         fclose(f);
         return err;
     }
-
-    // Erase the namespace to ensure a clean slate before loading new config
-    nvs_erase_all(nvs_handle);
 
     char line[256];
     while (fgets(line, sizeof(line), f)) {
@@ -86,9 +92,15 @@ esp_err_t config_load_from_sdcard_to_flash(const char* config_filepath) {
         if (trimmed_line[0] == '#' || trimmed_line[0] == ';' || trimmed_line[0] == '\0' || trimmed_line[0] == '[') {
             continue;
         }
-        err = parse_and_store_line(nvs_handle, trimmed_line);
+
+        // strtok modifies the string, so we use a copy for parsing
+        char line_copy[256];
+        strncpy(line_copy, trimmed_line, sizeof(line_copy)-1);
+        line_copy[sizeof(line_copy)-1] = '\0';
+
+        err = parse_and_store_line(nvs_handle, line_copy);
         if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to store line in NVS: %s", esp_err_to_name(err));
+            ESP_LOGW(TAG, "Failed to store line in NVS: '%s'", trimmed_line);
             // Continue parsing other lines
         }
     }
@@ -100,9 +112,9 @@ esp_err_t config_load_from_sdcard_to_flash(const char* config_filepath) {
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to commit NVS changes: %s", esp_err_to_name(err));
     } else {
-        ESP_LOGI(TAG, "Configuration from SD card loaded and committed to flash.");
+        ESP_LOGI(TAG, "Configuration from SD card has been processed and committed to flash.");
     }
-    
+
     nvs_close(nvs_handle);
     return err;
 }
@@ -137,13 +149,13 @@ void config_get_string(const char* key, const char* default_val, char* out_buf, 
         goto set_default;
     }
 
-    ESP_LOGI(TAG, "Retrieving string for key '%s' from NVS", key);
+    ESP_LOGD(TAG, "Retrieving string for key '%s' from NVS", key);
     size_t required_size = 0;
     // First, get the required size
     err = nvs_get_str(nvs_handle, key, NULL, &required_size);
     if (err != ESP_OK) {
         if (err == ESP_ERR_NVS_NOT_FOUND) {
-            ESP_LOGI(TAG, "Key '%s' not found in NVS, using default value: '%s'", key, default_val);
+            ESP_LOGD(TAG, "Key '%s' not found in NVS, using default value: '%s'", key, default_val);
         } else {
             ESP_LOGW(TAG, "NVS get_str (size check) failed for key '%s': %s", key, esp_err_to_name(err));
         }
@@ -157,7 +169,7 @@ void config_get_string(const char* key, const char* default_val, char* out_buf, 
 
     err = nvs_get_str(nvs_handle, key, out_buf, &required_size);
     if (err == ESP_OK) {
-        ESP_LOGI(TAG, "Retrieved string for key '%s': '%s'", key, out_buf);
+        ESP_LOGD(TAG, "Retrieved string for key '%s': '%s'", key, out_buf);
     } else { // Should not happen if size check passed, but for safety
         ESP_LOGW(TAG, "NVS get_str failed for key '%s': %s", key, esp_err_to_name(err));
         goto set_default;

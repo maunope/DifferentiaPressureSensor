@@ -2,6 +2,12 @@
 
 #include "esp_err.h"
 #include <stddef.h>
+#include <limits.h> // For INT_MIN
+#include <float.h>  // For FLT_MAX
+
+// Sentinel values to indicate a configuration value was not found in the INI file.
+#define CONFIG_VALUE_NOT_FOUND_FLOAT FLT_MAX
+#define CONFIG_VALUE_NOT_FOUND_INT   INT32_MIN
 
 #define CONFIG_STRING_MAX_LEN 256
 
@@ -18,8 +24,11 @@ esp_err_t config_init(void);
 /**
  * @brief Loads configuration from an .ini file on the SD card into flash (NVS).
  *
- * This function reads all key-value pairs from the specified file and writes
- * them to the NVS partition in an atomic operation.
+ * This function reads key-value pairs from the specified file. For each key,
+ * if a valid value is found in the .ini file, it updates that specific key in NVS.
+ * If a key is missing from the .ini file, its corresponding value in NVS is left
+ * untouched. This prevents an invalid or incomplete .ini file from overwriting
+ * the entire NVS configuration with defaults.
  *
  * @param config_filepath Path to the .ini file on the SD card (e.g., "/sdcard/config.ini").
  * @return ESP_OK on success, or an error code on failure.

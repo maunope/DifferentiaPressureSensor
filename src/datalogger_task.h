@@ -19,6 +19,7 @@ typedef enum {
      */
     DATALOGGER_CMD_PAUSE_WRITES,
     DATALOGGER_CMD_ROTATE_FILE,
+    DATALOGGER_CMD_DELETE_FILE,
 } datalogger_command_t;
 
 extern QueueHandle_t g_datalogger_cmd_queue;

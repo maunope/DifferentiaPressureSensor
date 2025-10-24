@@ -65,9 +65,9 @@ The following table details the GPIO connections for the main peripherals.
 | **OLED I2C Bus**        | `I2C1_SDA`      | 40            | Dedicated bus for the display       |
 |                         | `I2C1_SCL`      | 39            |                                     |
 | **SD Card (SPI)**       | `SPI_MOSI`      | 11            | Standard SPI pins for SD card       |
-|                         | `SPI_MISO`      | 13            |                                     |
+|                         | `SPI_MISO`      | 10            |                                     |
 |                         | `SPI_CLK`       | 12            |                                     |
-|                         | `SPI_CS`        | 10            |                                     |
+|                         | `SPI_CS`        | 13            |                                     |
 | **Rotary Encoder**      | `ENC_A`         | 41            |                                     |
 |                         | `ENC_B`         | 42            |                                     |
 |                         | `ENC_BTN`       | 2             | Also used as a deep sleep wakeup pin|

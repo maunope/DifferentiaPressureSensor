@@ -54,6 +54,7 @@ This task handles all sensor reading and data storage.
 *   **Receives**: Commands like `DATALOGGER_CMD_PAUSE_WRITES` and `DATALOGGER_CMD_RESUME_WRITES` from the `main_task`.
 *   **Writes**: The latest sensor readings and status information to the shared `g_sensor_buffer`.
 *   **Responsibilities**:
+    *   Handles file system commands sent from other tasks, such as deleting a log file (`DATALOGGER_CMD_DELETE_FILE`).
     *   Periodically wakes up to read data from the BMP280, D6F-PH, and battery monitor.
     *   Formats the data into CSV format.
     *   Writes the data to the SD card.
@@ -75,21 +76,21 @@ This task handles all sensor reading and data storage.
 
 ## Exclusive File System Access
 
-The SD card is a critical shared resource. To prevent file system corruption that could occur if multiple tasks tried to write to it simultaneously, the system enforces a strict exclusive access policy. This arbitration is managed by the `main_task`.
+The SD card is a critical shared resource. To prevent file system corruption, all file system operations are protected by a dedicated mutex (`g_sdcard_mutex` in the `spi-sdcard` library). This ensures that only one operation (e.g., writing a log line, deleting a file, listing files for the web server) can occur at a time, even when multiple tasks are running concurrently.
 
 There are three components that can access the SD card:
 
 1.  **Datalogger Task**: The default owner, responsible for writing sensor data logs.
 2.  **Web Server**: Allows a user to list, download, and delete files via a web browser.
-3.  **USB Mass Storage (MSC)**: Allows a host computer to mount the SD card as a drive.
+3.  **USB Mass Storage (MSC)**: Allows a host computer to mount the SD card as a drive, which has the highest priority.
 
 The access rules are as follows:
 
 *   **USB Mass Storage has absolute priority.** If the device is connected to a PC and the SD card is mounted by the host computer, the `main_task` will automatically stop the web server (if it's running) and will prevent both the web server and the datalogger from starting. This gives the host computer exclusive control to ensure a stable connection and prevent data corruption.
-*   **The Web Server has the next priority.** When the user starts the web server, the `main_task` first commands the `datalogger_task` to pause. Only after the datalogger is suspended does the web server start. When the web server is stopped, the `main_task` resumes the datalogger.
-*   **The Datalogger runs by default.** It operates whenever no other component needs exclusive access to the file system.
+*   **Concurrent Operation with Mutex Protection**: The `datalogger_task` (writing logs) and the Web Server task (listing/deleting files) can run at the same time. They do not need to pause each other. The low-level `g_sdcard_mutex` serializes their access to the SD card, preventing conflicts. For example, if the web server is deleting a file, the datalogger's attempt to write a new line will block on the mutex until the deletion is complete.
+*   **Special Operations (Formatting)**: For destructive, long-running operations like formatting the SD card, the `main_task` still explicitly pauses the `datalogger_task` to ensure the file system is completely idle.
 
-This state management ensures that there is only ever one "writer" or "manager" for the SD card, guaranteeing data integrity. As an additional safety measure, the `spi_sdcard_write_line` function inside the `spi-sdcard` library also performs its own check (`spi_sdcard_is_usb_connected()`) before any write operation. This provides a final safeguard against writes, since the activation of the USB MSC stack is handled by the TinyUSB component and is not directly controlled by the application tasks.
+This mutex-based approach provides more efficient and responsive operation than pausing entire tasks, while still guaranteeing data integrity.
 
 ## Power Management & Deep Sleep
 

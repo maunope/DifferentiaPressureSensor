@@ -11,7 +11,6 @@
 void spi_sdcard_full_init(void);
 void spi_sdcard_init_sd_only(void);
 void spi_sdcard_deinit(void);
-void spi_sdcard_format(void);
 void spi_sdcard_rotate_file(void);
 
 
@@ -46,3 +45,17 @@ bool spi_sdcard_is_usb_connected(void);
  * @param header The null-terminated string to use as the CSV header.
  */
 void spi_sdcard_set_csv_header(const char* header);
+
+/**
+ * @brief Deletes a file from the SD card.
+ *
+ * @param path Full path of the file to delete.
+ * @return esp_err_t ESP_OK on success, or an error code on failure.
+ */
+esp_err_t spi_sdcard_delete_file(const char *path);
+
+/**
+ * @brief Formats the SD card.
+ * @return esp_err_t ESP_OK on success, or an error code on failure.
+ */
+esp_err_t spi_sdcard_format(void);

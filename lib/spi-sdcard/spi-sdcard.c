@@ -16,6 +16,8 @@
 #include "tinyusb_msc.h"
 #include "../ui/time_utils.h"
 #include <stdbool.h>
+#include <errno.h>
+#include <unistd.h>
 
 #include <sys/stat.h>
 #include <dirent.h>
@@ -413,12 +415,12 @@ bool spi_sdcard_is_usb_connected(void)
  * in a single, robust operation. It prevents race conditions and ensures the
  * file system is in a clean state after formatting.
  */
-void spi_sdcard_format(void)
+esp_err_t spi_sdcard_format(void)
 {
     ESP_LOGI(TAG, "Attempting to format SD card.");
     esp_err_t ret = ESP_FAIL;
 
-    if (spi_sdcard_is_usb_connected())
+    if (tud_ready())
     {
         ESP_LOGE(TAG, "Cannot format: SD card is mounted as USB Mass Storage.");
     }
@@ -443,9 +445,42 @@ void spi_sdcard_format(void)
         }
     }
 
-    if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY))
+    return ret;
+}
+
+/**
+ * @brief Deletes a file from the SD card.
+ *
+ * @param path Full path of the file to delete.
+ * @return ESP_OK on success, ESP_FAIL on failure.
+ */
+esp_err_t spi_sdcard_delete_file(const char *path)
+{
+    if (!mounted)
     {
-        g_command_status = (ret == ESP_OK) ? CMD_STATUS_SUCCESS : CMD_STATUS_FAIL;
-        xSemaphoreGive(g_command_status_mutex);
+        ESP_LOGE(TAG, "SD card not mounted, cannot delete file.");
+        return ESP_FAIL;
     }
+
+    if (tud_ready())
+    {
+        ESP_LOGE(TAG, "USB is connected, cannot delete file.");
+        return ESP_FAIL;
+    }
+
+    if (path == NULL || strlen(path) == 0)
+    {
+        ESP_LOGE(TAG, "Invalid path for file deletion.");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "Deleting file: %s", path);
+    if (unlink(path) == 0)
+    {
+        ESP_LOGI(TAG, "File deleted successfully.");
+        return ESP_OK;
+    }
+
+    ESP_LOGE(TAG, "Failed to delete file: %s. Error: %s", path, strerror(errno));
+    return ESP_FAIL;
 }
