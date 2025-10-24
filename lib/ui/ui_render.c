@@ -120,10 +120,12 @@ static int8_t current_item = 0;
 static sensor_buffer_t s_local_sensor_buffer;
 
 // --- Initialization and event send ---
-void uiRender_init(i2c_master_bus_handle_t bus_handle, uint8_t oled_i2c_addr)
+esp_err_t uiRender_init(i2c_master_bus_handle_t bus_handle, uint8_t oled_i2c_addr)
 {
-    i2c_oled_bus_init(bus_handle, oled_i2c_addr);
+    esp_err_t ret = i2c_oled_bus_init(bus_handle, oled_i2c_addr);
+    if (ret != ESP_OK) return ret;
     s_oled_initialized = true;
+    return ESP_OK;
 }
 
 void uiRender_send_event(int event, float *values, int value_count)

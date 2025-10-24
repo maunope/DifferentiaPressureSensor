@@ -20,6 +20,9 @@ sensor_buffer_t g_sensor_buffer = {
     .sd_card_free_bytes = -2, // -2 indicates loading
     .high_freq_mode_enabled = false,
     .uptime_seconds = 0,
+    .bmp280_available = false,
+    .d6fph_available = false,
+    .ds3231_available = false
 };
 
 SemaphoreHandle_t g_sensor_buffer_mutex = NULL;

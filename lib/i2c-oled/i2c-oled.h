@@ -117,7 +117,8 @@ static const uint8_t font5x7[96][5] = {
  */
 #define i2c_oled_bus_init_default(i2c_num, sda, scl) i2c_oled_bus_init(i2c_num, sda, scl, OLED_I2C_ADDR)
 
-void i2c_oled_bus_init(i2c_master_bus_handle_t bus_handle, uint8_t i2c_addr);
+esp_err_t i2c_oled_bus_init(i2c_master_bus_handle_t bus_handle, uint8_t i2c_addr);
+void i2c_oled_bus_deinit(void);
 void i2c_oled_send_init_commands(i2c_port_t i2c_num);
 void i2c_oled_clear(i2c_port_t i2c_num);
 void i2c_oled_write_text(i2c_port_t i2c_num, uint8_t row, uint8_t col, const char *text);

@@ -84,6 +84,12 @@ static RTC_DATA_ATTR uint64_t rtc_last_boot_time_ms = 0;
 
 static const char *TAG = "main";
 
+typedef enum {
+    I2C_BUS_SENSORS, // I2C_NUM_0 for main peripherals
+    I2C_BUS_OLED,    // I2C_NUM_1 for the display
+    I2C_BUS_ALL      // Both buses
+} i2c_bus_target_t;
+
 bool rtc_available = false;
 
 ds3231_t g_rtc;    // Global RTC device handle
@@ -481,6 +487,50 @@ static esp_err_t i2c_bus_init(void)
     ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst1_config, &g_i2c_bus1_handle));
 
     return ESP_OK;
+}
+
+/**
+ * @brief De-initializes I2C buses and detaches all devices.
+ *
+ * This function safely detaches all known I2C devices from their buses
+ * and then deletes the bus handles, freeing the resources.
+ */
+static void i2c_bus_deinit(i2c_bus_target_t bus_to_deinit)
+{
+    ESP_LOGI(TAG, "De-initializing I2C bus(es)...");
+
+    if (bus_to_deinit == I2C_BUS_SENSORS || bus_to_deinit == I2C_BUS_ALL) {
+        ESP_LOGD(TAG, "Detaching devices from bus 0...");
+        // --- Detach devices from bus 0 ---
+        if (g_rtc.i2c_dev_handle) {
+            i2c_master_bus_rm_device(g_rtc.i2c_dev_handle);
+            g_rtc.i2c_dev_handle = NULL;
+        }
+        if (g_bmp280.i2c_dev_handle) {
+            i2c_master_bus_rm_device(g_bmp280.i2c_dev_handle);
+            g_bmp280.i2c_dev_handle = NULL;
+        }
+        if (g_d6fph.i2c_dev_handle) {
+            i2c_master_bus_rm_device(g_d6fph.i2c_dev_handle);
+            g_d6fph.i2c_dev_handle = NULL;
+        }
+        // --- Delete bus 0 handle ---
+        if (g_i2c_bus0_handle) {
+            i2c_del_master_bus(g_i2c_bus0_handle);
+            g_i2c_bus0_handle = NULL;
+        }
+    }
+
+    if (bus_to_deinit == I2C_BUS_OLED || bus_to_deinit == I2C_BUS_ALL) {
+        ESP_LOGD(TAG, "Detaching device from bus 1...");
+        // --- Detach device from bus 1 ---
+        i2c_oled_bus_deinit();
+        // --- Delete bus 1 handle ---
+        if (g_i2c_bus1_handle) {
+            i2c_del_master_bus(g_i2c_bus1_handle);
+            g_i2c_bus1_handle = NULL;
+        }
+    }
 }
 
 // --- Main Application Entry Point ---
@@ -938,23 +988,12 @@ void app_main(void)
     config_params_init();
     g_cfg = config_params_get();
 
-    // Initialize BMP280 Sensor.
-    err = bmp280_init(&g_bmp280, g_i2c_bus0_handle, BMP280_I2C_ADDR);
-    if (err != ESP_OK)
-    {
-        ESP_LOGE(TAG, "BMP280 sensor initialization failed, stopping.");
-        return;
-    }
+
 
     // --- Step 4: Initialize hardware drivers and peripherals ---
     // Initialize Battery Reader first, as it uses ADC which can conflict if I2C is initialized first
     battery_reader_init(BATTERY_ADC_PIN, BATTERY_PWR_PIN, g_cfg->battery_voltage_divider_ratio);
-    // Initialize D6F-PH Sensor.
-    err = d6fph_init(&g_d6fph, g_i2c_bus0_handle, D6FPH_I2C_ADDR, g_cfg->d6fph_model);
-    if (err != ESP_OK)
-    {
-        ESP_LOGE(TAG, "D6F-PH sensor initialization failed.");
-    }
+
 
     // --- Step 5: Initialize and validate the external Real-Time Clock (RTC) ---
     ds3231_init(&g_rtc, g_i2c_bus0_handle, DS3231_I2C_ADDR);
@@ -995,11 +1034,41 @@ void app_main(void)
         settimeofday(&tv, NULL);
         ESP_LOGI(TAG, "System time synchronized from DS3231 RTC to UTC.");
     }
+    if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY))
+    {
+        g_sensor_buffer.ds3231_available = rtc_available;
+        xSemaphoreGive(g_sensor_buffer_mutex);
+    }
     else
     {
         rtc_available = false;
         ESP_LOGW(TAG, "RTC not available, using ESP32 system time.");
     }
+
+    // Initialize D6F-PH Sensor.
+    bool d6fph_available = (d6fph_init(&g_d6fph, g_i2c_bus0_handle, D6FPH_I2C_ADDR, g_cfg->d6fph_model) == ESP_OK);
+    if (!d6fph_available)
+    {
+        ESP_LOGE(TAG, "D6F-PH sensor initialization failed.");
+    }
+    if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY))
+    {
+        g_sensor_buffer.d6fph_available = d6fph_available;
+        xSemaphoreGive(g_sensor_buffer_mutex);
+    }
+
+    // Initialize BMP280 Sensor.
+    bool bmp280_available = (bmp280_init(&g_bmp280, g_i2c_bus0_handle, BMP280_I2C_ADDR) == ESP_OK);
+    if (!bmp280_available)
+    {
+        ESP_LOGE(TAG, "BMP280 sensor initialization failed, stopping.");
+    }
+    if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY))
+    {
+        g_sensor_buffer.bmp280_available = bmp280_available;
+        xSemaphoreGive(g_sensor_buffer_mutex);
+    }
+
 
     // --- Step 6: Initialize user input (Rotary Encoder) ---
     rotaryencoder_config_t encoder_cfg = {
@@ -1038,6 +1107,8 @@ void app_main(void)
     }
     datalogger_params->bmp280_dev = &g_bmp280;
     datalogger_params->d6fph_dev = &g_d6fph;
+    datalogger_params->bmp280_available = bmp280_available;
+    datalogger_params->d6fph_available = d6fph_available;
     datalogger_params->log_interval_ms = g_cfg->log_interval_ms;
     datalogger_params->hf_log_interval_ms = g_cfg->hf_log_interval_ms;
 

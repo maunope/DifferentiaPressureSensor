@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include "driver/i2c_master.h"
 #include "../i2c-oled/i2c-oled.h"
+#include "esp_err.h"
 
 
 #define UI_MAX_MENU_ITEMS 20
@@ -43,7 +44,7 @@ extern const ui_page_t settings_page;
 extern const ui_page_t fs_stats_page;
 
 // UI task API
-void uiRender_init(i2c_master_bus_handle_t bus_handle, uint8_t oled_i2c_addr);
+esp_err_t uiRender_init(i2c_master_bus_handle_t bus_handle, uint8_t oled_i2c_addr);
 void uiRender_task(void *pvParameters);
 void uiRender_send_event(int event, float *values, int value_count);
 

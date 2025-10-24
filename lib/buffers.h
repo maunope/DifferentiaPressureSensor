@@ -40,7 +40,7 @@ typedef struct {
     float temperature_c;
     float diff_pressure_pa;
     time_t timestamp;
-    time_t last_successful_write_ts;
+    time_t last_successful_write_ts; // Timestamp of the last successful write
     bool timestamp_from_rtc; 
     float battery_voltage;
     int battery_percentage;
@@ -50,6 +50,9 @@ typedef struct {
     bool high_freq_mode_enabled;
     uint64_t uptime_seconds;
     char file_to_delete[64];
+    bool bmp280_available;
+    bool d6fph_available;
+    bool ds3231_available;
     command_status_t delete_file_status;
     uint32_t sd_card_free_space_mb;
 } sensor_buffer_t;

@@ -24,7 +24,7 @@ static const char *TAG = "DataloggerTask";
  * I2C bus and the shared sensor buffer.
  * @param bmp280_dev Pointer to the initialized BMP280 device descriptor.
  */
-static void update_sensor_buffer(bmp280_t *bmp280_dev, d6fph_t *d6fph_dev)
+static void update_sensor_buffer(datalogger_task_params_t *params)
 {
     const int MAX_I2C_RETRIES = 3;
     const int RETRY_DELAY_MS = 50;
@@ -39,20 +39,22 @@ static void update_sensor_buffer(bmp280_t *bmp280_dev, d6fph_t *d6fph_dev)
     {
         esp_err_t d6fph_err = ESP_FAIL;
 
-        // Use forced mode to ensure sensor is correctly configured for each read.
-        // This is more robust, especially after waking from deep sleep.
-        if (bmp280_force_read(bmp280_dev, &temperature_c, &pressure_pa) != ESP_OK)
+        if (params->bmp280_available)
         {
-            //  ESP_LOGE(TAG, "BMP280 force read failed.");
-            temperature_c = NAN;
-            pressure_pa = 0;
+            // Use forced mode to ensure sensor is correctly configured for each read.
+            // This is more robust, especially after waking from deep sleep.
+            if (bmp280_force_read(params->bmp280_dev, &temperature_c, &pressure_pa) != ESP_OK)
+            {
+                temperature_c = NAN;
+                pressure_pa = 0;
+            }
         }
 
-        if (d6fph_dev && d6fph_dev->is_initialized)
+        if (params->d6fph_available)
         {
             for (int retries = 0; retries < MAX_I2C_RETRIES; retries++)
             {
-                d6fph_err = d6fph_read_pressure(d6fph_dev, &diff_pressure_pa);
+                d6fph_err = d6fph_read_pressure(params->d6fph_dev, &diff_pressure_pa);
                 if (d6fph_err == ESP_OK)
                     break; // Success, exit retry loop
                 vTaskDelay(pdMS_TO_TICKS(RETRY_DELAY_MS));
@@ -96,7 +98,6 @@ void datalogger_task(void *pvParameters)
 {
     // The BMP280 device handle is passed as the task parameter.
     datalogger_task_params_t *params = (datalogger_task_params_t *)pvParameters;
-    bmp280_t *bmp280_dev = params->bmp280_dev;
     const uint32_t LOG_INTERVAL_MS_NORMAL = params->log_interval_ms;
     const uint32_t LOG_INTERVAL_MS_HF = params->hf_log_interval_ms;
     ESP_LOGI(TAG, "Datalogger task started with intervals: Normal=%lu ms, HF=%lu ms", (unsigned long)LOG_INTERVAL_MS_NORMAL, (unsigned long)LOG_INTERVAL_MS_HF);
@@ -109,7 +110,7 @@ void datalogger_task(void *pvParameters)
     spi_sdcard_set_csv_header("timestamp_gmt,datetime_local,temperature_c,pressure_pa,diff_pressure_pa,battery_voltage,battery_percentage,uptime_seconds");
 
     // Perform an initial sensor update right after startup.
-    update_sensor_buffer(bmp280_dev, params->d6fph_dev);
+    update_sensor_buffer(params);
 
     bool refresh_requested = false;
 
@@ -139,16 +140,15 @@ void datalogger_task(void *pvParameters)
                 long press;
                 if (xSemaphoreTake(g_i2c_bus_mutex, portMAX_DELAY))
                 {
-                    // Use the new blocking function to guarantee a fresh reading
-                    esp_err_t force_read_err = bmp280_force_read(bmp280_dev, &temp, &press);
-                    if (params->d6fph_dev && params->d6fph_dev->is_initialized)
+                    esp_err_t force_read_err = ESP_FAIL;
+                    if (params->bmp280_available) {
+                        // Use the new blocking function to guarantee a fresh reading
+                        force_read_err = bmp280_force_read(params->bmp280_dev, &temp, &press);
+                    }
+                    if (params->d6fph_available)
                     {
                         // Also read the D6F-PH sensor
                         d6fph_read_pressure(params->d6fph_dev, &diff_press);
-                    }
-                    else
-                    {
-                        diff_press = NAN;
                     }
                     xSemaphoreGive(g_i2c_bus_mutex);
 
@@ -233,8 +233,8 @@ void datalogger_task(void *pvParameters)
         {
             //  ESP_LOGI(TAG, "Scheduled log interval reached. Logging data.");
             // It's time for a scheduled log. This takes priority.
-            // Update sensors and write to SD card.
-            update_sensor_buffer(bmp280_dev, params->d6fph_dev);
+            // Update sensors and write to SD card.            
+            update_sensor_buffer(params);
 
             // Create a local copy of the buffer for logging and writing to SD
             sensor_buffer_t local_buffer;
@@ -314,7 +314,7 @@ void datalogger_task(void *pvParameters)
         {
             // A UI refresh was requested and a timed log is not due.
             // Just update the sensor buffer without writing to SD.
-            update_sensor_buffer(bmp280_dev, params->d6fph_dev);
+            update_sensor_buffer(params);
             refresh_requested = false; // Reset the flag
         }
 

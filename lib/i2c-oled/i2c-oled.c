@@ -95,7 +95,7 @@ static esp_err_t oled_data(i2c_port_t i2c_num, const uint8_t *data, size_t len) 
  * @param scl The GPIO number for the SCL line.
  * @param i2c_addr The I2C address of the OLED display.
  */
-void i2c_oled_bus_init(i2c_master_bus_handle_t bus_handle, uint8_t i2c_addr) {
+esp_err_t i2c_oled_bus_init(i2c_master_bus_handle_t bus_handle, uint8_t i2c_addr) {
     if (i2c_addr == 0) {
         i2c_addr = OLED_I2C_ADDR; // Use default if 0 is passed
     }
@@ -105,8 +105,20 @@ void i2c_oled_bus_init(i2c_master_bus_handle_t bus_handle, uint8_t i2c_addr) {
         .device_address = i2c_addr,
         .scl_speed_hz = 400000,
     };
-    ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &dev_cfg, &s_oled_dev_handle));
+    esp_err_t ret = i2c_master_bus_add_device(bus_handle, &dev_cfg, &s_oled_dev_handle);
+    if (ret != ESP_OK) {
+        s_oled_dev_handle = NULL;
+        return ret;
+    }
     i2c_oled_send_init_commands(0); // Port num is not used anymore, but kept for API compatibility
+    return ESP_OK;
+}
+
+void i2c_oled_bus_deinit(void) {
+    if (s_oled_dev_handle != NULL) {
+        i2c_master_bus_rm_device(s_oled_dev_handle);
+        s_oled_dev_handle = NULL;
+    }
 }
 
 /**
