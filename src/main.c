@@ -103,6 +103,18 @@ static bool is_usb_connected_state = false;
 static web_server_fsm_state_t s_web_server_state = WEB_SERVER_FSM_IDLE;
 
 // Forward declaration to resolve implicit declaration warning
+static void handle_battery_refresh(void)
+{
+    ESP_LOGI(TAG, "Refreshing battery status on USB state change.");
+    if (g_datalogger_cmd_queue != NULL)
+    {
+        datalogger_command_t logger_cmd = DATALOGGER_CMD_FORCE_REFRESH;
+        if (xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0) != pdPASS) {
+            ESP_LOGE(TAG, "Failed to send battery refresh command to datalogger queue");
+        }
+    }
+}
+
 static bool handle_stop_web_server(void);
 
 /**
@@ -728,6 +740,7 @@ void main_task(void *pvParameters)
             // Now, do a full init which includes TinyUSB.
             spi_sdcard_full_init();
             is_usb_connected_state = true;
+            handle_battery_refresh();
         }
         else if (!is_externally_powered && is_usb_connected_state)
         {
@@ -738,6 +751,7 @@ void main_task(void *pvParameters)
             // Re-init in SD-only mode for the datalogger.
             spi_sdcard_init_sd_only();
             is_usb_connected_state = false;
+            handle_battery_refresh();
         }
 
         vTaskDelay(pdMS_TO_TICKS(10));
