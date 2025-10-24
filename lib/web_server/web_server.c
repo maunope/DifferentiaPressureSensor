@@ -122,7 +122,7 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         ".file-info a { text-decoration: none; color: #03dac6; font-weight: 500; font-size: 1.1em; display: block; word-break: break-all; }"
         ".file-info a:hover { text-decoration: underline; }"
         ".file-metadata { font-size: 0.8em; color: #aaa; margin-top: 4px; }"
-        ".actions { display: flex; align-items: stretch; flex-shrink: 0; }"
+        ".actions { display: flex; align-items: stretch; flex-shrink: 0; padding-right: 15px; }"
         "button, .btn { background-color: #373737; color: #e0e0e0; border: none; padding: 12px 15px; cursor: pointer; font-weight: bold; transition: background-color 0.2s ease-in-out; }"
         "button.preview-btn { background-color: #03dac6; color: #121212; border-top-left-radius: 4px; border-bottom-left-radius: 4px; }"
         "button.preview-btn:hover { background-color: #33ffe7; }"
@@ -339,8 +339,9 @@ static esp_err_t index_html_handler(httpd_req_t *req)
          "    setTimeout(function() { previewBox.addEventListener('scroll', scrollHandler); }, 300);"
         "    return;"
         "}"
-        "const data = response.data;"
         "tbody.innerHTML = '';"
+        "const data = response.data;"
+       
         "renderRows(data.lines, data.start_line, false);"
         "setTimeout(function() {"
         "    if (position === 'bottom') { "
@@ -746,6 +747,7 @@ static int find_line_by_timestamp(FILE *f, time_t target_timestamp, long header_
     // Find the exact line from the narrowed-down position
     while (fgets(line_buf, sizeof(line_buf), f) != NULL)
     {
+       // ESP_LOGI(TAG, "Checking line %d with timestamp %s against target %lld  ", line_idx, line_buf,target_timestamp);
         if (atoll(line_buf) > target_timestamp)
         {
             return (line_idx > 0) ? (line_idx - 1) : 0;
@@ -753,7 +755,8 @@ static int find_line_by_timestamp(FILE *f, time_t target_timestamp, long header_
         line_idx++;
     }
 
-    return line_idx > 0 ? line_idx - 1 : 0; // Return last line if target is > all timestamps
+    return -1;
+    //return line_idx > 0 ? line_idx - 1 : 0; // Return last line if target is > all timestamps
 }
 
 /**
@@ -905,7 +908,7 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
         int found_line_idx = find_line_by_timestamp(f, requested_timestamp, header_end_pos);
         if (found_line_idx != -1)
         {
-            ESP_LOGI(TAG, "Found timestamp at or before line index %d", found_line_idx);
+           // ESP_LOGI(TAG, "Found timestamp at or before line index %d", found_line_idx);
             fseek(f, 0, SEEK_SET);             // Rewind to start of file
             skip_lines(f, 1 + found_line_idx); // Skip header + lines to get to the target
             actual_start_line_idx = found_line_idx;
