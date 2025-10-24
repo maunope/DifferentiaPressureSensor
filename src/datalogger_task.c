@@ -127,15 +127,17 @@ void datalogger_task(void *pvParameters)
     update_sensor_buffer(params);
     // Track the last refresh time to avoid polling sensors too frequently.
     static uint64_t last_refresh_time_ms = 0;
+    static bool is_logging_paused = false;
+    static time_t last_sleep_check_ts = 0;
 
     while (1)
     {
-        datalogger_command_t cmd;
+        datalogger_cmd_msg_t msg;
 
         // Check for a command without blocking. The main timing is handled by the vTaskDelay at the end.
-        if (xQueueReceive(g_datalogger_cmd_queue, &cmd, 0) == pdPASS)
+        if (xQueueReceive(g_datalogger_cmd_queue, &msg, 0) == pdPASS)
         {
-            if (cmd == DATALOGGER_CMD_FORCE_REFRESH)
+            if (msg.cmd == DATALOGGER_CMD_FORCE_REFRESH)
             {
                 // UI requested a refresh. Just update the buffer, don't write to SD.
                 ESP_LOGD(TAG, "UI refresh requested.");
@@ -151,7 +153,7 @@ void datalogger_task(void *pvParameters)
                 }
                 // No need to set refresh_requested as we handle it immediately
             }
-            else if (cmd == DATALOGGER_CMD_PAUSE_WRITES)
+            else if (msg.cmd == DATALOGGER_CMD_PAUSE_WRITES)
             {
                 ESP_LOGI(TAG, "Pausing writes to SD card.");
                 vTaskSuspend(NULL); // Suspend self. Execution resumes here after vTaskResume.
@@ -198,12 +200,30 @@ void datalogger_task(void *pvParameters)
                     }
                 }
             }
-            else if (cmd == DATALOGGER_CMD_ROTATE_FILE)
+            else if (msg.cmd == DATALOGGER_CMD_SET_MODE)
+            {
+                bool was_paused = is_logging_paused;
+                is_logging_paused = (msg.mode == DATALOGGER_MODE_PAUSED);
+
+                if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY))
+                {
+                    g_sensor_buffer.high_freq_mode_enabled = (msg.mode == DATALOGGER_MODE_HF);
+                    g_sensor_buffer.datalogger_paused = is_logging_paused;
+                    xSemaphoreGive(g_sensor_buffer_mutex);
+                }
+
+                ESP_LOGI(TAG, "Datalogger mode set to: %d (Paused: %d, HF: %d)", msg.mode, is_logging_paused, (msg.mode == DATALOGGER_MODE_HF));
+
+                // Force a file rotation on any mode change to clearly separate data segments.
+                // Especially important when coming out of a paused state.
+                if (was_paused && !is_logging_paused) spi_sdcard_rotate_file();
+            }
+            else if (msg.cmd == DATALOGGER_CMD_ROTATE_FILE)
             {
                 ESP_LOGI(TAG, "Rotating log file on request.");
                 spi_sdcard_rotate_file();
             }
-            else if (cmd == DATALOGGER_CMD_DELETE_FILE)
+            else if (msg.cmd == DATALOGGER_CMD_DELETE_FILE)
             {
                 ESP_LOGI(TAG, "File deletion requested.");
                 sensor_buffer_t local_buffer_copy;
@@ -259,9 +279,25 @@ void datalogger_task(void *pvParameters)
             xSemaphoreGive(g_sensor_buffer_mutex);
         }
 
+        // If paused, we don't log, but we should still check if it's time to sleep.
+        if (is_logging_paused)
+        {
+            if (current_ts - last_sleep_check_ts >= 1) // Check every second
+            {
+                if (g_app_cmd_queue != NULL)
+                {
+                    app_command_t sleep_cmd = {.cmd = APP_CMD_LOG_COMPLETE_SLEEP_NOW};
+                    xQueueSend(g_app_cmd_queue, &sleep_cmd, 0);
+                }
+                last_sleep_check_ts = current_ts;
+            }
+            vTaskDelay(pdMS_TO_TICKS(100)); // Don't spin too fast when paused
+            continue;
+        }
+
         // Check if enough time (in seconds) has passed for the next log.
         // ESP_LOGI(TAG, "Current TS: %lld, Last Write TS: %lld, Interval: %lu ms", (long long)current_ts, (long long)last_write_ts, (unsigned long)current_log_interval);
-        if ((current_ts - last_write_ts) * 1000 >= current_log_interval)
+        if (!is_logging_paused && (current_ts - last_write_ts) * 1000 >= current_log_interval)
         {
             //  ESP_LOGI(TAG, "Scheduled log interval reached. Logging data.");
             // It's time for a scheduled log. This takes priority.
@@ -338,7 +374,7 @@ void datalogger_task(void *pvParameters)
             {
                 if (g_app_cmd_queue != NULL)
                 {
-                    app_command_t sleep_cmd = APP_CMD_LOG_COMPLETE_SLEEP_NOW;
+                    app_command_t sleep_cmd = {.cmd = APP_CMD_LOG_COMPLETE_SLEEP_NOW};
                     xQueueSend(g_app_cmd_queue, &sleep_cmd, 0);
                 }
             }

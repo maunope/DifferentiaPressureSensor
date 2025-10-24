@@ -342,7 +342,7 @@ void page_web_server_on_btn(void)
 {
     // This function is called when the button is pressed on the QR code/URL screen.
     // It should stop the server and return to the main menu.
-    app_command_t cmd = APP_CMD_STOP_WEB_SERVER;
+    app_command_t cmd = {.cmd = APP_CMD_STOP_WEB_SERVER, .mode = 0};
     xQueueSend(g_app_cmd_queue, &cmd, 0);
     s_web_qr_code_cached = false; // Invalidate cache for next time
     
@@ -716,6 +716,7 @@ static void draw_status_icons(void)
     bool is_charging = s_local_sensor_buffer.battery_externally_powered;
     bool sd_write_failed = (s_local_sensor_buffer.writeStatus == WRITE_STATUS_FAIL);
     bool hf_mode_enabled = s_local_sensor_buffer.high_freq_mode_enabled;
+    bool is_paused = s_local_sensor_buffer.datalogger_paused;
 
     // The title bar is inverted on most screens. We render the icon with a non-inverted
     // color (white on black) only for specific full-screen pages that have a black background at the top.
@@ -780,6 +781,18 @@ static void draw_status_icons(void)
         i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x, warning_y + 5, !is_inverted);
         i2c_oled_fill_rect(s_oled_i2c_num, current_icon_x + 2, warning_y, 1, 4, !is_inverted);
         i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 2, warning_y + 5, !is_inverted);
+    }
+
+    // If paused, draw 'P'
+    if (is_paused)
+    {
+        current_icon_x -= 8; // Move left to make space
+        int paused_y = 1;
+        // Draw 'P'
+        i2c_oled_fill_rect(s_oled_i2c_num, current_icon_x, paused_y, 1, 6, !is_inverted);
+        i2c_oled_fill_rect(s_oled_i2c_num, current_icon_x + 1, paused_y, 2, 1, !is_inverted);
+        i2c_oled_fill_rect(s_oled_i2c_num, current_icon_x + 1, paused_y + 2, 2, 1, !is_inverted);
+        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 3, paused_y + 1, !is_inverted);
     }
 
     // If HF mode is enabled, draw ">>"
@@ -982,7 +995,7 @@ void menu_sensor_on_btn(void)
     // When entering sensor page, always reset to the first page
     s_sensor_page_num = 0;
     // Also trigger a refresh of SD card stats to ensure page 2 is up-to-date
-    app_command_t cmd_file_count = APP_CMD_GET_SD_FILE_COUNT;
+    app_command_t cmd_file_count = {.cmd = APP_CMD_GET_SD_FILE_COUNT, .mode = 0};
     xQueueSend(g_app_cmd_queue, &cmd_file_count, 0);
 
     s_menu_mode = false;
@@ -990,7 +1003,7 @@ void menu_sensor_on_btn(void)
     // ESP_LOGI(TAG, "menu_sensor_on_btn called, returning to sensor page. 3");
     if (g_app_cmd_queue != NULL)
     {
-        app_command_t cmd = APP_CMD_REFRESH_SENSOR_DATA;
+        app_command_t cmd = {.cmd = APP_CMD_REFRESH_SENSOR_DATA, .mode = 0};
         xQueueSend(g_app_cmd_queue, &cmd, 0);
     }
     else
@@ -1012,9 +1025,9 @@ void menu_fs_stats_on_btn(void)
             g_sensor_buffer.sd_card_free_bytes = -2; // -2 indicates loading
             xSemaphoreGive(g_sensor_buffer_mutex);
         }
-        app_command_t cmd_file_count = APP_CMD_GET_SD_FILE_COUNT;
+        app_command_t cmd_file_count = {.cmd = APP_CMD_GET_SD_FILE_COUNT, .mode = 0};
         xQueueSend(g_app_cmd_queue, &cmd_file_count, 0);
-        app_command_t cmd_free_space = APP_CMD_GET_SD_FREE_SPACE;
+        app_command_t cmd_free_space = {.cmd = APP_CMD_GET_SD_FREE_SPACE, .mode = 0};
         xQueueSend(g_app_cmd_queue, &cmd_free_space, 0);
     }
     s_menu_mode = false;
@@ -1025,7 +1038,7 @@ void menu_format_sd_confirm_on_btn(void)
 {
     if (g_app_cmd_queue != NULL)
     {
-        app_command_t cmd = APP_CMD_FORMAT_SD_CARD;
+        app_command_t cmd = {.cmd = APP_CMD_FORMAT_SD_CARD, .mode = 0};
         xQueueSend(g_app_cmd_queue, &cmd, 0);
         enter_cmd_pending_mode(30000, POST_ACTION_GO_BACK); // 30s timeout, then go back
     }
@@ -1039,7 +1052,7 @@ void menu_sync_rtc_ntp_on_btn(void)
 {
     if (g_app_cmd_queue != NULL)
     {
-        app_command_t cmd = APP_CMD_SYNC_RTC_NTP;
+        app_command_t cmd = {.cmd = APP_CMD_SYNC_RTC_NTP, .mode = 0};
         xQueueSend(g_app_cmd_queue, &cmd, 0);
         enter_cmd_pending_mode(45000, POST_ACTION_GO_BACK); // 45s timeout, then go back
     }
@@ -1053,7 +1066,7 @@ void menu_set_time_on_btn(void)
 {
     if (g_app_cmd_queue != NULL)
     {
-        app_command_t cmd = APP_CMD_SET_RTC_BUILD_TIME;
+        app_command_t cmd = {.cmd = APP_CMD_SET_RTC_BUILD_TIME, .mode = 0};
         xQueueSend(g_app_cmd_queue, &cmd, 0);
         enter_cmd_pending_mode(5000, POST_ACTION_GO_BACK); // 5s timeout, then go back
     }
@@ -1065,20 +1078,23 @@ void menu_set_time_on_btn(void)
 
 void menu_hf_mode_enable_on_btn(void)
 {
-    app_command_t cmd = APP_CMD_ENABLE_HF_MODE;
+    app_command_t cmd = {.cmd = APP_CMD_SET_DATALOGGER_MODE, .mode = DATALOGGER_MODE_HF};
     xQueueSend(g_app_cmd_queue, &cmd, 0);
-    // After action, go back to the main menu
-    current_page = 0;
-    current_item = 0;
-    s_menu_mode = true;
-    s_current_page = NULL;
+    menu_cancel_on_btn();
 }
 
 void menu_hf_mode_disable_on_btn(void)
 {
-    app_command_t cmd = APP_CMD_DISABLE_HF_MODE;
+    app_command_t cmd = {.cmd = APP_CMD_SET_DATALOGGER_MODE, .mode = DATALOGGER_MODE_NORMAL};
     xQueueSend(g_app_cmd_queue, &cmd, 0);
-    menu_cancel_on_btn(); // Go back to previous menu
+    menu_cancel_on_btn();
+}
+
+void menu_datalogger_pause_on_btn(void)
+{
+    app_command_t cmd = {.cmd = APP_CMD_SET_DATALOGGER_MODE, .mode = DATALOGGER_MODE_PAUSED};
+    xQueueSend(g_app_cmd_queue, &cmd, 0);
+    menu_cancel_on_btn();
 }
 
 void page_about_on_btn(void)
@@ -1130,7 +1146,7 @@ void menu_web_server_on_btn(void)
     // web server page upon success, or show "Failed" and return.
     if (g_app_cmd_queue != NULL)
     {
-        app_command_t cmd = APP_CMD_START_WEB_SERVER;
+        app_command_t cmd = {.cmd = APP_CMD_START_WEB_SERVER, .mode = 0};
         xQueueSend(g_app_cmd_queue, &cmd, 0);
         // We don't use enter_cmd_pending_mode here because the web server page
         // has its own complex state rendering. We just need to switch to it.

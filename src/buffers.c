@@ -22,7 +22,8 @@ sensor_buffer_t g_sensor_buffer = {
     .uptime_seconds = 0,
     .bmp280_available = false,
     .d6fph_available = false,
-    .ds3231_available = false
+    .ds3231_available = false,
+    .datalogger_paused = false,
 };
 
 SemaphoreHandle_t g_sensor_buffer_mutex = NULL;

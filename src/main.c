@@ -78,7 +78,7 @@
 // These variables retain their values across deep sleep cycles.
 static RTC_DATA_ATTR write_status_t rtc_last_write_status = WRITE_STATUS_UNKNOWN;
 static RTC_DATA_ATTR time_t rtc_last_successful_write_ts = 0;
-static RTC_DATA_ATTR bool rtc_high_freq_mode_enabled = false;
+static RTC_DATA_ATTR datalogger_mode_t rtc_datalogger_mode = DATALOGGER_MODE_NORMAL;
 static RTC_DATA_ATTR uint64_t rtc_total_awake_time_s = 0;
 static RTC_DATA_ATTR uint64_t rtc_last_boot_time_ms = 0;
 
@@ -90,8 +90,6 @@ typedef enum
     I2C_BUS_OLED,    // I2C_NUM_1 for the display
     I2C_BUS_ALL      // Both buses
 } i2c_bus_target_t;
-
-
 
 ds3231_t g_rtc;    // Global RTC device handle
 bmp280_t g_bmp280; // Global BMP280 device handle
@@ -115,8 +113,7 @@ static void handle_battery_refresh(void)
     ESP_LOGI(TAG, "Refreshing battery status on USB state change.");
     if (g_datalogger_cmd_queue != NULL)
     {
-        datalogger_command_t logger_cmd = DATALOGGER_CMD_FORCE_REFRESH;
-        if (xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0) != pdPASS)
+        if (xQueueSend(g_datalogger_cmd_queue, &(datalogger_cmd_msg_t){.cmd = DATALOGGER_CMD_FORCE_REFRESH}, 0) != pdPASS)
         {
             ESP_LOGE(TAG, "Failed to send battery refresh command to datalogger queue");
         }
@@ -132,7 +129,7 @@ static bool handle_stop_web_server(void);
 static void on_encoder_rotate_cw(void)
 {
     uiRender_send_event(UI_EVENT_CW, NULL, 0);
-    app_command_t cmd = APP_CMD_ACTIVITY_DETECTED;
+    app_command_t cmd = {.cmd = APP_CMD_ACTIVITY_DETECTED};
     xQueueSend(g_app_cmd_queue, &cmd, 0);
 }
 
@@ -144,7 +141,7 @@ static void on_encoder_rotate_ccw(void)
 {
 
     uiRender_send_event(UI_EVENT_CCW, NULL, 0);
-    app_command_t cmd = APP_CMD_ACTIVITY_DETECTED;
+    app_command_t cmd = {.cmd = APP_CMD_ACTIVITY_DETECTED};
     xQueueSend(g_app_cmd_queue, &cmd, 0);
 }
 
@@ -156,7 +153,7 @@ static void on_encoder_button_press(void)
 {
 
     uiRender_send_event(UI_EVENT_BTN, NULL, 0);
-    app_command_t cmd = APP_CMD_ACTIVITY_DETECTED;
+    app_command_t cmd = {.cmd = APP_CMD_ACTIVITY_DETECTED};
     xQueueSend(g_app_cmd_queue, &cmd, 0);
 }
 
@@ -167,7 +164,7 @@ static void on_encoder_button_press(void)
 static void on_encoder_button_long_press(void)
 {
     uiRender_send_event(UI_EVENT_BTN_LONG, NULL, 0);
-    app_command_t cmd = APP_CMD_ACTIVITY_DETECTED;
+    app_command_t cmd = {.cmd = APP_CMD_ACTIVITY_DETECTED};
     xQueueSend(g_app_cmd_queue, &cmd, 0);
 }
 
@@ -181,7 +178,6 @@ static void on_encoder_button_long_press(void)
  */
 static void handle_set_rtc_to_build_time(void)
 {
- 
 
     esp_err_t ret = ESP_FAIL;
     if (xSemaphoreTake(g_i2c_bus_mutex, portMAX_DELAY))
@@ -308,7 +304,9 @@ static void go_to_deep_sleep(void)
         // Saving this correctly prevents the race condition where the device wakes
         // and immediately tries to sleep again.
         rtc_last_successful_write_ts = g_sensor_buffer.last_successful_write_ts;
-        rtc_high_freq_mode_enabled = g_sensor_buffer.high_freq_mode_enabled;
+        rtc_datalogger_mode = g_sensor_buffer.datalogger_paused ? DATALOGGER_MODE_PAUSED : (g_sensor_buffer.high_freq_mode_enabled ? DATALOGGER_MODE_HF : DATALOGGER_MODE_NORMAL);
+        rtc_last_write_status = g_sensor_buffer.writeStatus;
+        xSemaphoreGive(g_sensor_buffer_mutex);
         rtc_last_write_status = g_sensor_buffer.writeStatus;
         xSemaphoreGive(g_sensor_buffer_mutex);
 
@@ -464,11 +462,13 @@ static void handle_web_server_fsm(void)
  *
  * Configures and installs the I2C driver for the main peripheral bus (I2C_NUM_0).
  */
-static esp_err_t i2c_bus_init(void) {
+static esp_err_t i2c_bus_init(void)
+{
     esp_err_t ret = ESP_OK;
 
     // --- Init I2C Bus 0 for Sensors (if not already initialized) ---
-    if (g_i2c_bus0_handle == NULL) {
+    if (g_i2c_bus0_handle == NULL)
+    {
         i2c_master_bus_config_t i2c_mst0_config = {
             .clk_source = I2C_CLK_SRC_DEFAULT,
             .i2c_port = I2C_MASTER_NUM,
@@ -478,14 +478,16 @@ static esp_err_t i2c_bus_init(void) {
             .flags.enable_internal_pullup = true,
         };
         ret = i2c_new_master_bus(&i2c_mst0_config, &g_i2c_bus0_handle);
-        if (ret != ESP_OK) {
+        if (ret != ESP_OK)
+        {
             ESP_LOGE(TAG, "Failed to create I2C bus 0: %s", esp_err_to_name(ret));
             return ret;
         }
     }
 
     // --- Init I2C Bus 1 for OLED (if not already initialized) ---
-    if (g_i2c_bus1_handle == NULL) {
+    if (g_i2c_bus1_handle == NULL)
+    {
         i2c_master_bus_config_t i2c_mst1_config = {
             .clk_source = I2C_CLK_SRC_DEFAULT,
             .i2c_port = I2C_OLED_NUM,
@@ -495,7 +497,8 @@ static esp_err_t i2c_bus_init(void) {
             .flags.enable_internal_pullup = true,
         };
         ret = i2c_new_master_bus(&i2c_mst1_config, &g_i2c_bus1_handle);
-        if (ret != ESP_OK) {
+        if (ret != ESP_OK)
+        {
             ESP_LOGE(TAG, "Failed to create I2C bus 1: %s", esp_err_to_name(ret));
             return ret;
         }
@@ -588,7 +591,7 @@ void main_task(void *pvParameters)
         if (xQueueReceive(g_app_cmd_queue, &cmd, 0) == pdPASS)
         {
             // Any command from the UI means it's active
-            switch (cmd)
+            switch (cmd.cmd)
             {
             case APP_CMD_SET_RTC_BUILD_TIME:
                 ESP_LOGI(TAG, "CMD: Set RTC to build time");
@@ -606,7 +609,7 @@ void main_task(void *pvParameters)
                 ESP_LOGI(TAG, "CMD: Format SD card");
                 // Pause the datalogger before formatting to prevent conflicts.
                 ESP_LOGI(TAG, "Pausing datalogger for SD format...");
-                xQueueSend(g_datalogger_cmd_queue, &(datalogger_command_t){DATALOGGER_CMD_PAUSE_WRITES}, 0);
+                xQueueSend(g_datalogger_cmd_queue, &(datalogger_cmd_msg_t){.cmd = DATALOGGER_CMD_PAUSE_WRITES}, 0);
 
                 int wait_cycles = 0;
                 const int max_wait_cycles = 150; // 3-second timeout
@@ -670,7 +673,7 @@ void main_task(void *pvParameters)
                 ESP_LOGD(TAG, "CMD: Refresh sensor data");
                 if (g_datalogger_cmd_queue != NULL)
                 {
-                    datalogger_command_t logger_cmd = DATALOGGER_CMD_FORCE_REFRESH;
+                    datalogger_cmd_msg_t logger_cmd = {.cmd = DATALOGGER_CMD_FORCE_REFRESH};
                     xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
                 }
                 break;
@@ -685,32 +688,14 @@ void main_task(void *pvParameters)
                     local_buffer.web_server_status = WEB_SERVER_STOPPED;
                 }
                 break;
-            case APP_CMD_ENABLE_HF_MODE:
-                ESP_LOGI(TAG, "CMD: Enable High-Frequency Mode");
-                if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY))
+            case APP_CMD_SET_DATALOGGER_MODE:
+                ESP_LOGI(TAG, "CMD: Set Datalogger Mode to %d", cmd.mode);
+                if (g_datalogger_cmd_queue != NULL) 
                 {
-                    if (!g_sensor_buffer.high_freq_mode_enabled)
-                    {
-                        g_sensor_buffer.high_freq_mode_enabled = true;
-                        // Force a new file on mode change
-                        datalogger_command_t logger_cmd = DATALOGGER_CMD_ROTATE_FILE;
-                        xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
-                    }
-                    xSemaphoreGive(g_sensor_buffer_mutex);
-                }
-                break;
-            case APP_CMD_DISABLE_HF_MODE:
-                ESP_LOGI(TAG, "CMD: Disable High-Frequency Mode");
-                if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY))
-                {
-                    if (g_sensor_buffer.high_freq_mode_enabled)
-                    {
-                        g_sensor_buffer.high_freq_mode_enabled = false;
-                        // Force a new file on mode change
-                        datalogger_command_t logger_cmd = DATALOGGER_CMD_ROTATE_FILE;
-                        xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
-                    }
-                    xSemaphoreGive(g_sensor_buffer_mutex);
+                    datalogger_cmd_msg_t logger_cmd = {
+                        .cmd = DATALOGGER_CMD_SET_MODE,
+                        .mode = cmd.mode};
+                    xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
                 }
                 break;
             case APP_CMD_LOG_COMPLETE_SLEEP_NOW:
@@ -729,7 +714,7 @@ void main_task(void *pvParameters)
                     oled_power_off();
 
                     // --- Step 1: Tell the logger to pause---
-                    xQueueSend(g_datalogger_cmd_queue, &(datalogger_command_t){DATALOGGER_CMD_PAUSE_WRITES}, 0);
+                    xQueueSend(g_datalogger_cmd_queue, &(datalogger_cmd_msg_t){.cmd = DATALOGGER_CMD_PAUSE_WRITES}, 0);
 
                     // --- Step 2: Wait for the datalogger to suspend itself ---
                     ESP_LOGI(TAG, "Waiting for datalogger to pause...");
@@ -771,7 +756,7 @@ void main_task(void *pvParameters)
                 }
                 break;
             default:
-                ESP_LOGW(TAG, "Unknown command received: %d", cmd);
+                ESP_LOGW(TAG, "Unknown command received: %d", cmd.cmd);
                 break;
             }
         }
@@ -959,7 +944,7 @@ void app_main(void)
     g_i2c_bus_mutex = xSemaphoreCreateMutex();
     g_sensor_buffer_mutex = xSemaphoreCreateMutex();
     g_app_cmd_queue = xQueueCreate(10, sizeof(app_command_t));
-    g_datalogger_cmd_queue = xQueueCreate(5, sizeof(datalogger_command_t));
+    g_datalogger_cmd_queue = xQueueCreate(5, sizeof(datalogger_cmd_msg_t));
 
     // --- Step 2.5: Restore State from RTC Memory ---
     if (cause == ESP_SLEEP_WAKEUP_UNDEFINED)
@@ -968,7 +953,7 @@ void app_main(void)
         ESP_LOGI(TAG, "First boot, initializing RTC state.");
         rtc_last_write_status = WRITE_STATUS_UNKNOWN;
         rtc_last_successful_write_ts = 0;
-        rtc_high_freq_mode_enabled = false; // HF mode is off on cold boot
+        rtc_datalogger_mode = DATALOGGER_MODE_NORMAL; // Default to normal on cold boot
         rtc_total_awake_time_s = 0;
     }
     rtc_last_boot_time_ms = esp_timer_get_time() / 1000;
@@ -978,7 +963,8 @@ void app_main(void)
     {
         g_sensor_buffer.writeStatus = rtc_last_write_status;
         g_sensor_buffer.last_successful_write_ts = rtc_last_successful_write_ts;
-        g_sensor_buffer.high_freq_mode_enabled = rtc_high_freq_mode_enabled;
+        g_sensor_buffer.high_freq_mode_enabled = (rtc_datalogger_mode == DATALOGGER_MODE_HF);
+        g_sensor_buffer.datalogger_paused = (rtc_datalogger_mode == DATALOGGER_MODE_PAUSED);
         // Uptime is calculated dynamically in main_task
         xSemaphoreGive(g_sensor_buffer_mutex);
     }
@@ -1048,7 +1034,6 @@ void app_main(void)
     struct tm timeinfo;
     time_t rtc_ts = -1;
 
- 
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "DS3231 RTC initialization failed with error: %s", esp_err_to_name(err));
@@ -1087,7 +1072,7 @@ void app_main(void)
                 handle_set_rtc_to_build_time();
             }
 
-            local_ds3231_available= true;
+            local_ds3231_available = true;
             ESP_LOGI(TAG, "RTC available, using DS3231 for timestamps.");
             // Set system timezone to UTC and synchronize system time with RTC.
             setenv("TZ", "UTC0", 1);
@@ -1115,14 +1100,13 @@ void app_main(void)
     {
         ESP_LOGE(TAG, "D6F-PH sensor initialization failed with error: %s", esp_err_to_name(err));
         i2c_bus_deinit(I2C_BUS_SENSORS); // Tear down the failed bus
-        i2c_bus_init(); // Re-create it
+        i2c_bus_init();                  // Re-create it
         g_d6fph.i2c_dev_handle = NULL;
         local_d6fph_available = false;
         if (local_ds3231_available)
         {
             ESP_LOGI(TAG, "D6F-PH sensor not available, but RTC is available. Using DS3231 for timestamps.");
             ds3231_init(&g_rtc, g_i2c_bus0_handle, DS3231_I2C_ADDR); // Re-attach RTC to the new bus
-          
         }
     }
     else
@@ -1136,31 +1120,28 @@ void app_main(void)
             xSemaphoreGive(g_sensor_buffer_mutex);
         }
     }
-    
+
     bool local_bmp280_available = false;
     // Initialize BMP280 Sensor.
     err = bmp280_init(&g_bmp280, g_i2c_bus0_handle, BMP280_I2C_ADDR);
-   
+
     if (err != ESP_OK)
     {
         local_bmp280_available = false;
         ESP_LOGE(TAG, "BMP280 sensor initialization failed with error: %s", esp_err_to_name(err));
         i2c_bus_deinit(I2C_BUS_SENSORS); // Tear down the failed bus
-        i2c_bus_init(); // Re-create it
+        i2c_bus_init();                  // Re-create it
         g_bmp280.i2c_dev_handle = NULL;
         if (local_ds3231_available)
         {
             ESP_LOGI(TAG, "BMP280 sensor not available, but RTC is available. Using DS3231 for timestamps.");
             ds3231_init(&g_rtc, g_i2c_bus0_handle, DS3231_I2C_ADDR); // Re-attach RTC
-          
         }
         if (local_d6fph_available)
         {
             ESP_LOGI(TAG, "BMP280 sensor not available, but D6F-PH is available. Using D6F-PH for pressure data.");
             d6fph_init(&g_d6fph, g_i2c_bus0_handle, D6FPH_I2C_ADDR, g_cfg->d6fph_model); // Re-attach D6FPH
-          
         }
-        
     }
     else
     {
@@ -1172,7 +1153,6 @@ void app_main(void)
             xSemaphoreGive(g_sensor_buffer_mutex);
         }
     }
-    
 
     // --- Step 6: Initialize user input (Rotary Encoder) ---
     rotaryencoder_config_t encoder_cfg = {

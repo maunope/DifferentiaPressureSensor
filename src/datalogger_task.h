@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../lib/buffers.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "../lib/i2c-bmp280/i2c-bmp280.h"
@@ -9,20 +10,18 @@
 typedef enum {
     DATALOGGER_CMD_NONE,
     DATALOGGER_CMD_FORCE_REFRESH,
-    /**
-     * @brief Command to request the datalogger task to pause its operations and suspend itself.
-     *
-     * This command-based approach is used instead of forcefully suspending the task from
-     * an external context (e.g., from main_task). It allows the datalogger task to finish
-     * any critical operations (like an SD card write) and suspend itself at a predictable
-     * point in its loop, preventing race conditions, deadlocks, and ensuring data integrity.
-     */
     DATALOGGER_CMD_PAUSE_WRITES,
     DATALOGGER_CMD_ROTATE_FILE,
     DATALOGGER_CMD_DELETE_FILE,
+    DATALOGGER_CMD_SET_MODE,
 } datalogger_command_t;
 
-extern QueueHandle_t g_datalogger_cmd_queue;
+typedef struct {
+    datalogger_command_t cmd;
+    datalogger_mode_t mode; // Payload for SET_MODE
+} datalogger_cmd_msg_t;
+
+extern QueueHandle_t g_datalogger_cmd_queue; // Now a queue of datalogger_cmd_msg_t
 
 typedef struct {
     bmp280_t *bmp280_dev;

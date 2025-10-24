@@ -123,6 +123,7 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "li { background-color: #2c2c2c; margin-bottom: 10px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; }"
         ".sensor-panel { background-color: #2c2c2c; margin-bottom: 20px; padding: 15px; border-radius: 8px; }"
         ".sensor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }"
+        ".sensor-panel h3 { color: #e0e0e0; margin-top: 0; margin-bottom: 15px; border-bottom: 1px solid #373737; padding-bottom: 10px; }"
         ".sensor-item { background-color: #373737; padding: 10px; border-radius: 4px; }"
         ".sensor-item h3 { margin-top: 0; font-size: 0.9em; color: #aaa; text-transform: uppercase; }"
         ".file-info { padding: 12px 15px; flex-grow: 1; min-width: 0; }"
@@ -135,12 +136,16 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "button.preview-btn:hover { background-color: #33ffe7; }"
         "button.delete-btn { background-color: #cf6679; color: #121212; border-radius: 0 4px 4px 0; }"
         "button.delete-btn:hover { background-color: #ff7991; }"
-        "#preview-container { display: none; margin-top: 20px; background-color: #2c2c2c; padding: 15px; border-radius: 8px; }"
         "#preview-box { background-color: #121212; border: 1px solid #373737; max-height: 60vh; overflow-y: auto; position: relative; }"
         "#preview-table { width: 100%; border-collapse: collapse; font-family: monospace; font-size: 0.9em; }"
-        "#preview-table thead { position: sticky; top: 0; background-color: #3a3a3a; }"
-        "#preview-table th, #preview-table td { padding: 6px 8px; border: 1px solid #373737; text-align: left; white-space: nowrap; }"
+        "#preview-table thead { position: sticky; top: 0; background-color: #373737; }"
+        "#preview-table th, #preview-table td { padding: 8px 10px; border: 1px solid #444; text-align: left; white-space: nowrap; }"
         "#preview-buttons { margin-top: 10px; }"
+        "#preview-buttons { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }"
+        "#preview-buttons button { flex-grow: 1; border-radius: 4px; background-color: #03dac6; color: #121212; }"
+        "#preview-buttons button:hover { background-color: #33ffe7; }"
+        "#preview-buttons #close-preview-btn { background-color: #cf6679; }"
+        "#preview-buttons #close-preview-btn:hover { background-color: #ff7991; }"
         "footer { text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #373737; font-size: 0.9em; color: #888; }"
         "footer a { color: #03dac6; text-decoration: none; }"
         "footer a:hover { text-decoration: underline; }"
@@ -157,11 +162,10 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "<div class=\"sensor-item\"><h3>Pressure</h3><p id=\"sensor-press\">-</p></div>"
         "<div class=\"sensor-item\"><h3>Diff. Pressure</h3><p id=\"sensor-diff-press\">-</p></div>"
         "<div class=\"sensor-item\"><h3>Battery</h3><p id=\"sensor-batt\">-</p></div>"
-        "</div></div>"
-        "<div class=\"container\">"
+        "</div></div>" // Ends sensor-panel and sensor-grid
         "<h1>Available Data Files</h1>"
-        "<div id=\"preview-container\" style=\"display: none;\">"
-        "<h2>File Preview</h2>"
+        "<div id=\"preview-container\" class=\"sensor-panel\" style=\"display: none; margin-top: 20px;\">"
+        "<h3 id=\"preview-title\">File Preview</h3>"
         "<div id=\"preview-box\">"
         "<table id=\"preview-table\">"
         "<thead></thead>"
@@ -179,7 +183,7 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "</div>"
         "<div id=\"loading-indicator\" style=\"display: none; text-align: center; color: #aaa; margin-top: 10px;\">Loading...</div>"
         "</div>"
-        "<ul id=\"file-list\"><p id=\"file-list-status\">Loading files...</p></ul>"
+        "<ul id=\"file-list\"><p id=\"file-list-status\">Loading files...</p></ul>" // This should be outside the container for the preview
         "<footer>"
         "<p><a href=\"" PROJECT_GITHUB_URL "\" target=\"_blank\">DifferentialPressureSensor Project on GitHub</a></p>"
         "</footer>"
@@ -276,9 +280,8 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "rawTextDisplay.style.display = 'none';"
         "previewBox.appendChild(rawTextDisplay);"
         "window.previewFile = function(file) {"
-        "currentFile = file;"
-        "previewContainer.style.display = 'block';"
-        "const title = document.querySelector('#preview-container h2');"
+        "currentFile = file; previewContainer.style.display = 'block';"
+        "const title = document.getElementById('preview-title');"
         "title.textContent = 'Preview: ' + file;"
         "previewTable.querySelector('thead').innerHTML = '';"
         "tbody.innerHTML = '<tr><td colspan=\"100\" style=\"text-align: center; padding: 20px;\">Loading...</td></tr>';"
@@ -286,8 +289,7 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "window.fetchChunk(file, 0, chunkSize, null, function(response) {"
         "document.getElementById('close-preview-btn').style.display = '';"
         "if (response.isCsv) {"
-        "previewTable.style.display = '';"
-        "rawTextDisplay.style.display = 'none';"
+        "previewTable.style.display = ''; rawTextDisplay.style.display = 'none';"
         "const data = response.data;"
         "title.textContent += ' (CSV)';"
         "previewTable.querySelector('thead').innerHTML = '<tr>' + data.header.split(',').map(function(h) { return '<th>' + h + '</th>'; }).join('') + '</tr>';"
@@ -535,8 +537,8 @@ static esp_err_t api_file_delete_handler(httpd_req_t *req)
     }
 
     // 2. Send the command to the datalogger task
-    datalogger_command_t cmd = DATALOGGER_CMD_DELETE_FILE;
-    if (xQueueSend(g_datalogger_cmd_queue, &cmd, pdMS_TO_TICKS(100)) != pdPASS)
+    datalogger_cmd_msg_t msg = {.cmd = DATALOGGER_CMD_DELETE_FILE};
+    if (xQueueSend(g_datalogger_cmd_queue, &msg, pdMS_TO_TICKS(100)) != pdPASS)
     {
         ESP_LOGE(TAG, "Failed to send delete command to datalogger queue");
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Server busy");
@@ -1010,8 +1012,7 @@ static esp_err_t api_sensordata_handler(httpd_req_t *req)
     // 1. Request a data refresh from the datalogger task
     if (g_datalogger_cmd_queue != NULL)
     {
-        datalogger_command_t logger_cmd = DATALOGGER_CMD_FORCE_REFRESH;
-        xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
+        xQueueSend(g_datalogger_cmd_queue, &(datalogger_cmd_msg_t){.cmd = DATALOGGER_CMD_FORCE_REFRESH}, 0);
     }
 
     // 2. Give a moment for the refresh to potentially happen.

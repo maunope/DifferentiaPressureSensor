@@ -54,8 +54,16 @@ typedef struct {
     bool d6fph_available;
     bool ds3231_available;
     command_status_t delete_file_status;
+    bool datalogger_paused;
     uint32_t sd_card_free_space_mb;
 } sensor_buffer_t;
+
+typedef enum
+{
+    DATALOGGER_MODE_NORMAL,
+    DATALOGGER_MODE_HF,
+    DATALOGGER_MODE_PAUSED,
+} datalogger_mode_t;
 
 // Global buffer and mutex declarations
 extern sensor_buffer_t g_sensor_buffer;
@@ -67,7 +75,6 @@ extern QueueHandle_t g_datalogger_cmd_queue;
 extern EventGroupHandle_t g_init_event_group;
 #define INIT_DONE_BIT BIT0
 
-
 // --- Main app command queue ---
 typedef enum {
     APP_CMD_NONE,
@@ -77,14 +84,17 @@ typedef enum {
     APP_CMD_FORMAT_SD_CARD,
     APP_CMD_DELETE_FILE,
     APP_CMD_ACTIVITY_DETECTED,
-
     APP_CMD_SYNC_RTC_NTP,
     APP_CMD_REFRESH_SENSOR_DATA,
     APP_CMD_START_WEB_SERVER,
     APP_CMD_STOP_WEB_SERVER,
-    APP_CMD_ENABLE_HF_MODE,
-    APP_CMD_DISABLE_HF_MODE,
-    APP_CMD_LOG_COMPLETE_SLEEP_NOW
+    APP_CMD_SET_DATALOGGER_MODE,
+    APP_CMD_LOG_COMPLETE_SLEEP_NOW,
+} app_command_type_t;
+
+typedef struct {
+    app_command_type_t cmd;
+    datalogger_mode_t mode; // Payload for SET_DATALOGGER_MODE
 } app_command_t;
 
 typedef enum {
