@@ -528,13 +528,7 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "    if (!newFiles.has(oldFile)) {"
         "        delete fileInfo[oldFile];"
         "    }"
-        "}"
-        "/* Don't clear the whole list if it's just an update. Only clear if there are no files now. */"
-        "if (!data.files || data.files.length === 0) {"
-        "    fileList.innerHTML = '';"
-        "}"
-        "if (data.files && data.files.length > 0) {"
-        "data.files.forEach(function(file) {"
+        "} fileList.innerHTML = ''; if (data.files && data.files.length > 0) { data.files.forEach(function(file) {"
         "const li = document.createElement('li');"
         "li.dataset.filename = file.name;"
         "const infoDiv = document.createElement('div');"
@@ -1110,13 +1104,14 @@ static int find_line_by_timestamp(FILE *f, time_t target_timestamp, long data_st
         current_f_pos = ftell(f);
     }
 
-    // If searching backward and we found a line, we might need to go back one more line
-    if (direction <= 0 && line_idx > 0) {
-        // The loop stops when ftell >= best_offset. If we are exactly at best_offset, we are on the line *after* the one we want.
-        // Let's re-read the line at best_offset to be sure.
+    // If searching backward, we might need to adjust. The binary search finds the last line
+    // *at or before* the target. If we land exactly on a line that is less than the target,
+    // we might be at the end of a previous block. Stepping back one line ensures we capture
+    // the context before that point when reading forward.
+    if (direction <= 0) {
         fseek(f, best_offset, SEEK_SET);
         if (fgets(line_buf, sizeof(line_buf), f) != NULL) {
-            if (atoll(line_buf) > target_timestamp && line_idx > 0) {
+            if (atoll(line_buf) < target_timestamp && line_idx > 0) {
                 line_idx--;
             }
         }

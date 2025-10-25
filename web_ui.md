@@ -23,6 +23,8 @@ The panel at the top of the page displays the most recent data read from the dev
 
 If the web page fails to fetch data, a banner will appear with a "Retry" button to re-establish the connection.
 
+![Live Sensor Data](images/web_ui_live_data.png)
+
 ## File Browser
 
 This section lists all files found on the SD card, sorted by the most recently modified. Each entry provides the following information and actions:
@@ -32,9 +34,13 @@ This section lists all files found on the SD card, sorted by the most recently m
 *   **Preview Button**: Opens the interactive File Previewer for that file.
 *   **Delete Button**: Permanently deletes the file from the SD card after a confirmation prompt.
 
+![File Browser](images/web_ui_file_selector.png)
+
 ## File Previewer
 
 The File Previewer is a powerful tool for inspecting log data directly on the device.
+
+![File Previewer](images/web_ui_preview.png)
 
 ### CSV vs. Raw Text Files
 
@@ -46,9 +52,22 @@ The previewer automatically detects the file type:
 
 The previewer is designed to handle very large files efficiently by only loading small chunks of data at a time.
 
-#### Navigation Buttons (`<<< head`, `>>> tail`, Time Jumps)
+#### Time Window and Navigation
 
-The buttons below the preview table (`<<< head`, `< Hour`, `Day >>`, etc.) are used for **windowed navigation**. When you click one of these buttons:
+The previewer has two sets of controls for navigation:
+
+1.  **Scale Buttons (`1 hour`, `4 hours`, etc.)**: These buttons set the **size of the time window** to load. When you select a scale, the previewer fetches a chunk of data that covers that duration.
+    *   **Performance Note**: For very large files, using a wide time window (like "24 hours" or "Max") can be sluggish, as the device needs to process more data to find the correct starting point. For quicker navigation, it's often better to use a smaller window and jump through the file.
+
+2.  **Jump Buttons (`<<< head`, `< Hour`, `Day >>`, etc.)**: These buttons perform **windowed navigation**, allowing you to "jump" through the file. When you click one of these buttons:
+    *   The currently displayed data is **replaced** with a new chunk of data from a different part of the file, based on the button you clicked (e.g., `Day >>` jumps forward 24 hours).
+    *   This is the fastest way to move through large files, as it avoids loading all the data in between.
+
+For extremely large or dense files, the most efficient way to perform a full analysis is to download the file and open it on your computer.
+
+#### Scrolling with the Mouse
+
+When you scroll up or down within the preview table, the behavior is different from the navigation buttons:
 
 *   The currently displayed data is **replaced** with a new chunk of data from a different part of the file.
 *   This allows you to quickly "jump" to the beginning, end, or a specific time in the log without loading all the data in between.

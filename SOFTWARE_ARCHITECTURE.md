@@ -89,6 +89,7 @@ The access rules are as follows:
 *   **USB Mass Storage has absolute priority.** If the device is connected to a PC and the SD card is mounted by the host computer, the `main_task` will automatically stop the web server (if it's running) and will prevent both the web server and the datalogger from starting. This gives the host computer exclusive control to ensure a stable connection and prevent data corruption.
 *   **Concurrent Operation with Mutex Protection**: The `datalogger_task` (writing logs) and the Web Server task (listing/deleting files) can run at the same time. They do not need to pause each other. The low-level `g_sdcard_mutex` serializes their access to the SD card, preventing conflicts. For example, if the web server is deleting a file, the datalogger's attempt to write a new line will block on the mutex until the deletion is complete.
 *   **Special Operations (Formatting)**: For destructive, long-running operations like formatting the SD card, the `main_task` still explicitly pauses the `datalogger_task` to ensure the file system is completely idle.
+*   **Safe Ejection**: When connected as a USB Mass Storage device, it is highly recommended to use your operating system's "Eject" or "Safely Remove Hardware" feature before physically unplugging the device. This ensures all file operations are complete and helps prevent data corruption on the SD card.
 
 This mutex-based approach provides more efficient and responsive operation than pausing entire tasks, while still guaranteeing data integrity.
 

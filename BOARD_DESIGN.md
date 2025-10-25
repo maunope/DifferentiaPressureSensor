@@ -8,7 +8,7 @@ The board is designed to be a compact, battery-powered datalogging platform. It 
 
 The following diagram shows how the main peripherals are connected to the ESP32 microcontroller:
 
-![Overall Architecture](overall_arch.png)
+![Overall Architecture](/images/overall_arch.png)
 
 ## Hardware & Compatibility
 
