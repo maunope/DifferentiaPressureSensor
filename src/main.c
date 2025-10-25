@@ -696,6 +696,11 @@ void main_task(void *pvParameters)
                         .cmd = DATALOGGER_CMD_SET_MODE,
                         .mode = cmd.mode};
                     xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
+
+                    // Also force a file rotation on any mode change to ensure data is
+                    // logged to a new file with the correct name (_hf or not).
+                    datalogger_cmd_msg_t rotate_cmd = {.cmd = DATALOGGER_CMD_ROTATE_FILE};
+                    xQueueSend(g_datalogger_cmd_queue, &rotate_cmd, 0);
                 }
                 break;
             case APP_CMD_LOG_COMPLETE_SLEEP_NOW:
