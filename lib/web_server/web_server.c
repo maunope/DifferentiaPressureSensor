@@ -995,46 +995,6 @@ static esp_err_t download_handler(httpd_req_t *req)
 }
 
 /**
- * @brief Skips a specified number of lines in a file.
- * @param f The file pointer.
- * @param num_lines The number of lines to skip.
- * @return The actual number of lines skipped.
- */
-static int skip_lines(FILE *f, int num_lines)
-{
-    char temp_line[256];
-    int skipped_count = 0;
-    for (int i = 0; i < num_lines; i++)
-    {
-        if (fgets(temp_line, sizeof(temp_line), f) == NULL)
-        {
-            break; // Reached end of file
-        }
-        skipped_count++;
-    }
-    return skipped_count;
-}
-
-/**
- * @brief Counts the total number of lines in a file.
- * @param f The file pointer.
- * @return The total number of lines.
- */
-static int count_lines(FILE *f)
-{
-    char temp_line[256];
-    int count = 0;
-    long current_pos = ftell(f); // Save current position
-    fseek(f, 0, SEEK_SET);       // Go to beginning
-    while (fgets(temp_line, sizeof(temp_line), f) != NULL)
-    {
-        count++;
-    }
-    fseek(f, current_pos, SEEK_SET); // Restore position
-    return count;
-}
-
-/**
  * @brief Finds the file offset corresponding to or after a target timestamp.
  * Assumes the first column of each line is a UNIX timestamp.
  * @param f The file pointer (should be positioned after the header).
@@ -1273,16 +1233,22 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
     }
     else if (requested_start_line == -1)
     {
-        int total_lines = count_lines(f) - 1; // Subtract header line, f is already past header
-        actual_start_line_idx = (total_lines > line_count) ? (total_lines - line_count) : 0;
-        fseek(f, 0, SEEK_SET);
-        skip_lines(f, 1 + actual_start_line_idx); // Skip header + lines
+        // Efficiently seek to near the end of the file to read the last chunk
+        fseek(f, 0, SEEK_END);
+        long file_size = ftell(f);
+        long seek_pos = (file_size > SCRATCH_BUFSIZE) ? (file_size - SCRATCH_BUFSIZE) : 0;
+        fseek(f, seek_pos, SEEK_SET);
+        if (seek_pos > 0) { // If not at the start, find the beginning of the next line
+            if (fgets(line, sizeof(line), f) == NULL) { // Read and discard partial line
+                 fseek(f, file_size, SEEK_SET); // Go to very end if read fails
+            }
+        }
+        actual_start_line_idx = -1; // Line index is not used when seeking to the end
     }
     else
     {
         // Request for specific start line (or default 0)
         fseek(f, data_start_offset, SEEK_SET);
-        skip_lines(f, requested_start_line);
         actual_start_line_idx = requested_start_line;
     }
     httpd_resp_set_type(req, "application/json");

@@ -467,6 +467,13 @@ esp_err_t spi_sdcard_format(void)
         }
     }
 
+    // Update the global command status for UI feedback
+    if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY))
+    {
+        g_command_status = (ret == ESP_OK) ? CMD_STATUS_SUCCESS : CMD_STATUS_FAIL;
+        xSemaphoreGive(g_command_status_mutex);
+    }
+
     return ret;
 }
 
