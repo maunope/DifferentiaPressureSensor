@@ -4,6 +4,15 @@
 #include <math.h>
 #include "../lib/buffers.h"
 
+/**
+ * @file buffers.c
+ * @brief Defines the global shared data structures and RTOS synchronization primitives.
+ *
+ * This file serves as the central repository for all shared state in the application,
+ * including the main sensor data buffer and the various mutexes and queues used for
+ * inter-task communication and resource protection.
+ */
+
 // --- Global buffer and mutex definition ---
 // This is the single source of truth for the global sensor buffer.
 sensor_buffer_t g_sensor_buffer = {

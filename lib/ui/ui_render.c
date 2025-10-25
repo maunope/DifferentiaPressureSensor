@@ -141,6 +141,12 @@ void uiRender_send_event(int event, float *values, int value_count)
 }
 
 // --- Helper to write a flicker-free, padded line ---
+/**
+ * @brief Writes a line of text to the OLED, padding it with spaces to clear the line.
+ *
+ * @param row The row (0-7) to write to.
+ * @param text The text to display.
+ */
 static void write_padded_line(uint8_t row, const char *text)
 {
     if (!s_oled_initialized)
@@ -151,6 +157,12 @@ static void write_padded_line(uint8_t row, const char *text)
 }
 
 // --- Helper to write a flicker-free, inverted line ---
+/**
+ * @brief Writes an inverted (white on black) line of text to the OLED.
+ *
+ * @param row The row (0-7) to write to.
+ * @param text The text to display.
+ */
 static void write_inverted_line(uint8_t row, const char *text)
 {
     if (!s_oled_initialized)
@@ -162,6 +174,9 @@ static void write_inverted_line(uint8_t row, const char *text)
 }
 
 // --- Menu rendering callback ---
+/**
+ * @brief Renders the current menu page to the OLED display.
+ */
 void render_menu_callback(void)
 {
     if (!s_oled_initialized)
@@ -270,6 +285,9 @@ void render_about_callback(void)
 }
 
 // --- Web Server Page Rendering ---
+/**
+ * @brief Renders the web server status page.
+ */
 void render_web_server_callback(void)
 {
     if (!s_oled_initialized)
@@ -338,6 +356,11 @@ void render_web_server_callback(void)
     }
 }
 
+/**
+ * @brief Handles a button press on the web server page.
+ *
+ * This stops the web server and returns the user to the main menu.
+ */
 void page_web_server_on_btn(void)
 {
     // This function is called when the button is pressed on the QR code/URL screen.
@@ -389,6 +412,9 @@ static void oled_display_qr_code(esp_qrcode_handle_t qrcode)
 }
 
 // --- Sleeping screen rendering callback ---
+/**
+ * @brief Renders a simple "Sleep mode" message to the screen.
+ */
 void render_sleeping_screen(void)
 {
     if (!s_oled_initialized)
@@ -401,6 +427,9 @@ void render_sleeping_screen(void)
 }
 
 // --- Sensor rendering callback ---
+/**
+ * @brief Renders the "About" page, which can show a QR code, URL, or build info.
+ */
 void render_sensor_callback(void)
 {
     if (!s_oled_initialized)
@@ -468,6 +497,9 @@ void render_sensor_callback(void)
 
 }
 
+/**
+ * @brief Renders the file system statistics page.
+ */
 void page_fs_stats_render_callback(void)
 {
     char new_lines[8][21] = {{0}}; // Initialize all lines to empty
@@ -531,6 +563,9 @@ void page_fs_stats_render_callback(void)
     }
 }
 // --- Menu event handlers ---
+/**
+ * @brief Handles clockwise rotation in menu mode (moves selection down).
+ */
 void menu_on_cw(void)
 {
     const ui_menu_page_t *page = &ui_menu_tree[current_page];
@@ -542,6 +577,9 @@ void menu_on_cw(void)
         current_item = page->item_count - 1;
 }
 
+/**
+ * @brief Handles counter-clockwise rotation in menu mode (moves selection up).
+ */
 void menu_on_ccw(void)
 {
     if (current_item > 0)
@@ -550,6 +588,9 @@ void menu_on_ccw(void)
     }
 }
 
+/**
+ * @brief Handles a button press in menu mode (selects item or enters submenu).
+ */
 void menu_on_btn(void)
 {
     const ui_menu_item_t *item = &ui_menu_tree[current_page].items[current_item];
@@ -576,6 +617,9 @@ void menu_on_btn(void)
     }
 }
 
+/**
+ * @brief Handles the "Back" menu item action (returns to the previous menu).
+ */
 void menu_cancel_on_btn(void)
 {
     if (menu_stack_pos > 0)
@@ -592,6 +636,11 @@ void menu_cancel_on_btn(void)
     s_current_page = NULL;
 }
 
+/**
+ * @brief Renders the feedback screen for asynchronous commands (e.g., "Loading...").
+ *
+ * This function displays "Loading...", "Success", "Failed", or "Timeout" based on the global command status.
+ */
 void render_cmd_feedback_screen(void)
 {
     static command_status_t last_rendered_status = CMD_STATUS_IDLE;
@@ -695,12 +744,6 @@ void render_cmd_feedback_screen(void)
 }
 
 /**
- * @brief Draws all status icons (HF Mode, SD Error, Battery) in the top-right corner.
- *
- * This function handles the positioning and rendering of all status icons,
- * ensuring they are correctly aligned and do not overlap.
- */
-/*
  * @brief Draws all status icons (HF Mode, SD Error, Battery) in the top-right corner.
  *
  * This function handles the positioning and rendering of all status icons,
@@ -843,13 +886,6 @@ static void enter_cmd_pending_mode(uint32_t timeout_ms, post_cmd_action_t post_a
     }
 }
 
-
-
-/**
- * @brief The main task for the user interface.
- * 
- * This task runs an infinite loop to process UI events from a queue, update the display state, and call the appropriate rendering functions.
- */
 // --- UI task ---
 void uiRender_task(void *pvParameters)
 {
@@ -987,6 +1023,9 @@ void uiRender_task(void *pvParameters)
 }
 
 // --- About event handlers (to be referenced in ui_menudef.h) ---
+/**
+ * @brief Action to switch the UI to the "About" page.
+ */
 void menu_about_on_btn(void)
 {
     s_qr_code_cached = false;
@@ -994,6 +1033,10 @@ void menu_about_on_btn(void)
     s_menu_mode = false;
     s_current_page = &about_page;
 }
+
+/**
+ * @brief Action to switch the UI to the main "Sensor Data" page.
+ */
 void menu_sensor_on_btn(void)
 {
     // When entering sensor page, always reset to the first page
@@ -1017,6 +1060,9 @@ void menu_sensor_on_btn(void)
     s_current_page = &sensor_page;
 }
 
+/**
+ * @brief Action to switch the UI to the "File System Stats" page.
+ */
 void menu_fs_stats_on_btn(void)
 {
     // Always trigger a new read when entering the stats page
@@ -1038,6 +1084,9 @@ void menu_fs_stats_on_btn(void)
     s_current_page = &fs_stats_page;
 }
 
+/**
+ * @brief Action to format the SD card (after confirmation).
+ */
 void menu_format_sd_confirm_on_btn(void)
 {
     if (g_app_cmd_queue != NULL)
@@ -1052,6 +1101,9 @@ void menu_format_sd_confirm_on_btn(void)
     }
 }
 
+/**
+ * @brief Action to sync the RTC with an NTP server.
+ */
 void menu_sync_rtc_ntp_on_btn(void)
 {
     if (g_app_cmd_queue != NULL)
@@ -1066,6 +1118,9 @@ void menu_sync_rtc_ntp_on_btn(void)
     }
 }
 
+/**
+ * @brief Action to set the RTC to the firmware's build time.
+ */
 void menu_set_time_on_btn(void)
 {
     if (g_app_cmd_queue != NULL)
@@ -1080,6 +1135,9 @@ void menu_set_time_on_btn(void)
     }
 }
 
+/**
+ * @brief Action to enable high-frequency logging mode.
+ */
 void menu_hf_mode_enable_on_btn(void)
 {
     app_command_t cmd = {.cmd = APP_CMD_SET_DATALOGGER_MODE, .mode = DATALOGGER_MODE_HF};
@@ -1087,6 +1145,9 @@ void menu_hf_mode_enable_on_btn(void)
     menu_cancel_on_btn();
 }
 
+/**
+ * @brief Action to set logging mode back to normal frequency.
+ */
 void menu_hf_mode_disable_on_btn(void)
 {
     app_command_t cmd = {.cmd = APP_CMD_SET_DATALOGGER_MODE, .mode = DATALOGGER_MODE_NORMAL};
@@ -1094,6 +1155,9 @@ void menu_hf_mode_disable_on_btn(void)
     menu_cancel_on_btn();
 }
 
+/**
+ * @brief Action to pause the datalogger.
+ */
 void menu_datalogger_pause_on_btn(void)
 {
     app_command_t cmd = {.cmd = APP_CMD_SET_DATALOGGER_MODE, .mode = DATALOGGER_MODE_PAUSED};
@@ -1101,19 +1165,31 @@ void menu_datalogger_pause_on_btn(void)
     menu_cancel_on_btn();
 }
 
+/**
+ * @brief Handles button press on the "About" page (returns to menu).
+ */
 void page_about_on_btn(void)
 {
     s_menu_mode = true;
     s_current_page = NULL;
 }
+/**
+ * @brief Handles clockwise rotation on the "About" page (cycles views).
+ */
 void page_about_on_cw(void)
 {
     s_about_page_view = (s_about_page_view + 1) % 3; // Cycle through 0, 1, 2
 }
+/**
+ * @brief Handles counter-clockwise rotation on the "About" page (cycles views).
+ */
 void page_about_on_ccw(void)
 {
     s_about_page_view = (s_about_page_view > 0) ? (s_about_page_view - 1) : 2; // Cycle through 2, 1, 0
 }
+/**
+ * @brief Handles button press on the "Sensor Data" page (enters menu).
+ */
 void page_sensor_on_btn(void)
 {
     // Button press on sensor page enters the menu
@@ -1122,11 +1198,17 @@ void page_sensor_on_btn(void)
     current_page = 0;
     current_item = 0;
 }
+/**
+ * @brief Handles clockwise rotation on the "Sensor Data" page (cycles pages).
+ */
 void page_sensor_on_cw(void)
 {
     // Rotation on sensor page toggles between sub-pages
     s_sensor_page_num = (s_sensor_page_num + 1) % SENSOR_PAGE_COUNT;
 }
+/**
+ * @brief Handles counter-clockwise rotation on the "Sensor Data" page (cycles pages).
+ */
 void page_sensor_on_ccw(void)
 {
     // Rotation on sensor page toggles between sub-pages
@@ -1136,12 +1218,21 @@ void page_sensor_on_ccw(void)
 void page_fs_stats_on_cw(void) { /* Do nothing */ }
 void page_fs_stats_on_ccw(void) { /* Do nothing */ }
 
+/**
+ * @brief Handles button press on the "File System Stats" page (returns to menu).
+ */
 void page_fs_stats_on_btn(void)
 {
     s_menu_mode = true;
     s_current_page = NULL;
 }
 
+/**
+ * @brief Action to start the web server.
+ *
+ * This switches the UI to the web server page, which will show the status
+ * as the server starts up.
+ */
 void menu_web_server_on_btn(void)
 {
     // Send the start command and enter a pending state.
@@ -1159,15 +1250,24 @@ void menu_web_server_on_btn(void)
     }
 }
 
+/**
+ * @brief Handles clockwise rotation on the "Web Server" page (cycles views).
+ */
 void page_web_server_on_cw(void)
 {
     s_web_page_view = (s_web_page_view + 1) % 2; // Toggle between 0 and 1
 }
+/**
+ * @brief Handles counter-clockwise rotation on the "Web Server" page (cycles views).
+ */
 void page_web_server_on_ccw(void)
 {
     s_web_page_view = (s_web_page_view + 1) % 2; // Toggle between 0 and 1
 }
 
+/**
+ * @brief Action to switch the UI to the "View Config" page.
+ */
 void menu_config_on_btn(void)
 {
     s_menu_mode = false;
@@ -1176,6 +1276,9 @@ void menu_config_on_btn(void)
     s_current_page = &config_page;
 }
 
+/**
+ * @brief Handles button press on the "View Config" page (returns to menu).
+ */
 void page_config_on_btn(void)
 {
     s_menu_mode = true;
@@ -1183,6 +1286,9 @@ void page_config_on_btn(void)
 }
 
 /* --- Config Page Callbacks --- */
+/**
+ * @brief Handles clockwise rotation on the "View Config" page (scrolls down).
+ */
 void page_config_on_cw(void)
 {
     int max_pages = (s_num_config_items + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE;
@@ -1192,6 +1298,9 @@ void page_config_on_cw(void)
         s_config_current_page_index = 0; // Wrap around to the first page
     }
 }
+/**
+ * @brief Handles counter-clockwise rotation on the "View Config" page (scrolls up).
+ */
 void page_config_on_ccw(void)
 {
     s_config_current_page_index--;
@@ -1202,6 +1311,9 @@ void page_config_on_ccw(void)
     }
 }
 
+/**
+ * @brief Prepares the configuration data for display on the "View Config" page.
+ */
 static void ui_config_page_prepare_data(void)
 {
     const config_params_t *params = config_params_get();
@@ -1248,6 +1360,9 @@ static void ui_config_page_prepare_data(void)
     }
 }
 
+/**
+ * @brief Renders the "View Config" page, showing key-value pairs from the configuration.
+ */
 void render_config_callback(void)
 {
     if (!s_oled_initialized)
