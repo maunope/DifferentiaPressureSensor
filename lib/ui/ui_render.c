@@ -425,7 +425,7 @@ void render_sensor_callback(void)
         write_padded_line(4, isnan(s_local_sensor_buffer.temperature_c) ? "T: N/A" : line_buf);
 
         // Pressure
-        snprintf(line_buf, sizeof(line_buf), "P: %ld Pa", s_local_sensor_buffer.pressure_pa);
+        snprintf(line_buf, sizeof(line_buf), "P: %.2f kPa", (float)s_local_sensor_buffer.pressure_pa / 1000.0f);
         write_padded_line(5, s_local_sensor_buffer.pressure_pa == 0 ? "P: N/A" : line_buf);
 
         // Differential Pressure

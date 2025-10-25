@@ -121,6 +121,9 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "h1 { color: #bb86fc; border-bottom: 2px solid #373737; padding-bottom: 10px; }"
         "ul { list-style-type: none; padding: 0; }"
         "li { background-color: #2c2c2c; margin-bottom: 10px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; }"
+        ".status-banner { background-color: #cf6679; color: #121212; padding: 10px; border-radius: 4px; text-align: center; font-weight: bold; display: none; align-items: center; justify-content: center; margin-bottom: 20px; }"
+        ".status-banner span { flex-grow: 1; text-align: center; }"
+        ".status-banner button { margin-left: 15px; font-size: 0.9em; border-radius: 4px; }"
         ".sensor-panel { background-color: #2c2c2c; margin-bottom: 20px; padding: 15px; border-radius: 8px; }"
         ".sensor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }"
         ".sensor-panel h3 { color: #e0e0e0; margin-top: 0; margin-bottom: 15px; border-bottom: 1px solid #373737; padding-bottom: 10px; }"
@@ -136,6 +139,8 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         ".file-info a:hover { text-decoration: underline; }"
         ".file-metadata { font-size: 0.8em; color: #aaa; margin-top: 4px; }"
         ".actions { display: flex; align-items: stretch; flex-shrink: 0; padding-right: 15px; }"
+        "button.btn-primary { background-color: #03dac6; color: #121212; border-radius: 4px; }"
+        "button.btn-primary:hover { background-color: #33ffe7; }"
         "button, .btn { background-color: #373737; color: #e0e0e0; border: none; padding: 12px 15px; cursor: pointer; font-weight: bold; transition: background-color 0.2s ease-in-out; }"
         "button.preview-btn { background-color: #03dac6; color: #121212; border-top-left-radius: 4px; border-bottom-left-radius: 4px; }"
         "button.preview-btn:hover { background-color: #33ffe7; }"
@@ -160,6 +165,7 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "</head>"
         "<body>"
         "<div class=\"container\">"
+        "<div id=\"global-status-banner\" class=\"status-banner\"><span id=\"global-status-message\"></span><button id=\"global-retry-btn\" class=\"btn-primary\"></button></div>"
         "<h1>Live Sensor Data</h1>"
         "<div class=\"sensor-panel\">"
         "<div class=\"sensor-grid\">"
@@ -204,24 +210,47 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "<script>"
         "document.addEventListener('DOMContentLoaded', function() {"
         "let currentFile = ''; let isLoading = false;"
+        "let sensorIntervalId = null;"
         "const chunkSize = 100; const maxRows = 1000; const buffer = 200;"
         "const previewContainer = document.getElementById('preview-container');"
         "const fileList = document.getElementById('file-list');"
         "const previewBox = document.getElementById('preview-box');"
         "function updateSensorData() {"
+        "    document.getElementById('global-status-banner').style.display = 'none';"
         "    fetch('/api/sensordata').then(r => r.json()).then(data => {"
-        "        document.getElementById('sensor-timestamp').textContent = data.datetime_local || 'N/A';"
-        "        document.getElementById('sensor-temp').textContent = data.temperature_c !== null ? data.temperature_c.toFixed(2) + ' C' : 'N/A';"
-        "        document.getElementById('sensor-press').textContent = data.pressure_pa !== 0 ? data.pressure_pa + ' Pa' : 'N/A';"
-        "        document.getElementById('sensor-diff-press').textContent = data.diff_pressure_pa !== null ? data.diff_pressure_pa.toFixed(2) + ' Pa' : 'N/A';"
+        "        const timestampEl = document.getElementById('sensor-timestamp'); if(timestampEl) timestampEl.textContent = data.datetime_local || 'N/A';"
+        "        const tempEl = document.getElementById('sensor-temp'); if(tempEl) tempEl.textContent = data.temperature_c !== null ? data.temperature_c.toFixed(2) + ' C' : 'N/A';"
+        "        const pressEl = document.getElementById('sensor-press'); if(pressEl) pressEl.textContent = data.pressure_kpa !== 0 ? data.pressure_kpa.toFixed(3) + ' kPa' : 'N/A';"
+        "        const diffPressEl = document.getElementById('sensor-diff-press'); if(diffPressEl) diffPressEl.textContent = data.diff_pressure_pa !== null ? data.diff_pressure_pa.toFixed(2) + ' Pa' : 'N/A';"
         "        let batt_str = 'N/A';"
         "        if (data.battery_voltage !== null) {"
         "           batt_str = `${data.battery_voltage.toFixed(2)}V ${data.battery_percentage}%`;"
         "           if (data.battery_externally_powered) { batt_str += ' (Charging)'; }"
         "        }"
-        "        document.getElementById('sensor-batt').textContent = batt_str;"
-        "    }).catch(err => console.error('Error fetching sensor data:', err));"
+        "        const battEl = document.getElementById('sensor-batt'); if(battEl) battEl.textContent = batt_str;"
+        "    }).catch(err => {"
+        "       console.error('Error fetching sensor data:', err);"
+        "       showGlobalBanner('Failed to load live data. Server may be offline.', startSensorRefresh);"
+        "     ['sensor-timestamp', 'sensor-temp', 'sensor-press', 'sensor-diff-press', 'sensor-batt'].forEach(id => { const el = document.getElementById(id); if(el) el.textContent = 'N/A'; });"
+        "       if (sensorIntervalId) { clearInterval(sensorIntervalId); sensorIntervalId = null; }"
+        "    });"
         "}"
+        "function showGlobalBanner(message, retryAction) {"
+        "    document.getElementById('global-status-message').textContent = message;"
+        "    const retryBtn = document.getElementById('global-retry-btn');"
+        "    retryBtn.textContent = 'Retry';"
+        "    retryBtn.onclick = retryAction;"
+        "    document.getElementById('global-status-banner').style.display = 'flex';"
+        "}"
+        "window.startSensorRefresh = function() {"
+        "    document.getElementById('global-status-banner').style.display = 'none';"
+        "    if (sensorIntervalId) {"
+        "        clearInterval(sensorIntervalId);"
+        "    }"
+        "    updateSensorData();"
+        "    sensorIntervalId = setInterval(updateSensorData, 5000);"
+        "};"
+
         "function drawSparkline(canvasId, data, color, unit, fixedMin, fixedMax) {"
         "    const canvas = document.getElementById(canvasId);"
         "    if (!canvas) return;"
@@ -229,19 +258,25 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "    canvas.height = canvas.clientHeight;"
         "    const ctx = canvas.getContext('2d');"
         "    const width = canvas.width; "
-        "    const height = canvas.height;"
-        "    const leftMargin = 40;"
+        "    const height = canvas.clientHeight;"
+        "    const leftMargin = 60;"
         "    ctx.clearRect(0, 0, width, height);"
         "    if (!data || data.length < 2) { return; }"
         "    let minVal = (fixedMin !== undefined) ? fixedMin : data.reduce((min, v) => Math.min(min, v), Infinity);"
         "    let maxVal = (fixedMax !== undefined) ? fixedMax : data.reduce((max, v) => Math.max(max, v), -Infinity);"
         "    let range = maxVal - minVal;"
-        "    if (range < 0.1) { range = 0.2; minVal -= 0.1; }"
+        "    if (range < 0.1) { "
+        "        const mid = (minVal + maxVal) / 2;"
+        "        minVal = mid - 0.1;"
+        "        maxVal = mid + 0.1;"
+        "        range = 0.2;"
+        "    }"
+        "    const precision = (unit === 'kPa') ? 2 : 1;"
         "    ctx.font = '10px monospace';"
         "    ctx.fillStyle = '#888';"
         "    ctx.textAlign = 'right';"
-        "    ctx.fillText(maxVal.toFixed(1) + unit, leftMargin - 5, 10);"
-        "    ctx.fillText(minVal.toFixed(1) + unit, leftMargin - 5, height - 2);"
+        "    ctx.fillText(maxVal.toFixed(precision) + unit, leftMargin - 5, 10);"
+        "    ctx.fillText(minVal.toFixed(precision) + unit, leftMargin - 5, height - 2);"
         "    const graphWidth = width - leftMargin;"
         "    const xStep = graphWidth / (data.length - 1);"
         "    ctx.beginPath();"
@@ -274,18 +309,19 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "    const timestamps = rows.map(row => row.cells[1].textContent.split(' ')[1]);"
         "    document.getElementById('sparkline-timestamp-range').textContent = `Time range: ${timestamps[0]} - ${timestamps[timestamps.length-1]}`;"
         "    const tempData = getColumnData('temperature_c');"
-        "    const pressData = getColumnData('pressure_pa');"
+        "    const pressData = getColumnData('pressure_kpa');"
         "    const diffPressData = getColumnData('diff_pressure_pa');"
         "    const battData = getColumnData('battery_voltage');"
+        "    const maxAbsDiffPress = diffPressData.length > 0 ? diffPressData.reduce((max, v) => Math.max(max, Math.abs(v)), 0) : 1;"
+        "    const maxBatt = battData.length > 0 ? battData.reduce((max, v) => Math.max(max, v), 0) : 4.2;"
         "    resizeCanvases();"
         "    document.getElementById('sparkline-container').style.display = 'grid';"
         "    drawSparkline('spark-temp', tempData, '#03dac6', 'C');"
-        "    drawSparkline('spark-press', pressData, '#bb86fc', 'Pa');"
-        "    drawSparkline('spark-diff-press', diffPressData, '#cf6679', 'Pa');"
-        "    drawSparkline('spark-batt', battData, '#03dac6', 'V', 3.0, 4.2);"
+        "    drawSparkline('spark-press', pressData, '#bb86fc', 'kPa');"
+        "    drawSparkline('spark-diff-press', diffPressData, '#cf6679', 'Pa', -maxAbsDiffPress, maxAbsDiffPress);"
+        "    drawSparkline('spark-batt', battData, '#03dac6', 'V', 3.0, Math.max(4.2, maxBatt));"
         "}"
-        "updateSensorData();"
-        "setInterval(updateSensorData, 5000);"
+        "startSensorRefresh();"
         "const loadingIndicator = document.getElementById('loading-indicator');"
         "const previewTable = document.getElementById('preview-table');"
         "const tbody = previewTable.querySelector('tbody');"
@@ -391,6 +427,7 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "function loadFiles() {"
         "if (!lastFilesSignature) { fileList.innerHTML = '<p id=\"file-list-status\">Loading files...</p>'; }"
         "fetch('/api/files')"
+        ".then(res => { if (!res.ok) throw new Error('Server responded with status ' + res.status); return res; })"
         ".then(function(response) { return response.json(); })"
         ".then(function(data) {"
         "if (data.files) { data.files.sort(function(a, b) { return b.mtime - a.mtime; }); }"
@@ -399,6 +436,7 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "    return; /* Data is the same, no need to re-render */"
         "}"
         "lastFilesSignature = newSignature;"
+        "document.getElementById('global-status-banner').style.display = 'none';"
 
         "fileList.innerHTML = '';"
         "if (data.files && data.files.length > 0) {"
@@ -427,7 +465,7 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "if (confirm('Are you sure you want to delete ' + file.name + '?')) {"
         "fetch('/api/files/' + encodeURIComponent(file.name), { method: 'DELETE' })"
         ".then(function(response) {"
-        "if (response.ok) { "
+        "if (response.ok) {"
         "if (currentFile === file.name) { "
         "    previewContainer.style.display = 'none'; "
         "    currentFile = ''; "
@@ -456,8 +494,8 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "})"
         ".catch(function(error) {"
         "console.error('Error fetching file list:', error);"
-        "alert('Failed to load file list. The web server may have been turned off or disconnected from Wi-Fi.');"
-        "fileList.innerHTML = '<p>Error loading file list. Please refresh the page.</p>';"
+        "showGlobalBanner('Failed to load file list. Server may be offline.', loadFiles);"
+        "fileList.innerHTML = '<p id=\"file-list-status\">Error loading file list.</p>';"
         "});"
         "}"
         "window.jumpTo = function(position) {"
@@ -465,12 +503,12 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "const start = (position === 'top') ? 0 : -1;"
         "window.fetchChunk(currentFile, start, chunkSize, null, function(response) {"
         "if (!response.isCsv || !response.data.lines || response.data.lines.length === 0) {"
-         "    setTimeout(function() { previewBox.addEventListener('scroll', scrollHandler); }, 300);"
+        "    setTimeout(function() { previewBox.addEventListener('scroll', scrollHandler); }, 300);"
         "    return;"
         "}"
         "tbody.innerHTML = '';"
         "const data = response.data;"
-       
+
         "renderRows(data.lines, data.start_line, false);"
         "setTimeout(function() {"
         "    if (position === 'bottom') { "
@@ -877,7 +915,7 @@ static int find_line_by_timestamp(FILE *f, time_t target_timestamp, long header_
     // Find the exact line from the narrowed-down position
     while (fgets(line_buf, sizeof(line_buf), f) != NULL)
     {
-       // ESP_LOGI(TAG, "Checking line %d with timestamp %s against target %lld  ", line_idx, line_buf,target_timestamp);
+        // ESP_LOGI(TAG, "Checking line %d with timestamp %s against target %lld  ", line_idx, line_buf,target_timestamp);
         if (atoll(line_buf) > target_timestamp)
         {
             return (line_idx > 0) ? (line_idx - 1) : 0;
@@ -886,7 +924,7 @@ static int find_line_by_timestamp(FILE *f, time_t target_timestamp, long header_
     }
 
     return -1;
-    //return line_idx > 0 ? line_idx - 1 : 0; // Return last line if target is > all timestamps
+    // return line_idx > 0 ? line_idx - 1 : 0; // Return last line if target is > all timestamps
 }
 
 /**
@@ -1038,7 +1076,7 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
         int found_line_idx = find_line_by_timestamp(f, requested_timestamp, header_end_pos);
         if (found_line_idx != -1)
         {
-           // ESP_LOGI(TAG, "Found timestamp at or before line index %d", found_line_idx);
+            // ESP_LOGI(TAG, "Found timestamp at or before line index %d", found_line_idx);
             fseek(f, 0, SEEK_SET);             // Rewind to start of file
             skip_lines(f, 1 + found_line_idx); // Skip header + lines to get to the target
             actual_start_line_idx = found_line_idx;
@@ -1141,12 +1179,15 @@ static esp_err_t api_sensordata_handler(httpd_req_t *req)
     snprintf(diff_press_str, sizeof(diff_press_str), isnan(data.diff_pressure_pa) ? "null" : "%.2f", data.diff_pressure_pa);
     snprintf(batt_volt_str, sizeof(batt_volt_str), isnan(data.battery_voltage) ? "null" : "%.2f", data.battery_voltage);
 
+    // Convert pressure from Pa (long) to kPa (float) for JSON compatibility
+    float pressure_kpa = (data.pressure_pa != 0) ? (float)data.pressure_pa / 1000.0f : 0.0f;
+
     snprintf(json_buffer, sizeof(json_buffer),
-             "{\"timestamp\":%lld,\"datetime_local\":\"%s\",\"temperature_c\":%s,\"pressure_pa\":%ld,\"diff_pressure_pa\":%s,\"battery_voltage\":%s,\"battery_percentage\":%d,\"battery_externally_powered\":%s}",
+             "{\"timestamp\":%lld,\"datetime_local\":\"%s\",\"temperature_c\":%s,\"pressure_kpa\":%.3f,\"diff_pressure_pa\":%s,\"battery_voltage\":%s,\"battery_percentage\":%d,\"battery_externally_powered\":%s}",
              (long long)data.timestamp,
              local_time_str,
              temp_str,
-             data.pressure_pa,
+             pressure_kpa,
              diff_press_str,
              batt_volt_str,
              data.battery_percentage,

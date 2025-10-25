@@ -127,7 +127,7 @@ void datalogger_task(void *pvParameters)
     xEventGroupWaitBits(g_init_event_group, INIT_DONE_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
 
     // Set the CSV header for all new log files.
-    spi_sdcard_set_csv_header("timestamp_gmt,datetime_local,temperature_c,pressure_pa,diff_pressure_pa,battery_voltage,battery_percentage,uptime_seconds");
+    spi_sdcard_set_csv_header("timestamp_gmt,datetime_local,temperature_c,pressure_kpa,diff_pressure_pa,battery_voltage,battery_percentage,uptime_seconds");
 
     // Perform an initial sensor update right after startup.
     update_sensor_buffer(params);
@@ -335,11 +335,11 @@ void datalogger_task(void *pvParameters)
 
             // Format the data into a CSV string
             char csv_line[200];
-            snprintf(csv_line, sizeof(csv_line), "%lld,%s,%.2f,%ld,%.2f,%.2f,%d,%llu",
+            snprintf(csv_line, sizeof(csv_line), "%lld,%s,%.2f,%.3f,%.2f,%.2f,%d,%llu",
                      (long long)local_buffer.timestamp,
                      local_time_str,
                      local_buffer.temperature_c, // snprintf handles nan
-                     local_buffer.pressure_pa, // Already long, 0 is invalid
+                     (float)local_buffer.pressure_pa / 1000.0f, // Convert Pa to kPa
                      local_buffer.diff_pressure_pa, // snprintf handles nan
                      local_buffer.battery_voltage, // snprintf handles nan
                      local_buffer.battery_percentage,
