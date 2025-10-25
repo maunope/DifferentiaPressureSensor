@@ -343,7 +343,9 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "    const rows = Array.from(tbody.rows);"
         "    if (rows.length < 2) { document.getElementById('sparkline-container').style.display = 'none'; document.getElementById('sparkline-timestamp-range').style.display = 'none'; return; }"
         "    document.getElementById('sparkline-timestamp-range').style.display = 'block';"
-        "    const headerCells = Array.from(previewTable.querySelector('thead tr').cells).map(th => th.textContent);"
+        "    const headerRow = previewTable.querySelector('thead tr');"
+        "    if (!headerRow) { console.warn('updateSparklines called before header was ready.'); return; }"
+        "    const headerCells = Array.from(headerRow.cells).map(th => th.textContent);"
         "    const getColumnData = (colName) => {"
         "        const idx = headerCells.indexOf(colName);"
         "        return idx === -1 ? [] : rows.map(row => parseFloat(row.cells[idx].textContent)).filter(v => !isNaN(v));"
@@ -396,7 +398,7 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "}"
         "startSensorRefresh();"
         "const loadingIndicator = document.getElementById('loading-indicator');"
-        "const previewTable = document.getElementById('preview-table');" // Keep this reference
+        "const previewTable = document.getElementById('preview-table');" /* Keep this reference*/
         "function formatSize(bytes) {"
         "if (bytes === 0) return '0 B';"
         "const k = 1024;"
@@ -424,12 +426,13 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "isLoading = false; loadingIndicator.style.display = 'none'; loadingIndicator.textContent = ''; callback(response);"
         "}).catch(function(err) { "
         "console.error('Fetch error:', err); isLoading = false; loadingIndicator.style.display = 'none'; loadingIndicator.textContent = '';"
-        "});"
-        "};"
-        "function renderRows(lines, chunkStartLine) {"
+        "});};"
+        "function renderRows(data, chunkStartLine) {"
+        "    const lines = data.lines;" /* Assumes header is already rendered*/
         "if (!lines || lines.length === 0) return;"
         "const fragment = document.createDocumentFragment();"
         "lastChunkInfo.start_line = chunkStartLine;"
+        "/* The header is now rendered separately by renderHeader()*/"
         "for (var i = 0; i < lines.length; i++) {"
         "var line = lines[i];"
         "if (!line) continue;"
@@ -450,6 +453,11 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "tbody.innerHTML = '';"
         "tbody.appendChild(fragment);"
         "updateSparklines();"
+        "document.querySelectorAll('#preview-buttons button, #scale-buttons button').forEach(b => b.style.display = '');"
+        "}"
+        "function renderHeader(headerString) {"
+        "    if (!headerString) return;"
+        "    previewTable.querySelector('thead').innerHTML = '<tr>' + headerString.split(',').map(function(h) { return '<th>' + h + '</th>'; }).join('') + '</tr>';"
         "}"
         "const rawTextDisplay = document.createElement('pre');"
         "rawTextDisplay.id = 'raw-text-preview';"
@@ -478,34 +486,34 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "    currentScale = 14400; /* Reset to default 4 hours before fetching info */"
         "    try {"
         "        const fileInfoRes = await fetch(`/api/fileinfo?file=${encodeURIComponent(file)}`);"
-        "        if (fileInfoRes.ok) { "
-        "            fileInfo[file] = await fileInfoRes.json(); "
-        "            const duration = fileInfo[file].last_ts - fileInfo[file].first_ts;"
-        "            if (duration < 3600) { currentScale = 1800; } /* < 1hr -> 30min */"
-        "            else if (duration < 7200) { currentScale = 3600; } /* < 2hr -> 1hr */"
-        "            else if (duration < 14400) { currentScale = 7200; } /* < 4hr -> 2hr */"
-        "            else { currentScale = 14400; } /* default 4hr */"
-        "            updateScaleButtons(); /* Update UI to reflect new default scale */"
-        "        }"
-        "    } catch (e) { console.error('Could not fetch file info', e); fileInfo[file] = null; }"
-        "    window.fetchChunk(file, 0, maxRows, null, currentScale, 'forward', function(response) {"
-        "        document.getElementById('close-preview-btn').style.display = '';"
-        "        if (response.isCsv) {"
+        "        if (!fileInfoRes.ok) { throw new Error('Failed to fetch file info'); }"
+        "        fileInfo[file] = await fileInfoRes.json();"
+        "        const duration = fileInfo[file].last_ts - fileInfo[file].first_ts;"
+        "        if (duration < 3600) { currentScale = 1800; } /* < 1hr -> 30min */"
+        "        else if (duration < 7200) { currentScale = 3600; } /* < 2hr -> 1hr */"
+        "        else if (duration < 14400) { currentScale = 7200; } /* < 4hr -> 2hr */"
+        "        else { currentScale = 14400; } /* default 4hr */"
+        "        updateScaleButtons();"
+        "        /* Now that we have info and scale, fetch the first chunk */"
+        "        window.fetchChunk(file, 0, maxRows, null, currentScale, 'forward', function(response) {"
+        "            if (!response.isCsv) {"
+        "                previewTable.style.display = 'none'; rawTextDisplay.style.display = 'block';"
+        "                document.querySelectorAll('#preview-buttons button, #scale-buttons button').forEach(b => b.style.display = 'none');"
+        "                title.textContent = 'Preview: ' + file + ' (Raw Text)';"
+        "                rawTextDisplay.textContent = response.data;"
+        "                return;"
+        "            }"
         "            previewTable.style.display = ''; rawTextDisplay.style.display = 'none';"
-        "            const data = response.data;"
-        "            title.textContent += ' (CSV)';"
-        "            previewTable.querySelector('thead').innerHTML = '<tr>' + data.header.split(',').map(function(h) { return '<th>' + h + '</th>'; }).join('') + '</tr>';"
-        "            tbody.innerHTML = '';"
-        "            renderRows(data.lines, data.start_line);"
-        "            document.querySelectorAll('#preview-buttons button, #scale-buttons button').forEach(b => b.style.display = '');"
-        "        } else {"
-        "            previewTable.style.display = 'none'; rawTextDisplay.style.display = 'block';"
-        "            document.querySelectorAll('#preview-buttons button, #scale-buttons button').forEach(b => b.style.display = 'none');"
-        "            title.textContent += ' (Raw Text)';"
-        "            rawTextDisplay.textContent = response.data;"
-        "        }"
-        "        closePreviewBtn.onclick = closePreview;"
-        "    });"
+        "            title.textContent = 'Preview: ' + file + ' (CSV)';"
+        "            renderHeader(response.data.header);"
+        "            renderRows(response.data, response.data.start_line); /* This will now call updateSparklines */"
+        "        });"
+        "    } catch (e) {"
+        "        console.error('Could not fetch file info or initial chunk', e);"
+        "        tbody.innerHTML = '<tr><td colspan=\"100\" style=\"text-align: center; padding: 20px;\">Error loading file.</td></tr>';"
+        "        fileInfo[file] = null;"
+        "    }"
+        "    closePreviewBtn.onclick = closePreview;"
         "};"
         "let lastFilesSignature = null;"
         "function loadFiles() {"
@@ -596,19 +604,20 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "function fetchAndRender(start, timestamp, duration, direction) {"
         "    previewBox.removeEventListener('scroll', scrollHandler);"
         "    window.fetchChunk(currentFile, start, maxRows, timestamp, duration, direction, function(response) {"
-        "        if (!response.isCsv || !response.data.lines || response.data.lines.length === 0) {"
+        "        if (!response.isCsv || !response.data.lines || response.data.lines.length === 0) {            "
         "            console.log('Received empty chunk, handling navigation boundary.');"
         "            if (direction === 'backward') {"
         "                jumpTo('top');"
         "            } else { /* forward or not specified */"
         "                jumpTo('bottom');"
-        "            }"
+        "            }            "
         "            return;"
         "        }"
-        "        renderRows(response.data.lines, response.data.start_line);"
+        "        if (response.data.header) { renderHeader(response.data.header); }"
+        "        renderRows(response.data, response.data.start_line);"
         "        setTimeout(() => {"
-        "            previewBox.scrollTop = 1;"
-        "            setTimeout(() => previewBox.addEventListener('scroll', scrollHandler), 300);"
+        "            previewBox.scrollTop = 0;" /* Scroll to top of new chunk */
+        /* Infinite scroll handler removed */
         "        });"
         "    });"
         "}"
@@ -644,24 +653,9 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "    }"
         "    const direction = offset < 0 ? 'backward' : 'forward';"
         "    let targetTimestamp = (lastChunkInfo.start_ts || 0) + offset;"
-        "    const fileStart = fileInfo[currentFile].first_ts;"
-        "    const fileEnd = fileInfo[currentFile].last_ts;"
-        "    if (targetTimestamp < fileStart) {"
-        "        targetTimestamp = fileStart;"
-        "    }"
-        "    if (targetTimestamp >= fileEnd) {"
-        "        /* Don't allow jumping past the very end of the file */"
-        "        return;"
-        "    }"
-        "fetchAndRender(null, targetTimestamp, currentScale, direction);};"
-        "function scrollHandler() {"
-        "if (isLoading) return;"
-        "if (tbody.rows.length > 0 && previewBox.scrollTop + previewBox.clientHeight >= previewBox.scrollHeight - buffer) {"
-        "    const lastVisibleRow = tbody.rows[tbody.rows.length - 1];"
-        "    const currentTimestampSec = parseInt(lastVisibleRow.dataset.timestamp, 10);"
-        "    fetchAndRender(null, currentTimestampSec, currentScale, 'forward');"
-        "}"
-        "}"
+        "    fetchAndRender(null, targetTimestamp, currentScale, direction);"
+        "};"
+        "/* scrollHandler function removed to disable infinite scroll */"
         "document.querySelectorAll('#scale-buttons button').forEach(button => {"
         "    button.addEventListener('click', function() {"
         "        currentScale = parseInt(this.dataset.scale, 10);"
@@ -673,7 +667,7 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "        }"
         "    });"
         "});"
-        "previewBox.addEventListener('scroll', scrollHandler);"
+        "/* previewBox.addEventListener('scroll', scrollHandler) removed */"
         "loadFiles();"
         "setInterval(loadFiles, 10000);});"
         "</script>"
@@ -1041,14 +1035,14 @@ static int count_lines(FILE *f)
 }
 
 /**
- * @brief Finds the line number (0-indexed after header) corresponding to or after a target timestamp.
+ * @brief Finds the file offset corresponding to or after a target timestamp.
  * Assumes the first column of each line is a UNIX timestamp.
  * @param f The file pointer (should be positioned after the header).
  * @param target_timestamp The UNIX timestamp to search for.
- * @return The 0-indexed line number relative to the start of data, or -1 if not found.
+ * @return The file offset for the line, or `data_start_offset` if not found.
  * @param direction If > 0, find first line >= timestamp. If <= 0, find first line <= timestamp.
  */
-static int find_line_by_timestamp(FILE *f, time_t target_timestamp, long data_start_offset, int direction)
+static long find_offset_by_timestamp(FILE *f, time_t target_timestamp, long data_start_offset, int direction)
 {
     char line_buf[256];
     fseek(f, 0, SEEK_SET); // Ensure we are at the beginning before getting file size
@@ -1095,29 +1089,27 @@ static int find_line_by_timestamp(FILE *f, time_t target_timestamp, long data_st
         }
     }
 
-    // Convert the best offset found to a line index
-    fseek(f, data_start_offset, SEEK_SET);
-    int line_idx = 0;
-    long current_f_pos = ftell(f);
-    while (current_f_pos < best_offset && fgets(line_buf, sizeof(line_buf), f) != NULL) {
-        line_idx++;
-        current_f_pos = ftell(f);
-    }
-
     // If searching backward, we might need to adjust. The binary search finds the last line
     // *at or before* the target. If we land exactly on a line that is less than the target,
     // we might be at the end of a previous block. Stepping back one line ensures we capture
     // the context before that point when reading forward.
     if (direction <= 0) {
         fseek(f, best_offset, SEEK_SET);
-        if (fgets(line_buf, sizeof(line_buf), f) != NULL) {
-            if (atoll(line_buf) < target_timestamp && line_idx > 0) {
-                line_idx--;
+        if (fgets(line_buf, sizeof(line_buf), f) != NULL && atoll(line_buf) < target_timestamp) {
+            // We landed on a line before our target. To get the full context leading up to it,
+            // we need to find the line *before* this one.
+            long prev_line_offset = best_offset;
+            while (prev_line_offset > data_start_offset) {
+                fseek(f, --prev_line_offset, SEEK_SET);
+                if (fgetc(f) == '\n') {
+                    best_offset = ftell(f);
+                    break;
+                }
             }
         }
     }
 
-    return line_idx;
+    return best_offset;
 }
 
 /**
@@ -1275,11 +1267,9 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
     if (requested_timestamp != 0)
     {   
         int direction = (strcmp(direction_str, "backward") == 0) ? -1 : 1;
-        // Search by timestamp takes precedence
-        int found_line_idx = find_line_by_timestamp(f, requested_timestamp, data_start_offset, direction);
-        fseek(f, data_start_offset, SEEK_SET); // Rewind to start of data
-        skip_lines(f, found_line_idx);
-        actual_start_line_idx = (found_line_idx < 0) ? 0 : found_line_idx;
+        long found_offset = find_offset_by_timestamp(f, requested_timestamp, data_start_offset, direction);
+        fseek(f, found_offset, SEEK_SET);
+        actual_start_line_idx = -1; // Line index is not used when seeking by timestamp
     }
     else if (requested_start_line == -1)
     {

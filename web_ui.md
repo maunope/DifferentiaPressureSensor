@@ -65,23 +65,8 @@ The previewer has two sets of controls for navigation:
 
 For extremely large or dense files, the most efficient way to perform a full analysis is to download the file and open it on your computer.
 
-#### Scrolling with the Mouse
+#### Scrolling
 
-When you scroll up or down within the preview table, the behavior is different from the navigation buttons:
+You can use your mouse or trackpad to scroll through the data that is currently loaded in the preview table. Scrolling does **not** load new data from the file. To navigate to a different part of the file, you must use the **Scale** and **Jump** buttons.
 
-*   The currently displayed data is **replaced** with a new chunk of data from a different part of the file.
-*   This allows you to quickly "jump" to the beginning, end, or a specific time in the log without loading all the data in between.
-*   The number of visible rows is reset to the default chunk size (e.g., 100 lines).
-
-This is the fastest way to move through large files.
-
-#### Scrolling with the Mouse
-
-When you scroll up or down within the preview table, the behavior is different:
-
-*   The previewer will automatically fetch and **append (or prepend)** new lines of data to the table.
-*   This allows you to create a longer, continuous view of the data, extending the number of visible points up to a maximum limit (e.g., 1000 rows).
-
-#### Combining Navigation Methods
-
-You can use both methods together. For example, you can scroll to load a few hundred lines of data for detailed inspection. If you then click a navigation button like `>>> tail`, the view will reset, clearing the extended list and showing only the last chunk of data from the end of thefile.
+When you click a navigation button (e.g., `Day >>`), the currently displayed data is replaced with a new chunk from the file, and the scroll position is reset to the top of the new chunk.
