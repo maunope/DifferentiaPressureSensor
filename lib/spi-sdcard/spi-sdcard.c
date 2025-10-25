@@ -341,9 +341,29 @@ void spi_sdcard_get_file_count(void)
  * @param is_hf_mode True if in high-frequency mode, which affects filename.
  */
 static void create_new_log_file(bool is_hf_mode) {
-    const char* filename_format = is_hf_mode ? "/sdcard/data_%lld_hf.csv" : "/sdcard/data_%lld.csv";
-    snprintf(current_filepath, sizeof(current_filepath), filename_format, (long long)time(NULL));
-    ESP_LOGI(TAG, "Starting new log file: %s", current_filepath);
+    // 1. Get current time and format it as YYYYMMDDHHMMSS
+    time_t now = time(NULL);
+    struct tm local_tm;
+    convert_gmt_to_cet(now, &local_tm);
+    char timestamp_str[15]; // YYYYMMDDHHMMSS\0
+    strftime(timestamp_str, sizeof(timestamp_str), "%Y%m%d%H%M%S", &local_tm);
+
+    // 2. Construct base filename and check for existence
+    char base_filepath[256];
+    const char* suffix = is_hf_mode ? "_hf.csv" : ".csv";
+    snprintf(base_filepath, sizeof(base_filepath), "/sdcard/%s%s", timestamp_str, suffix);
+
+    strncpy(current_filepath, base_filepath, sizeof(current_filepath) - 1);
+    current_filepath[sizeof(current_filepath) - 1] = '\0';
+
+    struct stat st;
+    int counter = 2;
+    while (stat(current_filepath, &st) == 0) {
+        // File exists, append a counter
+        snprintf(current_filepath, sizeof(current_filepath), "/sdcard/%s_%d%s", timestamp_str, counter, suffix);
+        counter++;
+    }
+    ESP_LOGI(TAG, "Creating new log file: %s", current_filepath);
 
     // Write the CSV header to the new file
     if (strlen(s_csv_header) > 0) {
