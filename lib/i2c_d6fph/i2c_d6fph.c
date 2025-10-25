@@ -1,4 +1,4 @@
-#include "i2c-d6fph.h"
+#include "i2c_d6fph.h"
 #include "driver/i2c_master.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"

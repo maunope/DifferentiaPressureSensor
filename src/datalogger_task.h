@@ -3,8 +3,8 @@
 #include "../lib/buffers.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
-#include "../lib/i2c-bmp280/i2c-bmp280.h"
-#include "../lib/i2c-d6fph/i2c-d6fph.h"
+#include "../lib/i2c_bmp280/i2c_bmp280.h"
+#include "../lib/i2c_d6fph/i2c_d6fph.h"
 
 // --- Datalogger command queue ---
 typedef enum {

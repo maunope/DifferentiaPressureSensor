@@ -1,6 +1,6 @@
 #include "ui_render.h"
-#include "i2c-oled.h"
-#include "rotaryencoder.h"
+#include "i2c_oled.h"
+#include "rotary_encoder.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"

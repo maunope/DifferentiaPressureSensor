@@ -1,4 +1,4 @@
-#include "i2c-bmp280.h"
+#include "i2c_bmp280.h"
 #include "driver/i2c_master.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -22,7 +22,7 @@ static const char *TAG = "BMP280";
 static int32_t t_fine;
 
 /**
- * @brief Reads the factory-programmed calibration data from the BMP280.
+ * @brief Reads the factory_programmed calibration data from the BMP280.
  *
  * @param dev Pointer to the BMP280 device descriptor.
  * @return esp_err_t `ESP_OK` on success, or an error code on failure.

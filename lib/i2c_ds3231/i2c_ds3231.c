@@ -1,4 +1,4 @@
-#include "i2c-ds3231.h"
+#include "i2c_ds3231.h"
 #include <string.h>
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"

@@ -58,15 +58,15 @@ For more details on the custom PCB, see the [board design documentation](BOARD_D
 *   **Component Management**: Dependencies like `qrcode` and `tinyusb` are managed by the ESP-IDF Component Manager via the `idf_component.yml` file. The `esp_tinyusb` component for USB Mass Storage is enabled and configured directly through `menuconfig`, with settings reflected in the PlatformIO build profiles.
 *   **Software Architecture**: The project is built on a multi-tasking architecture using FreeRTOS. For a detailed explanation of the tasks and how they communicate, see the Software Architecture Guide.
 *   **Custom Libraries (located in `lib/`)**: This project uses a modular structure with several custom libraries. Click on a library name to see its specific documentation.
-    *   `config-manager`: Handles loading configuration from an INI file.
-    *   `i2c-bmp280`: Driver for the BMP280 sensor.
-    *   `i2c-d6fph`: Driver for the Omron D6F-PH sensor.
-    *   `i2c-ds3231`: Driver for the DS3231 RTC.
-    *   `i2c-oled`: Driver for the OLED display.
-    *   `lipo-battery`: Logic for reading battery voltage.
-    *   `ntp-client`: Helper for synchronizing time from an NTP server.
-    *   `rotaryencoder`: Driver for the rotary encoder input.
-    *   `spi-sdcard`: High-level manager for SD card operations and USB MSC.
+    *   `config_manager`: Handles loading configuration from an INI file.
+    *   `i2c_bmp280`: Driver for the BMP280 sensor.
+    *   `i2c_d6fph`: Driver for the Omron D6F-PH sensor.
+    *   `i2c_ds3231`: Driver for the DS3231 RTC.
+    *   `i2c_oled`: Driver for the OLED display.
+    *   `lipo_battery`: Logic for reading battery voltage.
+    *   `ntp_client`: Helper for synchronizing time from an NTP server.
+    *   `rotary_encoder`: Driver for the rotary encoder input.
+    *   `spi_sdcard`: High-level manager for SD card operations and USB MSC.
     *   `ui`: Manages the complete user interface, menu, and pages.
     *   `web_server`: Provides a web interface for downloading log files.
     *   `wifi_manager`: Centralizes Wi-Fi connection and disconnection logic.

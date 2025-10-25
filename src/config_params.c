@@ -1,5 +1,5 @@
 #include "config_params.h"
-#include "../lib/config-manager/config-manager.h"
+#include "../lib/config_manager/config_manager.h"
 #include "esp_log.h"
 #include <string.h>
 

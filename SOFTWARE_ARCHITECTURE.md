@@ -76,7 +76,7 @@ This task handles all sensor reading and data storage.
 
 ## Exclusive File System Access
 
-The SD card is a critical shared resource. To prevent file system corruption, all file system operations are protected by a dedicated mutex (`g_sdcard_mutex` in the `spi-sdcard` library). This ensures that only one operation (e.g., writing a log line, deleting a file, listing files for the web server) can occur at a time, even when multiple tasks are running concurrently.
+The SD card is a critical shared resource. To prevent file system corruption, all file system operations are protected by a dedicated mutex (`g_sdcard_mutex` in the `spi_sdcard` library). This ensures that only one operation (e.g., writing a log line, deleting a file, listing files for the web server) can occur at a time, even when multiple tasks are running concurrently.
 
 There are three components that can access the SD card:
 

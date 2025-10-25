@@ -2,7 +2,7 @@
 #define CONFIG_PARAMS_H
 
 #include <stdint.h>
-#include "../lib/i2c-d6fph/i2c-d6fph.h"
+#include "../lib/i2c_d6fph/i2c_d6fph.h"
 
 /**
  * @brief Structure to hold all runtime configuration parameters.
@@ -22,7 +22,7 @@ typedef struct {
 /**
  * @brief Initializes the configuration parameters by loading them from NVS.
  *
- * This function should be called once at startup after the config-manager
+ * This function should be called once at startup after the config_manager
  * has potentially loaded new values from the SD card.
  */
 void config_params_init(void);

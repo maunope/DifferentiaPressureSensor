@@ -74,6 +74,22 @@ The following table details the GPIO connections for the main peripherals.
 | **Battery Monitor**     | `BATT_ADC_EN`   | 5             | Enables the voltage divider         |
 |                         | `BATT_ADC`      | 6             | ADC input for voltage measurement   |
 
+## I2C Bus Considerations
+
+When extending the I2C bus, especially with longer cables, it's crucial to consider the impact of cable capacitance. Excessive capacitance can degrade signal integrity, leading to communication errors or complete bus failure. It is  recommended to keep total I2C bus length below 2-3 meters (total of all paralleled cables) to stay within acceptable capacitance limits.
+
+To improve reliability over longer distances, several strategies can be employed:
+
+*   **Pull-up Resistor Values**: The I2C bus requires pull-up resistors on both SDA and SCL lines. Keeping these values relatively low can help overcome capacitance effects. This board has been successfully tested with a total pull-up resistance of 3 kOhm (measured between Vcc and SDA/SCL pins) on a 4-meter cable length, operating at 100 kHz.
+*   **Avoid Too Low Pull-ups**: While lower pull-up values are generally better for longer cables, care must be taken not to go too low. If I2C devices on the bus happen to have small internal pull-up resistors, they can effectively parallel with external resistors. The combined equivalent resistance should not cause overcurrents on i2c pins as going too low can lead to excessive current draw and signal distortion, 6mA capable pins should never be paired with less than 1kohm total pull up resistance.
+*   **Cable Type**: Using twisted pair cables for SDA/SCL lines can significantly reduce noise and maintain signal integrity over distance. This practice helps in keeping the total bus capacitance below the recommended 400 picofarad limit for standard I2C operation.
+
+For applications requiring longer I2C bus lengths or higher speeds, dedicated I2C bus extenders or buffers might be necessary.
+
+
+
+
+
 ## Design Files
 
 This project was designed using **KiCad**. The main files are:

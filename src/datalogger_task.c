@@ -9,10 +9,10 @@
 #include <math.h>
 
 #include "../lib/buffers.h"
-#include "../lib/i2c-bmp280/i2c-bmp280.h"
-#include "../lib/i2c-d6fph/i2c-d6fph.h"
-#include "../lib/lipo-battery/lipo-battery.h"
-#include "../lib/spi-sdcard/spi-sdcard.h"
+#include "../lib/i2c_bmp280/i2c_bmp280.h"
+#include "../lib/i2c_d6fph/i2c_d6fph.h"
+#include "../lib/lipo_battery/lipo_battery.h"
+#include "../lib/spi_sdcard/spi_sdcard.h"
 #include "../lib/ui/time_utils.h"
 
 static const char *TAG = "DataloggerTask";
