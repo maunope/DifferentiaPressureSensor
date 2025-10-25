@@ -218,7 +218,6 @@ esp_err_t spi_sdcard_write_line(const char *line, bool is_hf_mode)
         // This block runs on the first write after boot or after a file rotation.
         // We need to decide whether to resume an old file or create a new one.
 
-        const char* sscanf_format = is_hf_mode ? "data_%lld_hf.csv" : "data_%lld.csv";
         DIR *dir = opendir("/sdcard");
         if (dir)
         {
@@ -229,16 +228,19 @@ esp_err_t spi_sdcard_write_line(const char *line, bool is_hf_mode)
             while ((ent = readdir(dir)) != NULL)
             {
                 long long ts;
-                // Ensure we only parse files that match the current mode.
-                // If in HF mode, filename must contain "_hf".
-                // If not in HF mode, filename must NOT contain "_hf".
-                bool name_matches_mode = (is_hf_mode && strstr(ent->d_name, "_hf")) ||
-                                         (!is_hf_mode && !strstr(ent->d_name, "_hf"));
-
-                if (name_matches_mode && sscanf(ent->d_name, sscanf_format, &ts) == 1)
+                // Check if the filename starts with a 14-digit timestamp
+                if (strlen(ent->d_name) >= 14 && sscanf(ent->d_name, "%14lld", &ts) == 1)
                 {
-                    if (ts > latest_ts)
+                    // Now, check if the mode matches (_hf suffix)
+                    bool name_has_hf = strstr(ent->d_name, "_hf.csv") != NULL;
+                    bool mode_matches = (is_hf_mode && name_has_hf) || (!is_hf_mode && !name_has_hf);
+
+                    if (mode_matches && ts > latest_ts)
                     {
+                        // Also ensure it's not a file with a counter like YYYYMMDDHHMMSS_2.csv
+                        char *underscore_ptr = strchr(ent->d_name + 14, '_');
+                        if (underscore_ptr != NULL && (underscore_ptr - ent->d_name) == 14) continue;
+
                         latest_ts = ts;
                         snprintf(latest_file, sizeof(latest_file), "/sdcard/%.255s", ent->d_name);
                     }
