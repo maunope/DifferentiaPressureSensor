@@ -602,7 +602,7 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "});"
         "}"
         "function fetchAndRender(start, timestamp, duration, direction) {"
-        "    previewBox.removeEventListener('scroll', scrollHandler);"
+        "    /* previewBox.removeEventListener('scroll', scrollHandler) removed as scrollHandler is gone */"
         "    window.fetchChunk(currentFile, start, maxRows, timestamp, duration, direction, function(response) {"
         "        if (!response.isCsv || !response.data.lines || response.data.lines.length === 0) {            "
         "            console.log('Received empty chunk, handling navigation boundary.');"
