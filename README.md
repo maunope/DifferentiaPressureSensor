@@ -20,7 +20,7 @@ This project is a datalogger built on the ESP32-S3 platform using the ESP-IDF fr
 *   **NTP Time Sync**: Can synchronize the RTC with an NTP server over Wi-Fi.
 *   **Web Server**: Can start a web server to allow downloading and previewing logged data files directly from a web browser.
 *   **Multiple Sampling Modes**: Supports "Normal", "High Frequency", and "Paused" logging modes, selectable via the UI.
-*   **Robust Power Management**: Implements a command-driven deep sleep cycle to conserve battery. The datalogger task explicitly signals when it's safe to sleep, preventing race conditions and ensuring data integrity. The device wakes up on a timer for the next log or via user interaction.
+*   **Robust Power Management**: Implements a command-driven deep sleep cycle to conserve battery. The datalogger task explicitly signals when it's safe to sleep, preventing race conditions and ensuring data integrity. The device wakes up on a timer for the next log or via user interaction. 
 *   **Web File Management**: The web interface allows users to list, preview, download, and delete log files directly from the device.
 *   **Exclusive File System Access**: To prevent data corruption, the system ensures that only one component (Datalogger, Web Server, or USB Mass Storage) can access the SD card at a time. For example, starting the web server will pause the datalogger, and connecting the device to a PC will disable both the web server and the datalogger.
 *   **Configuration & Persistence**:
@@ -51,7 +51,8 @@ For more details on the custom PCB, see the [board design documentation](BOARD_D
 
 1.  **Configuration**: Copy the `config_sample.ini` file to the root of your SD card and rename it to `config.ini`. Edit this file to set your Wi-Fi credentials, sensor model, and other parameters.
 2.  **Operation**: The device is controlled with the rotary encoder and its built-in push-button. For a detailed explanation of the menu system and on-screen information, please see the [User Interface Guide](UI_GUIDE.md).
-### Software & Libraries
+3.  **Web Interface**: When the web server is active, you can manage files from your browser. See the Web UI Guide for more details.
+## Software & Libraries
 
 *   **Framework**: ESP-IDF
 *   **RTOS**: FreeRTOS
