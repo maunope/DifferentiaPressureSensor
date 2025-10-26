@@ -2,6 +2,16 @@
 
 This project is a datalogger built on the ESP32-S3 platform using the ESP-IDF framework. It's designed to read environmental data from a BMP280 sensor, display it on an OLED screen with a menu-driven interface, and log the data to an SD card. The system uses a DS3231 Real-Time Clock (RTC) for accurate timestamping and exposes the SD card as a USB Mass Storage Device for easy data access.
 
+Please refer to the following main guides for usage guidance and documentation:
+
+*   **[Board Design](BOARD_DESIGN.md)**: Details on the custom PCB, hardware components, and pinout.
+*   **[User Interface Guide](UI_GUIDE.md)**: A complete guide to the on-screen menu system and controls.
+*   **[Web UI Guide](WEB_UI.md)**: Instructions for using the web interface to manage files.
+*   **[Software Architecture](SOFTWARE_ARCHITECTURE.md)**: An in-depth look at the software design, tasks, and communication mechanisms.
+
+## Overview
+ 
+
 ### Key Features
 
 *   **Sensor Datalogging**: Periodically reads:
@@ -50,7 +60,7 @@ For more details on the custom PCB, see the [board design documentation](BOARD_D
 ### Usage
 
 1.  **Configuration**: Copy the `config_sample.ini` file to the root of your SD card and rename it to `config.ini`. Edit this file to set your Wi-Fi credentials, sensor model, and other parameters.
-2.  **Operation**: The device is controlled with the rotary encoder and its built-in push-button. For a detailed explanation of the menu system and on-screen information, please see the [User Interface Guide](UI_GUIDE.md).
+2.  **Operation**: The device is controlled with the rotary encoder and its built-in push-button. For a detailed explanation of the menu system and on-screen information, please see the User Interface Guide.
 3.  **Web Interface**: When the web server is active, you can manage files from your browser. See the Web UI Guide for more details.
 ## Software & Libraries
 
@@ -68,6 +78,6 @@ For more details on the custom PCB, see the [board design documentation](BOARD_D
     *   `ntp_client`: Helper for synchronizing time from an NTP server.
     *   `rotary_encoder`: Driver for the rotary encoder input.
     *   `spi_sdcard`: High-level manager for SD card operations and USB MSC.
-    *   `ui`: Manages the complete user interface, menu, and pages.
-    *   `web_server`: Provides a web interface for downloading log files.
+    *   `ui`: Manages the complete user interface, menu, and pages. See the UI Guide.
+    *   `web_server`: Provides a web interface for downloading log files. See the Web UI Guide.
     *   `wifi_manager`: Centralizes Wi-Fi connection and disconnection logic.
