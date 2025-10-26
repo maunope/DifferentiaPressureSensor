@@ -165,6 +165,11 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "#preview-buttons { display: flex; flex-wrap: wrap; gap: 5px; }"
         "#preview-buttons button { flex-grow: 1; border-radius: 4px; background-color: #03dac6; color: #121212; }"
         "#close-preview-btn { position: absolute; top: 10px; right: 10px; background-color: #cf6679; color: #121212; border-radius: 4px; z-index: 10; }"
+        "#loading-indicator { display: none; align-items: center; justify-content: center; gap: 10px; text-align: center; color: #aaa; margin-top: 10px; min-height: 1em; }"
+        ".spinner { width: 1.5em; height: 1.5em; transform-origin: center; animation: spinner_zKoa 2s linear infinite; }"
+        ".spinner circle { stroke-linecap: round; animation: spinner_YpZS 1.5s ease-in-out infinite; }"
+        "@keyframes spinner_zKoa { 100% { transform: rotate(360deg); } }"
+        "@keyframes spinner_YpZS { 0% { stroke-dasharray: 0 150; stroke-dashoffset: 0; } 47.5% { stroke-dasharray: 42 150; stroke-dashoffset: -16; } 95%, 100% { stroke-dasharray: 42 150; stroke-dashoffset: -59; } }"
         "#preview-buttons button:hover { background-color: #33ffe7; }"
         "#preview-buttons #close-preview-btn { background-color: #cf6679; }"
         "#preview-buttons #close-preview-btn:hover { background-color: #ff7991; }"
@@ -217,7 +222,10 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "  <div id=\"preview-buttons\">"
         "    <button onclick=\"jumpTo('top')\">&lt;&lt;&lt; head</button><button onclick=\"navigateTime(-86400)\"> &lt;&lt; Day</button><button onclick=\"navigateTime(-3600)\"> &lt; Hour</button><button onclick=\"navigateTime(3600)\">Hour &gt; </button><button onclick=\"navigateTime(86400)\">Day &gt;&gt; </button><button onclick=\"jumpTo('bottom')\">tail &gt;&gt;&gt;</button>"
         "  </div>"
-        "  <div id=\"loading-indicator\" style=\"display: none; text-align: center; color: #aaa; margin-top: 10px; min-height: 1em;\"></div>"
+        "  <div id=\"loading-indicator\">"
+        "    <svg class=\"spinner\" viewBox=\"0 0 24 24\" xmlns=\"http://www.w3.org/2000/svg\"><g><circle cx=\"12\" cy=\"12\" r=\"9.5\" fill=\"none\" stroke-width=\"3\" stroke=\"#03dac6\"></circle></g></svg>"
+        "    <span>Loading...</span>"
+        "  </div>"
         "</div>"
         "<div id=\"preview-box\">"
         "<table id=\"preview-table\">"
@@ -422,7 +430,7 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "window.fetchChunk = function(file, start, count, timestamp, duration, direction, callback) {"
         "if (isLoading) return;"
         "isLoading = true;"
-        "loadingIndicator.textContent = 'Loading...'; loadingIndicator.style.display = 'block';"
+        "loadingIndicator.style.display = 'flex';"
         "let url = `/api/preview?file=${encodeURIComponent(file)}&count=${maxRows}&duration=${duration}`;"
         "if (timestamp !== null) { url += '&timestamp=' + timestamp; }"
         "else if (start !== null) { url += '&start=' + start; }"
@@ -435,18 +443,19 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "return res.text().then(function(data) { return {isCsv: false, data: data}; });"
         "}"
         "})"
-        ".then(function(response) { "
-        "isLoading = false; loadingIndicator.style.display = 'none'; loadingIndicator.textContent = ''; callback(response);"
-        "}).catch(function(err) { "
-        "console.error('Fetch error:', err); isLoading = false; loadingIndicator.style.display = 'none'; loadingIndicator.textContent = '';"
+        ".then(function(response) {"
+        "isLoading = false; loadingIndicator.style.display = 'none'; callback(response);"
+        "}).catch(function(err) {"
+        "console.error('Fetch error:', err); isLoading = false; loadingIndicator.style.display = 'none';"
         "});};"
         "function renderRows(data, chunkStartLine) {"
         "    const lines = data.lines;" /* Assumes header is already rendered*/
         "if (!lines || lines.length === 0) return;"
+        "previewBox.style.display = '';" /* Show the table container now that we have data */
         "const fragment = document.createDocumentFragment();"
         "lastChunkInfo.start_line = chunkStartLine;"
         "/* The header is now rendered separately by renderHeader()*/"
-        "for (var i = 0; i < lines.length; i++) {"
+        "for (let i = 0; i < lines.length; i++) {"
         "var line = lines[i];"
         "if (!line) continue;"
         "const row = document.createElement('tr');"
@@ -491,7 +500,7 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "    currentFile = file; previewContainer.style.display = 'block';"
         "    const title = document.getElementById('preview-title');"
         "    title.textContent = 'Preview: ' + file;"
-        "    previewTable.querySelector('thead').innerHTML = '';"
+        "    previewBox.style.display = 'none';" /* Hide table container while loading */
         "    tbody.innerHTML = '<tr><td colspan=\"100\" style=\"text-align: center; padding: 20px;\">Loading...</td></tr>';"
         "    document.querySelectorAll('#preview-buttons button, #scale-buttons button').forEach(b => b.style.display = 'none');"
         "    setActiveFile(file);"
@@ -1275,6 +1284,8 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
 
     char *buf = server_data->scratch;
     time_t first_line_ts = 0;
+    time_t duration_end_ts = 0;
+    char *line_start; // Declare here to be used across the loop
 
     bool is_first_line_in_json = true;
     int lines_sent = 0;
@@ -1286,12 +1297,17 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
         size_t bytes_to_read = SCRATCH_BUFSIZE - leftover_len - 1;
         size_t bytes_read = fread(buf + leftover_len, 1, bytes_to_read, f);
 
+        if (duration_sec > 0 && first_line_ts > 0 && duration_end_ts == 0)
+        {
+            duration_end_ts = first_line_ts + duration_sec;
+        }
+
         if (bytes_read == 0 && leftover_len == 0) {
             break; // No more data to read and no leftovers
         }
 
         size_t total_len = leftover_len + bytes_read;
-        char *line_start = buf;
+        line_start = buf; // Reset line_start to the beginning of the buffer for each new chunk
         char *buf_end = buf + total_len;
 
         while (line_start < buf_end) {
@@ -1333,12 +1349,12 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
                 is_first_line_in_json = false;
                 lines_sent++;
 
-                if (duration_sec > 0 && first_line_ts > 0) {
-                    if ((current_line_ts - first_line_ts) > duration_sec) {
-                        lines_sent = 10001; // Force exit
-                        break;
-                    }
+                // Check duration limit after sending
+                if (duration_end_ts > 0 && current_line_ts >= duration_end_ts) {
+                    lines_sent = 10001; // Force exit from both loops
+                    break;
                 }
+
             }
 
             line_start = next_newline + 1; // Move to the start of the next line
