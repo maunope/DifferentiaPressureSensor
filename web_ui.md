@@ -50,6 +50,14 @@ The previewer automatically detects the file type:
 
 ### Navigating CSV Data
 
+The sparkline graphs are designed to provide a quick, at-a-glance overview of the data trends within the currently loaded time window. This is especially useful for getting a quick sense of the data in the field with minimal effort, even without an internet connection.
+
+For a more thorough analysis, especially with very large files, it is recommended to download the CSV file and use a dedicated tool. You can open the file in any spreadsheet program (like Microsoft Excel, Google Sheets, or LibreOffice Calc) or use online data visualization tools that allow you to upload CSV files, such as:
+*   CSV Plot
+*   Draxlr
+
+Additionally, mobile apps like Smart CSV are excellent for processing and visualizing entire data files on the go.
+
 The previewer is designed to handle very large files efficiently by only loading small chunks of data at a time.
 
 #### Time Window and Navigation
