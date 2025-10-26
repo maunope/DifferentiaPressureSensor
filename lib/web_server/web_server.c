@@ -1017,56 +1017,52 @@ static esp_err_t download_handler(httpd_req_t *req)
  */
 static long find_offset_by_timestamp(FILE *f, time_t target_timestamp, long data_start_offset, int direction)
 {
-    char line_buf[256];
-    fseek(f, 0, SEEK_SET); // Ensure we are at the beginning before getting file size
+    char line_buf[256]; // Buffer for reading lines
     fseek(f, 0, SEEK_END);
     long high = ftell(f);
     long low = data_start_offset;
-    long best_offset = data_start_offset;
+    long best_offset = (direction > 0) ? high : data_start_offset;
 
-    // Binary search on file offsets
-    while (low < high) {
-        long mid = low + (high - low) / 2; // Avoid overflow
+    // Perform a binary search on the file offsets to quickly find the approximate location.
+    while (low <= high) {
+        long mid = low + (high - low) / 2;
         fseek(f, mid, SEEK_SET);
 
-        // If not at the very beginning, skip to the start of the next line
-        if (mid > data_start_offset) {
-            if (fgets(line_buf, sizeof(line_buf), f) == NULL) {
-                high = mid; // We're at the end, search lower half
-                continue;
-            }
+        // If not at the start, read until the next newline to align to a line start.
+        if (mid > data_start_offset && fgets(line_buf, sizeof(line_buf), f) == NULL) {
+            high = mid - 1; // We're at the end, search lower half.
+            continue;
         }
 
         long current_pos = ftell(f);
-        if (current_pos >= high || fgets(line_buf, sizeof(line_buf), f) == NULL) {
-            high = mid; // Reached end of file, search lower half
+        if (fgets(line_buf, sizeof(line_buf), f) == NULL) {
+            // Reached end of file, the target must be in the lower half.
+            high = mid - 1;
             continue;
         }
 
         time_t line_ts = atoll(line_buf);
 
-        if (direction > 0) { // Find first line >= target
-            if (line_ts >= target_timestamp) {
-                best_offset = current_pos;
-                high = mid;
-            } else {
+        if (line_ts < target_timestamp) {
+            if (direction > 0) { // Searching forward, need to look in the upper half.
                 low = mid + 1;
+            } else { // Searching backward, this is a potential candidate.
+                best_offset = current_pos;
+                low = mid + 1; // Try to find a later line that's still <= target.
             }
-        } else { // Find first line <= target
-            if (line_ts <= target_timestamp) {
+        } else { // line_ts >= target_timestamp
+            if (direction > 0) { // Searching forward, this is a potential candidate.
                 best_offset = current_pos;
-                low = mid + 1;
-            } else {
-                high = mid;
+                high = mid - 1; // Try to find an earlier line that's still >= target.
+            } else { // Searching backward, need to look in the lower half.
+                high = mid - 1;
             }
         }
     }
 
-    // If searching backward, we might need to adjust. The binary search finds the last line
-    // *at or before* the target. If we land exactly on a line that is less than the target,
-    // we might be at the end of a previous block. Stepping back one line ensures we capture
-    // the context before that point when reading forward.
-    if (direction <= 0) {
+    // For a backward search, we might need to step back one more line to get the
+    // beginning of the context that *includes* the target timestamp.
+    if (direction <= 0 && best_offset > data_start_offset) {
         fseek(f, best_offset, SEEK_SET);
         if (fgets(line_buf, sizeof(line_buf), f) != NULL && atoll(line_buf) < target_timestamp) {
             // We landed on a line before our target. To get the full context leading up to it,
@@ -1277,73 +1273,85 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
     snprintf(json_start, sizeof(json_start), "{\"header\":\"%s\",\"start_line\":%d,\"lines\":[", header_line, actual_start_line_idx);
     httpd_resp_send_chunk(req, json_start, strlen(json_start));
 
-    char *chunk_buf = server_data->scratch;
-    char *line_buf = server_data->scratch + 512; // Use a different part of scratch for line processing
-    char *first_data_line = server_data->scratch + 512 + 256;
-    first_data_line[0] = '\0';
+    char *buf = server_data->scratch;
+    time_t first_line_ts = 0;
 
     bool is_first_line_in_json = true;
     int lines_sent = 0;
-    size_t remaining_bytes = 0;
+    size_t leftover_len = 0;
 
     while (lines_sent < 10000)
     {
-        // Read new data, appending it after any leftover data from the previous chunk
-        size_t bytes_read = fread(chunk_buf + remaining_bytes, 1, SCRATCH_BUFSIZE - remaining_bytes - 1, f);
-        if (bytes_read == 0 && remaining_bytes == 0)
-        {
-            break; // End of file and no remaining data to process
+        // Read new data into the buffer, after any leftover partial line
+        size_t bytes_to_read = SCRATCH_BUFSIZE - leftover_len - 1;
+        size_t bytes_read = fread(buf + leftover_len, 1, bytes_to_read, f);
+
+        if (bytes_read == 0 && leftover_len == 0) {
+            break; // No more data to read and no leftovers
         }
 
-        size_t total_bytes_in_buf = bytes_read + remaining_bytes;
-        chunk_buf[total_bytes_in_buf] = '\0'; // Null-terminate the buffer for safe string operations
+        size_t total_len = leftover_len + bytes_read;
+        char *line_start = buf;
+        char *buf_end = buf + total_len;
 
-        char *line_start = chunk_buf;
-        char *chunk_end = chunk_buf + total_bytes_in_buf;
-        remaining_bytes = 0;
-
-        while (line_start < chunk_end && lines_sent < 10000)
-        {
-            char *line_end = memchr(line_start, '\n', chunk_end - line_start);
-
-            if (!line_end)
-            { // Incomplete line at the end of the buffer
-                remaining_bytes = chunk_end - line_start;
-                memmove(chunk_buf, line_start, remaining_bytes); // Move the partial line to the beginning
+        while (line_start < buf_end) {
+            char *next_newline = memchr(line_start, '\n', buf_end - line_start);
+            if (!next_newline) {
+                // No more complete lines in this buffer, save the rest for the next read
+                leftover_len = buf_end - line_start;
+                memmove(buf, line_start, leftover_len);
                 break;
             }
+            leftover_len = 0; // We found a line, so reset leftovers for this iteration
 
-            size_t line_len = line_end - line_start;
-            if (line_len > 0 && line_start[line_len - 1] == '\r')
-            {
-                line_len--; // Trim trailing '\r' if present
+            size_t line_len = next_newline - line_start;
+            if (line_len > 0 && line_start[line_len - 1] == '\r') {
+                line_len--; // Trim CR
             }
 
-            if (line_len > 0)
-            {
-                // Use line_buf for temporary operations
-                if (line_len >= 256) line_len = 255;
-                memcpy(line_buf, line_start, line_len);
-                line_buf[line_len] = '\0';
+            if (line_len > 0) {
+                // Manually parse timestamp to handle potential null characters
+                time_t current_line_ts = 0;
+                char ts_str[21] = {0};
+                char *comma = memchr(line_start, ',', line_len);
+                if (comma) {
+                    size_t ts_len = comma - line_start;
+                    if (ts_len < sizeof(ts_str)) {
+                        memcpy(ts_str, line_start, ts_len);
+                        current_line_ts = atoll(ts_str);
+                    }
+                }
 
                 if (is_first_line_in_json) {
-                    strncpy(first_data_line, line_buf, 256 - 1);
-                    first_data_line[255] = '\0';
+                    first_line_ts = current_line_ts;
                 }
-                if (duration_sec > 0 && lines_sent > 0 && strlen(first_data_line) > 0 && (atoll(line_buf) - atoll(first_data_line) > duration_sec)) {
-                    lines_sent = 10001; // Force exit from both loops
-                    break;
-                }
+
                 if (!is_first_line_in_json) httpd_resp_send_chunk(req, ",", 1);
                 httpd_resp_send_chunk(req, "\"", 1);
                 httpd_resp_send_chunk(req, line_start, line_len);
                 httpd_resp_send_chunk(req, "\"", 1);
                 is_first_line_in_json = false;
                 lines_sent++;
+
+                if (duration_sec > 0 && first_line_ts > 0) {
+                    if ((current_line_ts - first_line_ts) > duration_sec) {
+                        lines_sent = 10001; // Force exit
+                        break;
+                    }
+                }
             }
 
-            line_start = line_end + 1;
+            line_start = next_newline + 1; // Move to the start of the next line
+            if (lines_sent >= 10000) break;
         }
+
+        if (lines_sent > 10000) break;
+
+        if (bytes_read == 0 && leftover_len > 0) {
+            break; // Exit the main loop, we are done.
+        }
+        // Yield to other tasks to prevent watchdog timer from triggering on long operations
+        vTaskDelay(pdMS_TO_TICKS(2));
     }
 
     fclose(f);
