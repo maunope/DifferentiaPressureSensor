@@ -228,19 +228,19 @@ esp_err_t spi_sdcard_write_line(const char *line, bool is_hf_mode)
             while ((ent = readdir(dir)) != NULL)
             {
                 long long ts;
-                // Check if the filename starts with a 14-digit timestamp
-                if (strlen(ent->d_name) >= 14 && sscanf(ent->d_name, "%14lld", &ts) == 1)
+                int counter = 0;
+                // Try to parse filenames like YYYYMMDDHHMMSS.csv or YYYYMMDDHHMMSS_hf.csv
+                // or with counters like YYYYMMDDHHMMSS_2.csv or YYYYMMDDHHMMSS_2_hf.csv
+                if (sscanf(ent->d_name, "%14lld_%d", &ts, &counter) == 2 || sscanf(ent->d_name, "%14lld", &ts) == 1)
                 {
                     // Now, check if the mode matches (_hf suffix)
                     bool name_has_hf = strstr(ent->d_name, "_hf.csv") != NULL;
                     bool mode_matches = (is_hf_mode && name_has_hf) || (!is_hf_mode && !name_has_hf);
 
-                    if (mode_matches && ts > latest_ts)
+                    // If we find a newer timestamp, reset the search.
+                    // If the timestamp is the same, we need to find the one with the highest counter.
+                    if (mode_matches && ts >= latest_ts)
                     {
-                        // Also ensure it's not a file with a counter like YYYYMMDDHHMMSS_2.csv
-                        char *underscore_ptr = strchr(ent->d_name + 14, '_');
-                        if (underscore_ptr != NULL && (underscore_ptr - ent->d_name) == 14) continue;
-
                         latest_ts = ts;
                         snprintf(latest_file, sizeof(latest_file), "/sdcard/%.255s", ent->d_name);
                     }

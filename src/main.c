@@ -706,15 +706,18 @@ void main_task(void *pvParameters)
             case APP_CMD_LOG_COMPLETE_SLEEP_NOW:
                 // checks here are partially redundant, I could just use the main loop to check all the "no sleep" conditions and update variables accordingly.
                 // or I could just raise a flag, "sleep now requested" and have the main loop handle it. but since debugging sleep issues is a pain in the *ss,
-                //  I'll keep the detailed albeit redundant checks and logging here for now. :-P
-                ESP_LOGI(TAG, "CMD: Log complete, checking sleep conditions.");
+                // I'll keep the detailed albeit redundant checks and logging here for now. :-P
+                const char* sleep_reason_log = local_buffer.datalogger_paused ? "Logging paused" : "Log complete";
+                ESP_LOGI(TAG, "CMD: %s, checking sleep conditions.", sleep_reason_log);
+
                 bool web_server_active = (local_buffer.web_server_status == WEB_SERVER_RUNNING || local_buffer.web_server_status == WEB_SERVER_STARTING);
                 uint64_t current_time_ms_for_sleep_check = esp_timer_get_time() / 1000ULL;
                 // last_activity_ms== 0 means no command was received since boot
                 bool ui_is_inactive = (current_time_ms_for_sleep_check - last_activity_ms > g_cfg->inactivity_timeout_ms || last_activity_ms == 0);
+
                 if (ui_is_inactive && !web_server_active)
                 {
-                    ESP_LOGI(TAG, "UI is inactive and log is complete. Initiating sleep.");
+                    ESP_LOGI(TAG, "UI is inactive and %s. Initiating sleep.", sleep_reason_log);
                     // in case it's already off, this does no harm
                     oled_power_off();
 
