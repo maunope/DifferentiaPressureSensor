@@ -1112,11 +1112,12 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
     time_t requested_timestamp = 0; // 0 indicates no timestamp search
     char direction_str[16] = "forward"; // Default direction
 
+    char *query_buf = NULL;
     size_t query_len = httpd_req_get_url_query_len(req) + 1;
     if (query_len > 1)
     {
-        char *query_buf = malloc(query_len);
-        if (query_buf == NULL)
+        query_buf = malloc(query_len);
+        if (!query_buf)
         {
             ESP_LOGE(TAG, "Failed to allocate query buffer");
             httpd_resp_send_500(req);
@@ -1154,17 +1155,18 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
                 strncpy(direction_str, param, sizeof(direction_str) - 1);
             }
         }
-        free(query_buf);
     }
 
     if (strlen(filename) == 0)
     {
         ESP_LOGE(TAG, "Filename parameter is missing in preview request");
+        if (query_buf) free(query_buf);
         httpd_resp_send_404(req);
         return ESP_FAIL;
     }
 
     snprintf(filepath, sizeof(filepath), "/sdcard/%s", filename);
+    if (query_buf) free(query_buf); // Free query buffer now that we are done with it
 
     FILE *f = fopen(filepath, "r");
     if (f == NULL)
@@ -1174,12 +1176,15 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    char line[256];
-    char header_line[256] = "";
+    file_server_data_t *server_data = (file_server_data_t *)req->user_ctx;
+    // Use parts of the scratch buffer for local string operations to avoid stack allocation
+    char *line = server_data->scratch;
+    char *header_line = server_data->scratch + 256;
+    memset(header_line, 0, 256);
     long header_pos = ftell(f); // Save position of file start
 
     // Read the first line to check for the CSV header.
-    if (fgets(header_line, sizeof(header_line), f) == NULL)
+    if (fgets(header_line, 256, f) == NULL)
     {
         fclose(f);
         httpd_resp_send_500(req);
@@ -1235,10 +1240,10 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
 
     // --- Proceed with JSON CSV Preview ---
     int actual_start_line_idx = 0;
-    long data_start_offset = ftell(f);
-    line_count = 10000; // Increase line count to allow for larger time windows
+    long current_offset = ftell(f);
+    const long data_start_offset = current_offset;
     if (requested_timestamp != 0)
-    {   
+    {
         int direction = (strcmp(direction_str, "backward") == 0) ? -1 : 1;
         long found_offset = find_offset_by_timestamp(f, requested_timestamp, data_start_offset, direction);
         fseek(f, found_offset, SEEK_SET);
@@ -1256,50 +1261,89 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
                  fseek(f, file_size, SEEK_SET); // Go to very end if read fails
             }
         }
+        current_offset = ftell(f);
         actual_start_line_idx = -1; // Line index is not used when seeking to the end
     }
     else
     {
         // Request for specific start line (or default 0)
         fseek(f, data_start_offset, SEEK_SET);
+        current_offset = data_start_offset;
         actual_start_line_idx = requested_start_line;
     }
+
     httpd_resp_set_type(req, "application/json");
     char json_start[512];
     snprintf(json_start, sizeof(json_start), "{\"header\":\"%s\",\"start_line\":%d,\"lines\":[", header_line, actual_start_line_idx);
     httpd_resp_send_chunk(req, json_start, strlen(json_start));
 
-    bool first_data_chunk_line = true;
-    char first_data_line[256] = {0};
+    char *chunk_buf = server_data->scratch;
+    char *line_buf = server_data->scratch + 512; // Use a different part of scratch for line processing
+    char *first_data_line = server_data->scratch + 512 + 256;
+    first_data_line[0] = '\0';
+
+    bool is_first_line_in_json = true;
     int lines_sent = 0;
-    while (fgets(line, sizeof(line), f) != NULL && lines_sent < line_count)
+    size_t remaining_bytes = 0;
+
+    while (lines_sent < 10000)
     {
-        // Check duration if specified and we have a first line to compare against
-        if (duration_sec > 0 && lines_sent > 0 && strlen(first_data_line) > 0)
+        // Read new data, appending it after any leftover data from the previous chunk
+        size_t bytes_read = fread(chunk_buf + remaining_bytes, 1, SCRATCH_BUFSIZE - remaining_bytes - 1, f);
+        if (bytes_read == 0 && remaining_bytes == 0)
         {
-            time_t first_ts = atoll(first_data_line); // Timestamp of the very first line in this chunk
-            time_t current_ts = atoll(line);
-            if (current_ts - first_ts > duration_sec)
-            {
+            break; // End of file and no remaining data to process
+        }
+
+        size_t total_bytes_in_buf = bytes_read + remaining_bytes;
+        chunk_buf[total_bytes_in_buf] = '\0'; // Null-terminate the buffer for safe string operations
+
+        char *line_start = chunk_buf;
+        char *chunk_end = chunk_buf + total_bytes_in_buf;
+        remaining_bytes = 0;
+
+        while (line_start < chunk_end && lines_sent < 10000)
+        {
+            char *line_end = memchr(line_start, '\n', chunk_end - line_start);
+
+            if (!line_end)
+            { // Incomplete line at the end of the buffer
+                remaining_bytes = chunk_end - line_start;
+                memmove(chunk_buf, line_start, remaining_bytes); // Move the partial line to the beginning
                 break;
             }
-        }
-        line[strcspn(line, "\r\n")] = 0; // Trim newline
-        if (strlen(line) == 0)
-            continue; // Skip empty lines
 
-        if (first_data_chunk_line)
-        {
-            strncpy(first_data_line, line, sizeof(first_data_line) - 1);
-        }
+            size_t line_len = line_end - line_start;
+            if (line_len > 0 && line_start[line_len - 1] == '\r')
+            {
+                line_len--; // Trim trailing '\r' if present
+            }
 
-        if (!first_data_chunk_line)
-            httpd_resp_send_chunk(req, ",", 1);
-        httpd_resp_send_chunk(req, "\"", 1);
-        httpd_resp_send_chunk(req, line, strlen(line));
-        httpd_resp_send_chunk(req, "\"", 1);
-        first_data_chunk_line = false;
-        lines_sent++;
+            if (line_len > 0)
+            {
+                // Use line_buf for temporary operations
+                if (line_len >= 256) line_len = 255;
+                memcpy(line_buf, line_start, line_len);
+                line_buf[line_len] = '\0';
+
+                if (is_first_line_in_json) {
+                    strncpy(first_data_line, line_buf, 256 - 1);
+                    first_data_line[255] = '\0';
+                }
+                if (duration_sec > 0 && lines_sent > 0 && strlen(first_data_line) > 0 && (atoll(line_buf) - atoll(first_data_line) > duration_sec)) {
+                    lines_sent = 10001; // Force exit from both loops
+                    break;
+                }
+                if (!is_first_line_in_json) httpd_resp_send_chunk(req, ",", 1);
+                httpd_resp_send_chunk(req, "\"", 1);
+                httpd_resp_send_chunk(req, line_start, line_len);
+                httpd_resp_send_chunk(req, "\"", 1);
+                is_first_line_in_json = false;
+                lines_sent++;
+            }
+
+            line_start = line_end + 1;
+        }
     }
 
     fclose(f);
