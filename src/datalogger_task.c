@@ -227,7 +227,8 @@ void datalogger_task(void *pvParameters)
 
                 // Force a file rotation on any mode change to clearly separate data segments.
                 // Especially important when coming out of a paused state.
-                if (was_paused && !is_logging_paused) spi_sdcard_rotate_file();
+                if (was_paused && !is_logging_paused)
+                    spi_sdcard_rotate_file();
             }
             else if (msg.cmd == DATALOGGER_CMD_ROTATE_FILE)
             {
@@ -329,6 +330,24 @@ void datalogger_task(void *pvParameters)
                 continue; // Skip this logging cycle
             }
 
+            // --- Battery Level Check ---
+            if (local_buffer.battery_voltage > 0 && local_buffer.battery_voltage < 3.55f)
+            {
+                ESP_LOGE(TAG, "Cannot log data: Battery voltage (%.2fV) is below threshold (%.2fV)", local_buffer.battery_voltage, 3.55f);
+                if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(100)) == pdTRUE)
+                {
+                    // Update status to indicate failure due to low battery.
+                    g_sensor_buffer.writeStatus = WRITE_STATUS_FAIL;
+                    xSemaphoreGive(g_sensor_buffer_mutex);
+                }
+                // Signal to sleep, as there's nothing more to do if the battery is low.
+                app_command_t sleep_cmd = {.cmd = APP_CMD_LOG_COMPLETE_SLEEP_NOW};
+                xQueueSend(g_app_cmd_queue, &sleep_cmd, 0);
+                // The specific error code is returned conceptually by not writing and logging an error.
+                // The error is logged, and the write is skipped.
+                continue; // Skip the rest of the logging process
+            }
+
             // Format timestamp for logging
             char local_time_str[32];
             struct tm local_tm;
@@ -343,10 +362,10 @@ void datalogger_task(void *pvParameters)
             snprintf(csv_line, sizeof(csv_line), "%lld,%s,%.2f,%.3f,%.2f,%.2f,%d,%llu",
                      (long long)local_buffer.timestamp,
                      local_time_str,
-                     local_buffer.temperature_c, // snprintf handles nan
+                     local_buffer.temperature_c,         // snprintf handles nan
                      local_buffer.pressure_pa / 1000.0f, // Convert Pa to kPa
-                     local_buffer.diff_pressure_pa, // snprintf handles nan
-                     local_buffer.battery_voltage, // snprintf handles nan
+                     local_buffer.diff_pressure_pa,      // snprintf handles nan
+                     local_buffer.battery_voltage,       // snprintf handles nan
                      local_buffer.battery_percentage,
                      local_buffer.uptime_seconds);
 

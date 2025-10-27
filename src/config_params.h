@@ -9,6 +9,7 @@
  */
 typedef struct {
     float battery_voltage_divider_ratio;
+    float battery_voltage_treshold;
     uint32_t inactivity_timeout_ms;
     uint64_t sleep_duration_ms;
     uint32_t log_interval_ms;

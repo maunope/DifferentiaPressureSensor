@@ -90,19 +90,20 @@ typedef struct
 } config_item_t;
 
 #define MAX_CONFIG_ITEMS 9 // Correctly define the number of items
-static config_item_t s_config_items[MAX_CONFIG_ITEMS];
+#define NEW_MAX_CONFIG_ITEMS 10 // Increased by 1 for b_volt_threshold
+static config_item_t s_config_items[NEW_MAX_CONFIG_ITEMS];
 
 // Define the actual configuration keys here, in one place.
-static const char *s_config_keys[MAX_CONFIG_ITEMS] = {
+static const char *s_config_keys[NEW_MAX_CONFIG_ITEMS] = {
     "v_div_ratio",
+    "b_volt_threshold",
     "inactive_ms",
     "sleep_ms",
     "hf_sleep_ms",
     "log_int_ms",
     "hf_log_int_ms",
     "d6fph_model",
-    "wifi_ssid",
-    "wifi_password"};
+    "wifi_ssid", "wifi_password"};
 static int s_num_config_items = 0;
 
 static int s_config_current_page_index = 0;
@@ -1317,24 +1318,26 @@ void page_config_on_ccw(void)
 static void ui_config_page_prepare_data(void)
 {
     const config_params_t *params = config_params_get();
-    s_num_config_items = MAX_CONFIG_ITEMS;
+    s_num_config_items = NEW_MAX_CONFIG_ITEMS;
 
     // Populate the values based on the current config. The keys are now centrally defined.
     s_config_items[0].full_key = s_config_keys[0];
     snprintf(s_config_items[0].value, sizeof(s_config_items[0].value), "%.4f", params->battery_voltage_divider_ratio);
     s_config_items[1].full_key = s_config_keys[1];
-    snprintf(s_config_items[1].value, sizeof(s_config_items[1].value), "%lu", (unsigned long)params->inactivity_timeout_ms);
+    snprintf(s_config_items[1].value, sizeof(s_config_items[1].value), "%.2f", params->battery_voltage_treshold);
     s_config_items[2].full_key = s_config_keys[2];
-    snprintf(s_config_items[2].value, sizeof(s_config_items[2].value), "%llu", (unsigned long long)params->sleep_duration_ms);
-    s_config_items[3].full_key = s_config_keys[3]; // hf_sleep_ms
-    snprintf(s_config_items[3].value, sizeof(s_config_items[3].value), "%llu", (unsigned long long)params->hf_sleep_duration_ms);
-    s_config_items[4].full_key = s_config_keys[4]; // log_int_ms
-    snprintf(s_config_items[4].value, sizeof(s_config_items[4].value), "%lu", (unsigned long)params->log_interval_ms);
-    s_config_items[5].full_key = s_config_keys[5]; // hf_log_int_ms
-    snprintf(s_config_items[5].value, sizeof(s_config_items[5].value), "%lu", (unsigned long)params->hf_log_interval_ms);
+    snprintf(s_config_items[2].value, sizeof(s_config_items[2].value), "%lu", (unsigned long)params->inactivity_timeout_ms);
+    s_config_items[3].full_key = s_config_keys[3];
+    snprintf(s_config_items[3].value, sizeof(s_config_items[3].value), "%llu", (unsigned long long)params->sleep_duration_ms);
+    s_config_items[4].full_key = s_config_keys[4]; // hf_sleep_ms
+    snprintf(s_config_items[4].value, sizeof(s_config_items[4].value), "%llu", (unsigned long long)params->hf_sleep_duration_ms);
+    s_config_items[5].full_key = s_config_keys[5]; // log_int_ms
+    snprintf(s_config_items[5].value, sizeof(s_config_items[5].value), "%lu", (unsigned long)params->log_interval_ms);
+    s_config_items[6].full_key = s_config_keys[6]; // hf_log_int_ms
+    snprintf(s_config_items[6].value, sizeof(s_config_items[6].value), "%lu", (unsigned long)params->hf_log_interval_ms);
 
     // D6F-PH Model
-    s_config_items[6].full_key = s_config_keys[6];
+    s_config_items[7].full_key = s_config_keys[7];
     const char *model_str = "Unknown";
     if (params->d6fph_model == D6FPH_MODEL_0025AD1)
         model_str = "0025AD1";
@@ -1342,21 +1345,21 @@ static void ui_config_page_prepare_data(void)
         model_str = "0505AD3";
     else if (params->d6fph_model == D6FPH_MODEL_5050AD4)
         model_str = "5050AD4";
-    snprintf(s_config_items[6].value, sizeof(s_config_items[6].value), "%s (%d)", model_str, params->d6fph_model);
+    snprintf(s_config_items[7].value, sizeof(s_config_items[7].value), "%s (%d)", model_str, params->d6fph_model);
 
     // WiFi SSID
-    s_config_items[7].full_key = s_config_keys[7];
-    snprintf(s_config_items[7].value, sizeof(s_config_items[7].value), "%.20s", params->wifi_ssid);
+    s_config_items[8].full_key = s_config_keys[8];
+    snprintf(s_config_items[8].value, sizeof(s_config_items[8].value), "%.20s", params->wifi_ssid);
 
     // WiFi Password (masked)
-    s_config_items[8].full_key = s_config_keys[8];
-    if (strlen(params->wifi_password) > 0)
+    s_config_items[9].full_key = s_config_keys[9];
+    if (strlen(params->wifi_password) > 0) // Use index 9
     {
-        snprintf(s_config_items[8].value, sizeof(s_config_items[8].value), "********");
+        snprintf(s_config_items[9].value, sizeof(s_config_items[9].value), "********");
     }
     else
     {
-        snprintf(s_config_items[8].value, sizeof(s_config_items[8].value), "(not set)");
+        snprintf(s_config_items[9].value, sizeof(s_config_items[9].value), "(not set)");
     }
 }
 

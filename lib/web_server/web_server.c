@@ -22,7 +22,7 @@ static regex_t csv_header_regex;
 static bool regex_is_compiled = false;
 
 #define FILE_PATH_MAX (ESP_VFS_PATH_MAX + 128)
-#define SCRATCH_BUFSIZE (5*10240)
+#define SCRATCH_BUFSIZE (5 * 10240)
 
 typedef struct
 {
@@ -33,7 +33,6 @@ typedef struct
 static esp_err_t api_preview_handler(httpd_req_t *req);
 static esp_err_t api_sensordata_handler(httpd_req_t *req);
 static esp_err_t api_fileinfo_handler(httpd_req_t *req);
-
 
 /**
  * @brief Trims leading and trailing whitespace from a string.
@@ -118,7 +117,7 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "<meta charset=\"UTF-8\">"
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
         "<title>Differential Pressure Sensor</title>"
-        //
+        // favicon generated with https://formito.com/tools/favicon
         "<link rel=\"icon\" type=\"image/svg+xml\" href=\"data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22256%22 height=%22256%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%23373737%22></rect><path d=%22M22.86 74.88L8.54 74.88L8.54 25.12L23.24 25.12Q29.83 25.12 34.94 28.06Q40.05 31.00 42.86 36.40Q45.66 41.80 45.66 48.77L45.66 48.77L45.66 51.26Q45.66 58.34 42.84 63.71Q40.02 69.07 34.81 71.98Q29.59 74.88 22.86 74.88L22.86 74.88ZM23.24 32.09L17.19 32.09L17.19 67.98L22.83 67.98Q29.63 67.98 33.27 63.72Q36.91 59.47 36.98 51.50L36.98 51.50L36.98 48.74Q36.98 40.63 33.46 36.36Q29.94 32.09 23.24 32.09L23.24 32.09ZM73.21 56.39L62.92 56.39L62.92 74.88L54.27 74.88L54.27 25.12L73.31 25.12Q81.65 25.12 86.56 29.46Q91.46 33.80 91.46 40.94L91.46 40.94Q91.46 48.26 86.66 52.32Q81.86 56.39 73.21 56.39L73.21 56.39ZM62.92 32.09L62.92 49.45L73.31 49.45Q77.92 49.45 80.35 47.28Q82.78 45.11 82.78 41.01L82.78 41.01Q82.78 36.98 80.32 34.57Q77.86 32.16 73.55 32.09L73.55 32.09L62.92 32.09Z%22 fill=%22%2303dac6%22></path></svg>\" />"
         "<style>"
         "body { font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif; background-color: #121212; color: #e0e0e0; margin: 0; padding: 20px; line-height: 1.6; }"
@@ -251,9 +250,13 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "function closePreview() {"
         "    previewContainer.style.display = 'none';"
         "    currentFile = '';"
-        "    setActiveFile(null);"
-        "    document.getElementById('sparkline-container').style.display = 'none';"
-        "    document.getElementById('sparkline-timestamp-range').style.display = 'none';"
+        "    setActiveFile(null);" // Clear active file highlight
+        "    document.getElementById('sparkline-container').style.display = 'none';" // Hide sparklines
+        "    document.getElementById('sparkline-timestamp-range').style.display = 'none';" // Hide sparkline range
+        "    document.getElementById('controls-panel').style.display = 'none';" // Explicitly hide controls
+        "    previewBox.style.display = 'none';" // Explicitly hide previewBox
+        "    previewTable.style.display = 'none';" // Explicitly hide table
+        "    rawTextDisplay.style.display = 'none';"                            // Explicitly hide raw text
         "}"
         "const tbody = document.querySelector('#preview-table tbody');"
         "const fileList = document.getElementById('file-list');"
@@ -390,7 +393,7 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "    const idealWidthPercent = (displayDuration / fileTotalDuration) * 100;"
         "    const remainingPercent = 100 - leftPercent;"
         "    const finalWidthPercent = Math.min(idealWidthPercent, remainingPercent);"
-        
+
         "    timelineBar.style.left = `${leftPercent}%`;"
         "    timelineBar.style.width = `${finalWidthPercent}%`;"
         "    timelineBar.style.minWidth = '0';"
@@ -403,7 +406,7 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "        timelineBar.style.width = `${minWidthPercent}%`;"
         "        timelineBar.textContent = '';" /* Hide text if bar is too small */
         "    }"
-        
+
         "    document.getElementById('sparkline-timestamp-range').style.display = 'flex';"
         "    const tempData = getColumnData('temperature_c');"
         "    const pressData = getColumnData('pressure_kpa');"
@@ -428,7 +431,7 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "const i = Math.floor(Math.log(bytes) / Math.log(k));"
         "return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];"
         "};"
-       "let partialLine = '';"
+        "let partialLine = '';"
         "window.fetchChunk = async function(file, start, count, timestamp, duration, direction, callback) {"
         "    if (isLoading) return;"
         "    isLoading = true;"
@@ -440,6 +443,7 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "    try {"
         "        const response = await fetch(url);"
         "        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);"
+        "        const contentType = response.headers.get('Content-Type');"
         "        const header = response.headers.get('X-CSV-Header');"
         "        const reader = response.body.getReader();"
         "        const decoder = new TextDecoder();"
@@ -449,7 +453,7 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "            if (done) break;"
         "            result += decoder.decode(value, { stream: true });"
         "        }"
-        "        callback({ isCsv: true, header: header, data: result });"
+        "        callback({ isCsv: !!header, header: header, data: result });"
         "    } catch (err) {"
         "        console.error('Fetch error:', err);"
         "        callback({ isCsv: false, data: 'Error loading data.' });"
@@ -514,32 +518,43 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "    title.textContent = 'Preview: ' + file;"
         "    previewBox.style.display = 'none';" /* Hide table container while loading */
         "    tbody.innerHTML = '<tr><td colspan=\"100\" style=\"text-align: center; padding: 20px;\">Loading...</td></tr>';"
-        "    document.querySelectorAll('#preview-buttons button, #scale-buttons button').forEach(b => b.style.display = 'none');"
+        "    document.querySelectorAll('#preview-buttons button, #scale-buttons button').forEach(b => b.style.display = 'none');" // Hide controls during loading
+        "    document.getElementById('sparkline-container').style.display = 'none';"                                              // Hide sparklines during loading
+        "    document.getElementById('sparkline-timestamp-range').style.display = 'none';"                                        // Hide sparkline range during loading
         "    setActiveFile(file);"
+
         "    updateScaleButtons();"
         "    currentScale = 14400; /* Reset to default 4 hours before fetching info */"
         "    try {"
+        "        previewBox.style.display = 'block';" /* Make previewBox visible here, before fetchChunk, to show loading */
         "        const fileInfoRes = await fetch(`/api/fileinfo?file=${encodeURIComponent(file)}`);"
         "        if (!fileInfoRes.ok) { throw new Error('Failed to fetch file info'); }"
         "        fileInfo[file] = await fileInfoRes.json();"
         "        const duration = fileInfo[file].last_ts - fileInfo[file].first_ts;"
         "        if (duration < 3600) { currentScale = 1800; } /* < 1hr -> 30min */"
         "        else if (duration < 7200) { currentScale = 3600; } /* < 2hr -> 1hr */"
-        "        else if (duration < 14400) { currentScale = 7200; } /* < 4hr -> 2hr */"
+        "        else if (duration < 14400) { currentScale = 7200; } /* < 4hr -> 2hr */" // Fix: This line was duplicated in the previous diff.
         "        else { currentScale = 14400; } /* default 4hr */"
         "        updateScaleButtons();"
         "        /* Now that we have info and scale, fetch the first chunk */"
-        "        window.fetchChunk(file, 0, maxRows, null, currentScale, 'forward', function(response) {"
-   "            if (!response.isCsv || !response.header) {"
-        "                previewTable.style.display = 'none'; rawTextDisplay.style.display = 'block'; document.getElementById('sparkline-container').style.display = 'none'; document.getElementById('sparkline-timestamp-range').style.display = 'none';"
-        "                document.querySelectorAll('#preview-buttons button, #scale-buttons button').forEach(b => b.style.display = 'none');"
+        "        window.fetchChunk(file, 0, maxRows, null, currentScale, 'forward', function(response) {" /* The callback*/
+        "            if (!response.isCsv) {"                                                              /* Simplified condition: if not CSV*/
+        "                previewTable.style.display = 'none';"
+        "                rawTextDisplay.style.display = 'block';"
+        "                document.getElementById('sparkline-container').style.display = 'none';"
+        "                document.getElementById('sparkline-timestamp-range').style.display = 'none';"
+        "                document.getElementById('controls-panel').style.display = 'none';"
         "                title.textContent = 'Preview: ' + file + ' (Raw Text)';"
         "                rawTextDisplay.textContent = response.data;"
         "                return;"
         "            }"
-        "            previewTable.style.display = ''; rawTextDisplay.style.display = 'none';"
+        "            previewTable.style.display = '';"
+        "            rawTextDisplay.style.display = 'none';"
+        "            document.getElementById('controls-panel').style.display = 'block';"
+        "            document.getElementById('sparkline-container').style.display = 'grid';" /* Ensure visible for CSV*/
+        "            document.getElementById('sparkline-timestamp-range').style.display = 'flex';" /*Ensure visible for CSV*/
         "            title.textContent = 'Preview: ' + file + ' (CSV)';"
-         "            renderHeader(response.header);"
+        "            renderHeader(response.header);"
         "            renderRows(response.data, currentScale);"
         "            updateSparklines();"
         "        });"
@@ -552,7 +567,10 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "};"
         "let lastFilesSignature = null;"
         "function loadFiles() {"
-        "if (!lastFilesSignature) { fileList.innerHTML = '<p id=\"file-list-status\">Loading files...</p>'; }"
+        "if (!lastFilesSignature) { /* Only show loading message on first load */"
+        "    fileList.innerHTML = '<p id=\"file-list-status\">Loading files...</p>';"
+        "    document.getElementById('file-list-status').style.display = 'block';"
+        "}" 
         "fetch('/api/files')"
         ".then(res => { if (!res.ok) throw new Error('Server responded with status ' + res.status); return res; })"
         ".then(function(response) { return response.json(); })"
@@ -571,58 +589,62 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "    if (!newFiles.has(oldFile)) {"
         "        delete fileInfo[oldFile];"
         "    }"
-        "} fileList.innerHTML = ''; if (data.files && data.files.length > 0) { data.files.forEach(function(file) {"
-        "const li = document.createElement('li');"
-        "li.dataset.filename = file.name;"
-        "const infoDiv = document.createElement('div');"
-        "infoDiv.className = 'file-info';"
-        "const a = document.createElement('a');"
-        "const existingLi = fileList.querySelector(`li[data-filename=\\\"${file.name}\\\"]`);"
-        "if (existingLi) {"
-        "    /* Just update the metadata, don't recreate the whole element */"
-        "    const meta = existingLi.querySelector('.file-metadata');"
-        "    if (meta) meta.textContent = formatSize(file.size) + ' - ' + new Date(file.mtime * 1000).toLocaleString(undefined, {dateStyle: 'short', timeStyle: 'medium'});"
-        "    return;"
         "}"
-        "a.href = '/download?file=' + encodeURIComponent(file.name);"
-        "a.textContent = file.name;"
-        "const meta = document.createElement('div');"
-        "const actionsDiv = document.createElement('div');"
-        "actionsDiv.className = 'actions';"
-        "const previewBtn = document.createElement('button');"
-        "previewBtn.textContent = 'Preview';"
-        "previewBtn.className = 'btn preview-btn';"
-        "previewBtn.onclick = function() { previewFile(file.name); };"
-        "meta.className = 'file-metadata';"
-        "const date = new Date(file.mtime * 1000).toLocaleString(undefined, {dateStyle: 'short', timeStyle: 'medium'});"
-        "meta.textContent = formatSize(file.size) + ' - ' + date;"
-        "const deleteBtn = document.createElement('button');"
-        "deleteBtn.textContent = 'Delete';"
-        "deleteBtn.className = 'btn delete-btn';"
-        "deleteBtn.onclick = function() {"
-        "if (confirm('Are you sure you want to delete ' + file.name + '?')) {"
-        "fetch('/api/files/' + encodeURIComponent(file.name), { method: 'DELETE' })"
-        ".then(function(response) {"
-        "if (response.ok) {"
-        "if (currentFile === file.name) { "
-        "    previewContainer.style.display = 'none'; "
-        "    currentFile = ''; "
-        "} "
-        "li.remove();"
-        "} else {"
-        "alert('Failed to delete file.');"
-        "}"
-        "});"
-        "}"
-        "};"
-        "infoDiv.appendChild(a);"
-        "infoDiv.appendChild(meta);"
-        "actionsDiv.appendChild(previewBtn);"
-        "actionsDiv.appendChild(deleteBtn);"
-        "li.appendChild(infoDiv);"
-        "li.appendChild(actionsDiv);"
-        "fileList.appendChild(li);"
-        "});"
+        "fileList.innerHTML = '';"
+        "if (data.files && data.files.length > 0) {"
+        "    const statusEl = document.getElementById('file-list-status');"
+        "    if (statusEl) statusEl.style.display = 'none';"
+        "    data.files.forEach(function(file) {"
+        "        const li = document.createElement('li');"
+        "        li.dataset.filename = file.name;"
+        "        const infoDiv = document.createElement('div');"
+        "        infoDiv.className = 'file-info';"
+        "        const a = document.createElement('a');"
+        "        const existingLi = fileList.querySelector(`li[data-filename=\\\"${file.name}\\\"]`);"
+        "        if (existingLi) {"
+        "            const meta = existingLi.querySelector('.file-metadata');"
+        "            if (meta) meta.textContent = formatSize(file.size) + ' - ' + new Date(file.mtime * 1000).toLocaleString(undefined, {dateStyle: 'short', timeStyle: 'medium'});"
+        "            return;"
+        "        }"
+        "        a.href = '/download?file=' + encodeURIComponent(file.name);"
+        "        a.textContent = file.name;"
+        "        const meta = document.createElement('div');"
+        "        meta.className = 'file-metadata';"
+        "        const date = new Date(file.mtime * 1000).toLocaleString(undefined, {dateStyle: 'short', timeStyle: 'medium'});"
+        "        meta.textContent = formatSize(file.size) + ' - ' + date;"
+        "        const actionsDiv = document.createElement('div');"
+        "        actionsDiv.className = 'actions';"
+        "        const previewBtn = document.createElement('button');"
+        "        previewBtn.textContent = 'Preview';"
+        "        previewBtn.className = 'btn preview-btn';"
+        "        previewBtn.onclick = function() { previewFile(file.name); };"
+        "        const deleteBtn = document.createElement('button');"
+        "        deleteBtn.textContent = 'Delete';"
+        "        deleteBtn.className = 'btn delete-btn';"
+        "        deleteBtn.onclick = function() {"
+        "            if (confirm('Are you sure you want to delete ' + file.name + '?')) {"
+        "                fetch('/api/files/' + encodeURIComponent(file.name), { method: 'DELETE' })"
+        "                .then(function(response) {"
+        "                    if (response.ok) {"
+        "                        if (currentFile === file.name) {"
+        "                            previewContainer.style.display = 'none';"
+        "                            currentFile = '';"
+        "                        }"
+        "                        li.remove();"
+        "                    } else {"
+        "                        alert('Failed to delete file.');"
+        "                    }"
+        "                });"
+        "            }"
+        "        };"
+        "        infoDiv.appendChild(a);"
+        "        infoDiv.appendChild(meta);"
+        "        actionsDiv.appendChild(previewBtn);"
+        "        actionsDiv.appendChild(deleteBtn);"
+        "        li.appendChild(infoDiv);"
+        "        li.appendChild(actionsDiv);"
+        "        fileList.appendChild(li);"
+        "    });"
         "} else {"
         "const li = document.createElement('li');"
         "li.textContent = 'No files found on SD card.';"
@@ -1045,18 +1067,21 @@ static long find_offset_by_timestamp(FILE *f, time_t target_timestamp, long data
     long best_offset = (direction > 0) ? high : data_start_offset;
 
     // Perform a binary search on the file offsets to quickly find the approximate location.
-    while (low <= high) {
+    while (low <= high)
+    {
         long mid = low + (high - low) / 2;
         fseek(f, mid, SEEK_SET);
 
         // If not at the start, read until the next newline to align to a line start.
-        if (mid > data_start_offset && fgets(line_buf, sizeof(line_buf), f) == NULL) {
+        if (mid > data_start_offset && fgets(line_buf, sizeof(line_buf), f) == NULL)
+        {
             high = mid - 1; // We're at the end, search lower half.
             continue;
         }
 
         long current_pos = ftell(f);
-        if (fgets(line_buf, sizeof(line_buf), f) == NULL) {
+        if (fgets(line_buf, sizeof(line_buf), f) == NULL)
+        {
             // Reached end of file, the target must be in the lower half.
             high = mid - 1;
             continue;
@@ -1064,18 +1089,27 @@ static long find_offset_by_timestamp(FILE *f, time_t target_timestamp, long data
 
         time_t line_ts = atoll(line_buf);
 
-        if (line_ts < target_timestamp) {
-            if (direction > 0) { // Searching forward, need to look in the upper half.
+        if (line_ts < target_timestamp)
+        {
+            if (direction > 0)
+            { // Searching forward, need to look in the upper half.
                 low = mid + 1;
-            } else { // Searching backward, this is a potential candidate.
+            }
+            else
+            { // Searching backward, this is a potential candidate.
                 best_offset = current_pos;
                 low = mid + 1; // Try to find a later line that's still <= target.
             }
-        } else { // line_ts >= target_timestamp
-            if (direction > 0) { // Searching forward, this is a potential candidate.
+        }
+        else
+        { // line_ts >= target_timestamp
+            if (direction > 0)
+            { // Searching forward, this is a potential candidate.
                 best_offset = current_pos;
                 high = mid - 1; // Try to find an earlier line that's still >= target.
-            } else { // Searching backward, need to look in the lower half.
+            }
+            else
+            { // Searching backward, need to look in the lower half.
                 high = mid - 1;
             }
         }
@@ -1083,15 +1117,19 @@ static long find_offset_by_timestamp(FILE *f, time_t target_timestamp, long data
 
     // For a backward search, we might need to step back one more line to get the
     // beginning of the context that *includes* the target timestamp.
-    if (direction <= 0 && best_offset > data_start_offset) {
+    if (direction <= 0 && best_offset > data_start_offset)
+    {
         fseek(f, best_offset, SEEK_SET);
-        if (fgets(line_buf, sizeof(line_buf), f) != NULL && atoll(line_buf) < target_timestamp) {
+        if (fgets(line_buf, sizeof(line_buf), f) != NULL && atoll(line_buf) < target_timestamp)
+        {
             // We landed on a line before our target. To get the full context leading up to it,
             // we need to find the line *before* this one.
             long prev_line_offset = best_offset;
-            while (prev_line_offset > data_start_offset) {
+            while (prev_line_offset > data_start_offset)
+            {
                 fseek(f, --prev_line_offset, SEEK_SET);
-                if (fgetc(f) == '\n') {
+                if (fgetc(f) == '\n')
+                {
                     best_offset = ftell(f);
                     break;
                 }
@@ -1123,10 +1161,10 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
 {
     char filepath[FILE_PATH_MAX];
     char filename[64] = {0};
-    int requested_start_line = 0;   /* 0-indexed, after header */
-    int line_count = 100;           // Default to 100 lines for chunk size
-    int duration_sec = -1;          // Default to no duration limit
-    time_t requested_timestamp = 0; // 0 indicates no timestamp search
+ //   int requested_start_line = 0;       /* 0-indexed, after header */
+    int line_count = 100;               // Default to 100 lines for chunk size
+    int duration_sec = -1;              // Default to no duration limit
+    time_t requested_timestamp = 0;     // 0 indicates no timestamp search
     char direction_str[16] = "forward"; // Default direction
 
     char *query_buf = NULL;
@@ -1148,10 +1186,10 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
                 strncpy(filename, param, sizeof(filename) - 1);
                 url_decode(filename); // Decode the URL-encoded filename
             }
-            if (httpd_query_key_value(query_buf, "start", param, sizeof(param)) == ESP_OK)
+          /*  if (httpd_query_key_value(query_buf, "start", param, sizeof(param)) == ESP_OK)
             {
                 requested_start_line = atoi(param);
-            }
+            }*/
             if (httpd_query_key_value(query_buf, "count", param, sizeof(param)) == ESP_OK)
             {
                 int val = atoi(param);
@@ -1177,13 +1215,15 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
     if (strlen(filename) == 0)
     {
         ESP_LOGE(TAG, "Filename parameter is missing in preview request");
-        if (query_buf) free(query_buf);
+        if (query_buf)
+            free(query_buf);
         httpd_resp_send_404(req);
         return ESP_FAIL;
     }
 
     snprintf(filepath, sizeof(filepath), "/sdcard/%s", filename);
-    if (query_buf) free(query_buf); // Free query buffer now that we are done with it
+    if (query_buf)
+        free(query_buf); // Free query buffer now that we are done with it
 
     FILE *f = fopen(filepath, "r");
     if (f == NULL)
@@ -1328,12 +1368,14 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
 
                 // Move to the next line
                 char *next_line = memchr(current_pos, '\n', end_of_buffer - current_pos);
-                if (!next_line) break; // No more full lines in this chunk
+                if (!next_line)
+                    break; // No more full lines in this chunk
                 current_pos = next_line + 1;
             }
         }
 
-        if (bytes_read == 0) break; // Exit if we've decided to stop
+        if (bytes_read == 0)
+            break; // Exit if we've decided to stop
 
         // Send the raw chunk
         if (httpd_resp_send_chunk(req, buf, bytes_read) != ESP_OK)
@@ -1347,7 +1389,8 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
 
         // A simple way to limit the total data sent, similar to the old line count
         lines_sent += 1; // Here, we count chunks instead of lines
-        if (lines_sent > 200) { // ~1MB of data
+        if (lines_sent > 200)
+        { // ~1MB of data
             ESP_LOGW(TAG, "Preview data limit reached. Stopping stream.");
             break;
         }
@@ -1523,11 +1566,8 @@ esp_err_t start_web_server(void)
         .user_ctx = server_data};
     httpd_register_uri_handler(server, &download_uri);
 
-
-
     return ESP_OK;
 }
-
 
 void stop_web_server(void)
 {
