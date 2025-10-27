@@ -41,7 +41,7 @@ static char *trim_whitespace(char *str)
  */
 static esp_err_t parse_and_store_line(nvs_handle_t nvs_handle, char *line)
 {
-    ESP_LOGI(TAG, "Input line for parsing: '%s'", line);
+    ESP_LOGD(TAG, "Input line for parsing: '%s'", line);
 
     // Find the first '=' character which separates the key and value.
     char *separator = strchr(line, '=');
@@ -58,9 +58,12 @@ static esp_err_t parse_and_store_line(nvs_handle_t nvs_handle, char *line)
 
     if (strlen(key) > 0 && strlen(value) > 0)
     {
-        ESP_LOGI(TAG, "  -> Parsed and storing to NVS: key=[%s], value=[%s]", key, value);
-        esp_err_t err= nvs_set_str(nvs_handle, key, value);
-        ESP_LOGI(TAG, "  -> nvs_set_str result: %s", esp_err_to_name(err));
+        ESP_LOGD(TAG, "  -> Parsed and storing to NVS: key=[%s], value=[%s]", key, value);
+        esp_err_t err = nvs_set_str(nvs_handle, key, value);
+        if (err != ESP_OK)
+        {
+            ESP_LOGE(TAG, "  -> nvs_set_str failed: %s", esp_err_to_name(err));
+        }
         return err;
     }
     else
@@ -119,7 +122,7 @@ esp_err_t config_load_from_sdcard_to_flash(const char *config_filepath)
         {
             continue;
         }
-        ESP_LOGI(TAG, "config_load_from_sdcard_to_flash: Raw line from file: '%s'", trimmed_line);
+        ESP_LOGD(TAG, "config_load_from_sdcard_to_flash: Raw line from file: '%s'", trimmed_line);
 
         // strtok modifies the string, so we use a copy for parsing
         char line_copy[256];

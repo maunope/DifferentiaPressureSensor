@@ -9,6 +9,12 @@
  */
 typedef struct {
     float battery_voltage_divider_ratio;
+    /**
+     * @brief The minimum battery voltage required to write data to the SD card.
+     * This acts as a safety measure to prevent data corruption that can occur
+     * if the device loses power during a write operation. If the measured
+     * battery voltage is below this threshold, logging to the SD card is suspended.
+     */
     float battery_voltage_treshold;
     uint32_t inactivity_timeout_ms;
     uint64_t sleep_duration_ms;

@@ -30,7 +30,7 @@ Please refer to the following main guides for usage guidance and documentation:
 *   **NTP Time Sync**: Can synchronize the RTC with an NTP server over Wi-Fi.
 *   **Web Server**: Can start a web server to allow downloading and previewing logged data files directly from a web browser.
 *   **Multiple Sampling Modes**: Supports "Normal", "High Frequency", and "Paused" logging modes, selectable via the UI.
-*   **Robust Power Management**: Implements a command-driven deep sleep cycle to conserve battery. The datalogger task explicitly signals when it's safe to sleep, preventing race conditions and ensuring data integrity. The device wakes up on a timer for the next log or via user interaction. 
+*   **Robust Power Management**: Implements a command-driven deep sleep cycle to conserve battery. The datalogger task explicitly signals when it's safe to sleep, preventing race conditions and ensuring data integrity. The device wakes up on a timer for the next log or via user interaction. A safety threshold on battery voltage avoids data corruption when measured battery voltage is too low to guarantee stable power to the 3.3V rail.
 *   **Web File Management**: The web interface allows users to list, preview, download, and delete log files directly from the device.
 *   **Exclusive File System Access**: To prevent data corruption, the system ensures that only one component (Datalogger, Web Server, or USB Mass Storage) can access the SD card at a time. For example, starting the web server will pause the datalogger, and connecting the device to a PC will disable both the web server and the datalogger.
 *   **Configuration & Persistence**:
