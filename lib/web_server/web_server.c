@@ -1275,6 +1275,8 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
     int lines_sent = 0;
     bool first_chunk = true;
 
+    httpd_resp_send_chunk(req, header_line, strlen(header_line)); // Send header line first
+
     while (!feof(f))
     {
         size_t bytes_read = fread(buf, 1, SCRATCH_BUFSIZE, f);
@@ -1293,7 +1295,7 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
                 if (first_line_ts > 0)
                 {
                     duration_end_ts = first_line_ts + duration_sec;
-                    ESP_LOGI(TAG, "Preview duration: %d s. Start TS: %ld, End TS: %ld", duration_sec, first_line_ts, duration_end_ts);
+                    ESP_LOGD(TAG, "Preview duration: %d s. Start TS: %ld, End TS: %ld", duration_sec, first_line_ts, duration_end_ts);
                 }
             }
         }
@@ -1316,7 +1318,7 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
                     {
                         httpd_resp_send_chunk(req, buf, valid_len);
                     }
-                    ESP_LOGI(TAG, "Reached end of duration window. Stopping stream.");
+                    ESP_LOGD(TAG, "Reached end of duration window. Stopping stream.");
                     bytes_read = 0; // Mark as done
                     break;
                 }
