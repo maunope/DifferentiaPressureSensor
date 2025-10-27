@@ -34,6 +34,7 @@ static esp_err_t api_preview_handler(httpd_req_t *req);
 static esp_err_t api_sensordata_handler(httpd_req_t *req);
 static esp_err_t api_fileinfo_handler(httpd_req_t *req);
 
+
 /**
  * @brief Trims leading and trailing whitespace from a string.
  * @param str The string to trim.
@@ -117,6 +118,8 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "<meta charset=\"UTF-8\">"
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
         "<title>Differential Pressure Sensor</title>"
+        //
+        "<link rel=\"icon\" type=\"image/svg+xml\" href=\"data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22256%22 height=%22256%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%23373737%22></rect><path d=%22M22.86 74.88L8.54 74.88L8.54 25.12L23.24 25.12Q29.83 25.12 34.94 28.06Q40.05 31.00 42.86 36.40Q45.66 41.80 45.66 48.77L45.66 48.77L45.66 51.26Q45.66 58.34 42.84 63.71Q40.02 69.07 34.81 71.98Q29.59 74.88 22.86 74.88L22.86 74.88ZM23.24 32.09L17.19 32.09L17.19 67.98L22.83 67.98Q29.63 67.98 33.27 63.72Q36.91 59.47 36.98 51.50L36.98 51.50L36.98 48.74Q36.98 40.63 33.46 36.36Q29.94 32.09 23.24 32.09L23.24 32.09ZM73.21 56.39L62.92 56.39L62.92 74.88L54.27 74.88L54.27 25.12L73.31 25.12Q81.65 25.12 86.56 29.46Q91.46 33.80 91.46 40.94L91.46 40.94Q91.46 48.26 86.66 52.32Q81.86 56.39 73.21 56.39L73.21 56.39ZM62.92 32.09L62.92 49.45L73.31 49.45Q77.92 49.45 80.35 47.28Q82.78 45.11 82.78 41.01L82.78 41.01Q82.78 36.98 80.32 34.57Q77.86 32.16 73.55 32.09L73.55 32.09L62.92 32.09Z%22 fill=%22%2303dac6%22></path></svg>\" />"
         "<style>"
         "body { font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif; background-color: #121212; color: #e0e0e0; margin: 0; padding: 20px; line-height: 1.6; }"
         ".container { max-width: 800px; margin: auto; background-color: #1e1e1e; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.5); }"
@@ -1520,8 +1523,11 @@ esp_err_t start_web_server(void)
         .user_ctx = server_data};
     httpd_register_uri_handler(server, &download_uri);
 
+
+
     return ESP_OK;
 }
+
 
 void stop_web_server(void)
 {
