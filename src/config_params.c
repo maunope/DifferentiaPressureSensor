@@ -31,7 +31,7 @@ void config_params_init(void) {
 
     // Load values from NVS, using defaults if a key is not found.
     g_config_params.battery_voltage_divider_ratio = config_get_float("v_div_ratio", s_default_params.battery_voltage_divider_ratio); // Index 0
-    g_config_params.battery_voltage_treshold = config_get_float("b_volt_threshold", s_default_params.battery_voltage_treshold);     // Index 1
+    g_config_params.battery_voltage_treshold = config_get_float("b_v_thresh", s_default_params.battery_voltage_treshold);     // Index 1
     g_config_params.inactivity_timeout_ms = config_get_int("inactive_ms", s_default_params.inactivity_timeout_ms);                 // Index 2
     g_config_params.sleep_duration_ms = config_get_int("sleep_ms", s_default_params.sleep_duration_ms);                             // Index 3
     g_config_params.log_interval_ms = config_get_int("log_int_ms", s_default_params.log_interval_ms);                             // Index 4
@@ -43,7 +43,7 @@ void config_params_init(void) {
 
     ESP_LOGI(TAG, "--- Loaded Configuration ---");
     ESP_LOGI(TAG, "v_div_ratio: %.4f", g_config_params.battery_voltage_divider_ratio);
-    ESP_LOGI(TAG, "b_volt_threshold: %.2f", g_config_params.battery_voltage_treshold);
+    ESP_LOGI(TAG, "b_v_thresh: %.2f", g_config_params.battery_voltage_treshold);
     ESP_LOGI(TAG, "inactive_ms: %lu", (unsigned long)g_config_params.inactivity_timeout_ms);
     ESP_LOGI(TAG, "sleep_ms: %llu", g_config_params.sleep_duration_ms);
     ESP_LOGI(TAG, "log_int_ms: %lu", (unsigned long)g_config_params.log_interval_ms);

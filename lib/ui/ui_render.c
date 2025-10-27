@@ -96,7 +96,7 @@ static config_item_t s_config_items[NEW_MAX_CONFIG_ITEMS];
 // Define the actual configuration keys here, in one place.
 static const char *s_config_keys[NEW_MAX_CONFIG_ITEMS] = {
     "v_div_ratio",
-    "b_volt_threshold",
+    "b_v_thresh",
     "inactive_ms",
     "sleep_ms",
     "hf_sleep_ms",

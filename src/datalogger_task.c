@@ -14,6 +14,7 @@
 #include "../lib/lipo_battery/lipo_battery.h"
 #include "../lib/spi_sdcard/spi_sdcard.h"
 #include "../lib/ui/time_utils.h"
+#include "config_params.h"
 
 static const char *TAG = "DataloggerTask";
 
@@ -331,9 +332,13 @@ void datalogger_task(void *pvParameters)
             }
 
             // --- Battery Level Check ---
-            if (local_buffer.battery_voltage > 0 && local_buffer.battery_voltage < 3.55f)
+
+            const config_params_t *cfg = config_params_get();
+            if (local_buffer.battery_voltage > 0 && local_buffer.battery_voltage < cfg->battery_voltage_treshold)
             {
-                ESP_LOGE(TAG, "Cannot log data: Battery voltage (%.2fV) is below threshold (%.2fV)", local_buffer.battery_voltage, 3.55f);
+
+                ESP_LOGE(TAG, "Cannot log data: Battery voltage (%.2fV) is below threshold (%.2fV)", local_buffer.battery_voltage, cfg->battery_voltage_treshold);
+
                 if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(100)) == pdTRUE)
                 {
                     // Update status to indicate failure due to low battery.
