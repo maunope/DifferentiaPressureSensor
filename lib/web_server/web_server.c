@@ -257,23 +257,25 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "const previewBox = document.getElementById('preview-box');"
         "function updateSensorData() {"
         "    document.getElementById('global-status-banner').style.display = 'none';"
-        "    fetch('/api/sensordata').then(r => r.json()).then(data => {"
-        "        const timestampEl = document.getElementById('sensor-timestamp'); if(timestampEl) timestampEl.textContent = data.datetime_local || 'N/A';"
-        "        const tempEl = document.getElementById('sensor-temp'); if(tempEl) tempEl.textContent = data.temperature_c !== null ? data.temperature_c.toFixed(2) + ' C' : 'N/A';"
-        "        const pressEl = document.getElementById('sensor-press'); if(pressEl) pressEl.textContent = data.pressure_kpa !== 0 ? data.pressure_kpa.toFixed(3) + ' kPa' : 'N/A';"
-        "        const diffPressEl = document.getElementById('sensor-diff-press'); if(diffPressEl) diffPressEl.textContent = data.diff_pressure_pa !== null ? data.diff_pressure_pa.toFixed(2) + ' Pa' : 'N/A';"
-        "        let batt_str = 'N/A';"
-        "        if (data.battery_voltage !== null) {"
-        "           batt_str = `${data.battery_voltage.toFixed(2)}V ${data.battery_percentage}%`;"
-        "           if (data.battery_externally_powered) { batt_str += ' (Charging)'; }"
-        "        }"
-        "        const battEl = document.getElementById('sensor-batt'); if(battEl) battEl.textContent = batt_str;"
-        "    }).catch(err => {"
-        "       console.error('Error fetching sensor data:', err);"
-        "       showGlobalBanner('Failed to load live data. Server may be offline.', startSensorRefresh);"
-        "     ['sensor-timestamp', 'sensor-temp', 'sensor-press', 'sensor-diff-press', 'sensor-batt'].forEach(id => { const el = document.getElementById(id); if(el) el.textContent = 'N/A'; });"
-        "       if (sensorIntervalId) { clearInterval(sensorIntervalId); sensorIntervalId = null; }"
-        "    });"
+        "    fetch('/api/sensordata')"
+        "        .then(r => r.json())"
+        "        .then(data => {"
+        "            const timestampEl = document.getElementById('sensor-timestamp'); if(timestampEl) timestampEl.textContent = data.datetime_local || 'N/A';"
+        "            const tempEl = document.getElementById('sensor-temp'); if(tempEl) tempEl.textContent = data.temperature_c !== null ? data.temperature_c.toFixed(2) + ' C' : 'N/A';"
+        "            const pressEl = document.getElementById('sensor-press'); if(pressEl) pressEl.textContent = data.pressure_kpa !== 0 ? data.pressure_kpa.toFixed(3) + ' kPa' : 'N/A';"
+        "            const diffPressEl = document.getElementById('sensor-diff-press'); if(diffPressEl) diffPressEl.textContent = data.diff_pressure_pa !== null ? data.diff_pressure_pa.toFixed(2) + ' Pa' : 'N/A';"
+        "            let batt_str = 'N/A';"
+        "            if (data.battery_voltage !== null) {"
+        "               batt_str = `${data.battery_voltage.toFixed(2)}V ${data.battery_percentage}%`;"
+        "               if (data.battery_externally_powered) { batt_str += ' (Charging)'; }"
+        "            }"
+        "            const battEl = document.getElementById('sensor-batt'); if(battEl) battEl.textContent = batt_str;"
+        "        }).catch(err => {"
+        "           console.error('Error fetching sensor data:', err);"
+        "           showGlobalBanner('Failed to load live data. Server may be offline.', startSensorRefresh);"
+        "         ['sensor-timestamp', 'sensor-temp', 'sensor-press', 'sensor-diff-press', 'sensor-batt'].forEach(id => { const el = document.getElementById(id); if(el) el.textContent = 'N/A'; });"
+        "           if (sensorIntervalId) { clearInterval(sensorIntervalId); sensorIntervalId = null; }"
+        "        });"
         "}"
         "function showGlobalBanner(message, retryAction) {"
         "    document.getElementById('global-status-message').textContent = message;"
@@ -284,43 +286,40 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "}"
         "window.startSensorRefresh = function() {"
         "    document.getElementById('global-status-banner').style.display = 'none';"
-        "    if (sensorIntervalId) {"
-        "        clearInterval(sensorIntervalId);"
-        "    }"
+        "    if (sensorIntervalId) { clearInterval(sensorIntervalId); }"
         "    updateSensorData();"
         "    sensorIntervalId = setInterval(updateSensorData, 5000);"
         "};"
-
         "function drawSparkline(canvasId, data, color, unit, fixedMin, fixedMax) {"
         "    const canvas = document.getElementById(canvasId);"
         "    if (!canvas) return;"
         "    canvas.width = canvas.clientWidth;"
         "    canvas.height = canvas.clientHeight;"
         "    const ctx = canvas.getContext('2d');"
-        "    const width = canvas.width; "
+        "    const width = canvas.width;"
         "    const height = canvas.clientHeight;"
-        "    const leftMargin = 60;"
+        "    const leftMargin = 50;"
         "    ctx.clearRect(0, 0, width, height);"
         "    if (!data || data.length < 2) { return; }"
         "    let minVal = (fixedMin !== undefined) ? fixedMin : data.reduce((min, v) => Math.min(min, v), Infinity);"
         "    let maxVal = (fixedMax !== undefined) ? fixedMax : data.reduce((max, v) => Math.max(max, v), -Infinity);"
         "    let range = maxVal - minVal;"
-        "    if (range < 0.1) { "
+        "    if (range < 0.1) { /* Avoid division by zero for flat lines */"
         "        const mid = (minVal + maxVal) / 2;"
         "        minVal = mid - 0.1;"
         "        maxVal = mid + 0.1;"
         "        range = 0.2;"
         "    }"
         "    const precision = (unit === 'kPa') ? 2 : 1;"
-        "    ctx.font = '10px monospace';"
-        "    ctx.fillStyle = '#888';"
+        "    ctx.font = '10px sans-serif';"
+        "    ctx.fillStyle = '#aaa';"
         "    ctx.textAlign = 'right';"
         "    ctx.fillText(maxVal.toFixed(precision) + unit, leftMargin - 5, 10);"
         "    ctx.fillText(minVal.toFixed(precision) + unit, leftMargin - 5, height - 2);"
         "    if (minVal < 0 && maxVal > 0) {"
         "        const zeroY = height - ((0 - minVal) / range) * height;"
         "        ctx.beginPath();"
-        "        ctx.strokeStyle = '#888'; /* Lighter grey line for zero level */"
+        "        ctx.strokeStyle = '#555'; /* Lighter grey line for zero level */"
         "        ctx.lineWidth = 1;"
         "        ctx.moveTo(leftMargin, zeroY);"
         "        ctx.lineTo(width, zeroY);"
@@ -340,11 +339,11 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "    ctx.stroke();"
         "    return {min: minVal, max: maxVal};"
         "}"
-        "function resizeCanvases() {"
-        "    ['spark-temp', 'spark-press', 'spark-diff-press', 'spark-batt'].forEach(id => {"
-        "        const canvas = document.getElementById(id); if (!canvas) return;"
-        "        canvas.width = canvas.clientWidth; canvas.height = canvas.clientHeight;"
-        "    });"
+        "function resizeCanvases() { "
+        "    ['spark-temp', 'spark-press', 'spark-diff-press', 'spark-batt'].forEach(id => { "
+        "        const canvas = document.getElementById(id); if (!canvas) return; "
+        "        canvas.width = canvas.clientWidth; canvas.height = canvas.clientHeight; "
+        "    }); "
         "}"
         "function updateSparklines() {"
         "    const rows = Array.from(tbody.rows);"
@@ -388,10 +387,10 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "    const idealWidthPercent = (displayDuration / fileTotalDuration) * 100;"
         "    const remainingPercent = 100 - leftPercent;"
         "    const finalWidthPercent = Math.min(idealWidthPercent, remainingPercent);"
-
+        
         "    timelineBar.style.left = `${leftPercent}%`;"
         "    timelineBar.style.width = `${finalWidthPercent}%`;"
-        "    timelineBar.style.minWidth = '0';" /* Reset minWidth before calculating */
+        "    timelineBar.style.minWidth = '0';"
 
         "    /* Only apply minimum width if it doesn't cause an overshoot */"
         "    const minWidthPercent = 5;"
@@ -401,7 +400,7 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "        timelineBar.style.width = `${minWidthPercent}%`;"
         "        timelineBar.textContent = '';" /* Hide text if bar is too small */
         "    }"
-
+        
         "    document.getElementById('sparkline-timestamp-range').style.display = 'flex';"
         "    const tempData = getColumnData('temperature_c');"
         "    const pressData = getColumnData('pressure_kpa');"
@@ -426,55 +425,66 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "const i = Math.floor(Math.log(bytes) / Math.log(k));"
         "return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];"
         "};"
-        "window.fetchChunk = function(file, start, count, timestamp, duration, direction, callback) {"
-        "if (isLoading) return;"
-        "isLoading = true;"
-        "loadingIndicator.style.display = 'flex';"
-        "let url = `/api/preview?file=${encodeURIComponent(file)}&count=${maxRows}&duration=${duration}`;"
-        "if (timestamp !== null) { url += '&timestamp=' + timestamp; }"
-        "else if (start !== null) { url += '&start=' + start; }"
-        "if (direction) { url += '&direction=' + direction; }"
-        "fetch(url).then(function(res) {"
-        "const contentType = res.headers.get('content-type');"
-        "if (contentType && contentType.includes('application/json')) {"
-        "return res.json().then(function(data) { return {isCsv: true, data: data}; });"
-        "} else {"
-        "return res.text().then(function(data) { return {isCsv: false, data: data}; });"
-        "}"
-        "})"
-        ".then(function(response) {"
-        "isLoading = false; loadingIndicator.style.display = 'none'; callback(response);"
-        "}).catch(function(err) {"
-        "console.error('Fetch error:', err); isLoading = false; loadingIndicator.style.display = 'none';"
-        "});};"
-        "function renderRows(data, chunkStartLine) {"
-        "    const lines = data.lines;" /* Assumes header is already rendered*/
-        "if (!lines || lines.length === 0) return;"
-        "previewBox.style.display = '';" /* Show the table container now that we have data */
-        "const fragment = document.createDocumentFragment();"
-        "lastChunkInfo.start_line = chunkStartLine;"
-        "/* The header is now rendered separately by renderHeader()*/"
-        "for (let i = 0; i < lines.length; i++) {"
-        "var line = lines[i];"
-        "if (!line) continue;"
-        "const row = document.createElement('tr');"
-        "const cells = line.split(',');"
-        "row.dataset.line = (chunkStartLine + i).toString();"
-        "for (var j = 0; j < cells.length; j++) {"
-        "if (j === 0) { "
-        "    row.dataset.timestamp = cells[j]; "
-        "    if (i === 0) { lastChunkInfo.start_ts = parseInt(cells[j], 10); } "
-        "}"
-        "const td = document.createElement('td');"
-        "td.textContent = cells[j];"
-        "row.appendChild(td);"
-        "}"
-        "fragment.appendChild(row);"
-        "}"
-        "tbody.innerHTML = '';"
-        "tbody.appendChild(fragment);"
-        "updateSparklines();"
-        "document.querySelectorAll('#preview-buttons button, #scale-buttons button').forEach(b => b.style.display = '');"
+       "let partialLine = '';"
+        "window.fetchChunk = async function(file, start, count, timestamp, duration, direction, callback) {"
+        "    if (isLoading) return;"
+        "    isLoading = true;"
+        "    loadingIndicator.style.display = 'flex';"
+        "    let url = `/api/preview?file=${encodeURIComponent(file)}&count=${maxRows}&duration=${duration}`;"
+        "    if (timestamp !== null) { url += '&timestamp=' + timestamp; }"
+        "    else if (start !== null) { url += '&start=' + start; }"
+        "    if (direction) { url += '&direction=' + direction; }"
+        "    try {"
+        "        const response = await fetch(url);"
+        "        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);"
+        "        const header = response.headers.get('X-CSV-Header');"
+        "        const reader = response.body.getReader();"
+        "        const decoder = new TextDecoder();"
+        "        let result = '';"
+        "        while (true) {"
+        "            const { done, value } = await reader.read();"
+        "            if (done) break;"
+        "            result += decoder.decode(value, { stream: true });"
+        "        }"
+        "        callback({ isCsv: true, header: header, data: result });"
+        "    } catch (err) {"
+        "        console.error('Fetch error:', err);"
+        "        callback({ isCsv: false, data: 'Error loading data.' });"
+        "    } finally {"
+        "        isLoading = false;"
+        "        loadingIndicator.style.display = 'none';"
+        "    }"
+        "};"
+        "function renderRows(rawText, duration) {"
+        "    const allLines = (partialLine + rawText).split(/\\r?\\n/);"
+        "    partialLine = allLines.pop() || ''; /* The last element might be a partial line */"
+        "    const fragment = document.createDocumentFragment();"
+        "    let firstTimestampSet = false;"
+        "    let lastTimestamp = null;"
+        "    for (const line of allLines) {"
+        "        if (!line) continue; /* Skip empty lines */"
+        "        const cells = line.split(',');"
+        "        const ts = parseInt(cells[0], 10);"
+        "        if (isNaN(ts)) continue; /* Skip lines that don't start with a valid timestamp */"
+        "        if (!firstTimestampSet) {"
+        "            lastChunkInfo.start_ts = ts;"
+        "            firstTimestampSet = true;"
+        "        }"
+        "        lastTimestamp = ts;"
+        "        const row = document.createElement('tr');"
+        "        row.dataset.timestamp = ts;"
+        "        cells.forEach(cell => {"
+        "            const td = document.createElement('td');"
+        "            td.textContent = cell;"
+        "            row.appendChild(td);"
+        "        });"
+        "        fragment.appendChild(row);"
+        "    }"
+        "    lastChunkInfo.end_ts = lastTimestamp;"
+        "    tbody.innerHTML = '';"
+        "    tbody.appendChild(fragment);"
+        "    previewBox.style.display = '';"
+        "    document.querySelectorAll('#preview-buttons button, #scale-buttons button').forEach(b => b.style.display = '');"
         "}"
         "function renderHeader(headerString) {"
         "    if (!headerString) return;"
@@ -517,8 +527,8 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "        updateScaleButtons();"
         "        /* Now that we have info and scale, fetch the first chunk */"
         "        window.fetchChunk(file, 0, maxRows, null, currentScale, 'forward', function(response) {"
-        "            if (!response.isCsv) {"
-        "                previewTable.style.display = 'none'; rawTextDisplay.style.display = 'block';"
+   "            if (!response.isCsv || !response.header) {"
+        "                previewTable.style.display = 'none'; rawTextDisplay.style.display = 'block'; document.getElementById('sparkline-container').style.display = 'none'; document.getElementById('sparkline-timestamp-range').style.display = 'none';"
         "                document.querySelectorAll('#preview-buttons button, #scale-buttons button').forEach(b => b.style.display = 'none');"
         "                title.textContent = 'Preview: ' + file + ' (Raw Text)';"
         "                rawTextDisplay.textContent = response.data;"
@@ -526,8 +536,9 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "            }"
         "            previewTable.style.display = ''; rawTextDisplay.style.display = 'none';"
         "            title.textContent = 'Preview: ' + file + ' (CSV)';"
-        "            renderHeader(response.data.header);"
-        "            renderRows(response.data, response.data.start_line); /* This will now call updateSparklines */"
+         "            renderHeader(response.header);"
+        "            renderRows(response.data, currentScale);"
+        "            updateSparklines();"
         "        });"
         "    } catch (e) {"
         "        console.error('Could not fetch file info or initial chunk', e);"
@@ -563,7 +574,7 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "const infoDiv = document.createElement('div');"
         "infoDiv.className = 'file-info';"
         "const a = document.createElement('a');"
-        "const existingLi = fileList.querySelector(`li[data-filename=\"${file.name}\"]`);"
+        "const existingLi = fileList.querySelector(`li[data-filename=\\\"${file.name}\\\"]`);"
         "if (existingLi) {"
         "    /* Just update the metadata, don't recreate the whole element */"
         "    const meta = existingLi.querySelector('.file-metadata');"
@@ -623,22 +634,23 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "});"
         "}"
         "function fetchAndRender(start, timestamp, duration, direction) {"
-        "    /* previewBox.removeEventListener('scroll', scrollHandler) removed as scrollHandler is gone */"
-        "    window.fetchChunk(currentFile, start, maxRows, timestamp, duration, direction, function(response) {"
-        "        if (!response.isCsv || !response.data.lines || response.data.lines.length === 0) {            "
-        "            console.log('Received empty chunk, handling navigation boundary.');"
-        "            if (direction === 'backward') {"
-        "                jumpTo('top');"
-        "            } else { /* forward or not specified */"
-        "                jumpTo('bottom');"
-        "            }            "
+        "    /* Infinite scroll logic is removed, so no need for scroll handlers */"
+        "    window.fetchChunk(currentFile, start, maxRows, timestamp, duration, direction, function(response) { "
+        "        if (!response.isCsv) {"
+        "            /* This case is for non-CSV files, handled by previewFile now */"
+        "            tbody.innerHTML = '<tr><td colspan=\\\"100\\\">Not a CSV file or error.</td></tr>';"
         "            return;"
         "        }"
-        "        if (response.data.header) { renderHeader(response.data.header); }"
-        "        renderRows(response.data, response.data.start_line);"
-        "        setTimeout(() => {"
-        "            previewBox.scrollTop = 0;" /* Scroll to top of new chunk */
-        /* Infinite scroll handler removed */
+        "        if (response.data.trim() === '') {"
+        "            console.log('Received empty data chunk, likely end of file.');"
+        "            /* Optionally provide feedback that no more data is available in this direction */"
+        "            if (direction === 'backward') { jumpTo('top'); } else { jumpTo('bottom'); }"
+        "            return; /* Do nothing, keep current view */"
+        "        }"
+        "        if (response.header) { renderHeader(response.header); }"
+        "        renderRows(response.data, duration);"
+        "        setTimeout(() => { updateSparklines();"
+        "            previewBox.scrollTop = 0; /* Scroll to top of new chunk */ "
         "        });"
         "    });"
         "}"
@@ -650,11 +662,11 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "    } else if (position === 'bottom') {"
         "        /* For 'bottom', we want the chunk to end at fileEndTimestamp, so calculate its start*/"
         "        /* If currentScale is -1 (Max), then just go to fileStartTimestamp*/"
-        "        if (currentScale === -1) {"
+        "        if (currentScale === -1) { "
         "            targetTimestamp = fileInfo[currentFile].first_ts;"
         "        } else {"
         "            targetTimestamp = fileInfo[currentFile].last_ts - currentScale;"
-        "            /* Ensure we don't go before the file start*/"
+        "            /* Ensure we don't go before the file start */"
         "            if (targetTimestamp < fileInfo[currentFile].first_ts) {"
         "                targetTimestamp = fileInfo[currentFile].first_ts;"
         "            }"
@@ -676,7 +688,6 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "    let targetTimestamp = (lastChunkInfo.start_ts || 0) + offset;"
         "    fetchAndRender(null, targetTimestamp, currentScale, direction);"
         "};"
-        "/* scrollHandler function removed to disable infinite scroll */"
         "document.querySelectorAll('#scale-buttons button').forEach(button => {"
         "    button.addEventListener('click', function() {"
         "        currentScale = parseInt(this.dataset.scale, 10);"
@@ -688,7 +699,6 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "        }"
         "    });"
         "});"
-        "/* previewBox.addEventListener('scroll', scrollHandler) removed */"
         "loadFiles();"
         "setInterval(loadFiles, 10000);});"
         "</script>"
@@ -1242,191 +1252,107 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    // --- Proceed with JSON CSV Preview ---
-    int actual_start_line_idx = 0;
+    // --- Proceed with Raw CSV Preview ---
     long current_offset = ftell(f);
     const long data_start_offset = current_offset;
+
+    // Determine the starting position in the file
     if (requested_timestamp != 0)
     {
         int direction = (strcmp(direction_str, "backward") == 0) ? -1 : 1;
         long found_offset = find_offset_by_timestamp(f, requested_timestamp, data_start_offset, direction);
         fseek(f, found_offset, SEEK_SET);
-        actual_start_line_idx = -1; // Line index is not used when seeking by timestamp
-    }
-    else if (requested_start_line == -1)
-    {
-        // Efficiently seek to near the end of the file to read the last chunk
-        fseek(f, 0, SEEK_END);
-        long file_size = ftell(f);
-        long seek_pos = (file_size > SCRATCH_BUFSIZE) ? (file_size - SCRATCH_BUFSIZE) : 0;
-        fseek(f, seek_pos, SEEK_SET);
-        if (seek_pos > 0) { // If not at the start, find the beginning of the next line
-            if (fgets(line, sizeof(line), f) == NULL) { // Read and discard partial line
-                 fseek(f, file_size, SEEK_SET); // Go to very end if read fails
-            }
-        }
-        current_offset = ftell(f);
-        actual_start_line_idx = -1; // Line index is not used when seeking to the end
-    }
-    else
-    {
-        // Request for specific start line (or default 0)
-        fseek(f, data_start_offset, SEEK_SET);
-        current_offset = data_start_offset;
-        actual_start_line_idx = requested_start_line;
     }
 
-    httpd_resp_set_type(req, "application/json");
-    char json_start[512];
-    snprintf(json_start, sizeof(json_start), "{\"header\":\"%s\",\"start_line\":%d,\"lines\":[", header_line, actual_start_line_idx);
-    httpd_resp_send_chunk(req, json_start, strlen(json_start));
+    // Set headers for raw text streaming
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_set_hdr(req, "X-CSV-Header", trimmed_header);
 
+    // Buffer for reading file chunks
     char *buf = server_data->scratch;
     time_t first_line_ts = 0;
     time_t duration_end_ts = 0;
-    char *line_start; // Declare here to be used across the loop
-
-    bool is_first_line_in_json = true;
     int lines_sent = 0;
-    size_t leftover_len = 0;
-    int64_t chunk_read_start_time;
+    bool first_chunk = true;
 
-    while (lines_sent < 10000)
+    while (!feof(f))
     {
-        // Read new data into the buffer, after any leftover partial line
-        size_t bytes_to_read = SCRATCH_BUFSIZE - leftover_len - 1;
-        chunk_read_start_time = esp_timer_get_time();
-        size_t bytes_read = fread(buf + leftover_len, 1, bytes_to_read, f);
-        ESP_LOGI(TAG, "Chunk read took %lld us for %d bytes.", esp_timer_get_time() - chunk_read_start_time, bytes_read);
-
-        if (duration_sec > 0 && first_line_ts > 0 && duration_end_ts == 0)
+        size_t bytes_read = fread(buf, 1, SCRATCH_BUFSIZE, f);
+        if (bytes_read == 0)
         {
-            duration_end_ts = first_line_ts + duration_sec;
+            break; // End of file
         }
 
-        if (bytes_read == 0 && leftover_len == 0) {
-            break; // No more data to read and no leftovers
-        }
-
-        size_t total_len = leftover_len + bytes_read;
-        buf[total_len] = '\0'; // Null-terminate for string functions
-        int64_t chunk_process_start_time = esp_timer_get_time();
-        char *buf_end = buf + total_len;
-        line_start = buf; // Initialize line_start at the beginning of chunk processing
-
-        // --- Optimization: Check if the whole chunk can be sent ---
-        bool fast_path = false;
-        if (duration_end_ts > 0) {
-            // Find the last newline in the buffer to identify the last full line
-            char *last_newline = memrchr(buf, '\n', total_len);
-            if (last_newline) {
-                // Find the start of that last line
-                char *last_line_start = last_newline;
-                while (last_line_start > buf && *(last_line_start - 1) != '\n') {
-                    last_line_start--;
-                }
-
-                // Parse the timestamp from the last line
-                time_t last_line_ts = atoll(last_line_start);
-                if (last_line_ts < duration_end_ts) {
-                    fast_path = true;
+        // On the first chunk, determine the end timestamp if a duration is set
+        if (first_chunk)
+        {
+            first_chunk = false;
+            if (duration_sec > 0)
+            {
+                first_line_ts = atoll(buf);
+                if (first_line_ts > 0)
+                {
+                    duration_end_ts = first_line_ts + duration_sec;
+                    ESP_LOGI(TAG, "Preview duration: %d s. Start TS: %ld, End TS: %ld", duration_sec, first_line_ts, duration_end_ts);
                 }
             }
         }
 
-        if (fast_path)
+        // If duration is set, check if the first line of the current buffer is past the end time
+        if (duration_end_ts > 0)
         {
-            // FAST PATH: The entire chunk is valid. Process line by line for correct JSON formatting.
-            ESP_LOGI(TAG, "Fast path: Entire chunk is valid.");
-
-            char *current_line_ptr = buf;
-            while (current_line_ptr < buf_end)
+            // Find the first line that exceeds the duration
+            char *current_pos = buf;
+            char *end_of_buffer = buf + bytes_read;
+            while (current_pos < end_of_buffer)
             {
-                char *next_newline = memchr(current_line_ptr, '\n', buf_end - current_line_ptr);
-                if (!next_newline)
+                time_t line_ts = atoll(current_pos);
+                if (line_ts >= duration_end_ts)
                 {
-                    // This means the last part of the buffer is a partial line.
-                    // For the fast path, we only process full lines.
-                    // The remaining part will be handled as leftover.
+                    // Found a line that is past our time window.
+                    // We should send the data *up to* this line.
+                    size_t valid_len = current_pos - buf;
+                    if (valid_len > 0)
+                    {
+                        httpd_resp_send_chunk(req, buf, valid_len);
+                    }
+                    ESP_LOGI(TAG, "Reached end of duration window. Stopping stream.");
+                    bytes_read = 0; // Mark as done
                     break;
                 }
 
-                size_t line_len = next_newline - current_line_ptr;
-                if (line_len > 0 && current_line_ptr[line_len - 1] == '\r')
-                {
-                    line_len--; // Remove trailing \r
-                }
-
-                // Only process and send non-empty lines
-                if (line_len > 0)
-                {
-                    if (!is_first_line_in_json) httpd_resp_send_chunk(req, ",", 1);
-                    httpd_resp_send_chunk(req, "\"", 1);
-                    httpd_resp_send_chunk(req, current_line_ptr, line_len);
-                    httpd_resp_send_chunk(req, "\"", 1);
-                    is_first_line_in_json = false;
-                    lines_sent++;
-                }
-                current_line_ptr = next_newline + 1;
+                // Move to the next line
+                char *next_line = memchr(current_pos, '\n', end_of_buffer - current_pos);
+                if (!next_line) break; // No more full lines in this chunk
+                current_pos = next_line + 1;
             }
-            line_start = current_line_ptr; // Update line_start for leftover handling
         }
-        else
+
+        if (bytes_read == 0) break; // Exit if we've decided to stop
+
+        // Send the raw chunk
+        if (httpd_resp_send_chunk(req, buf, bytes_read) != ESP_OK)
         {
-            // SLOW PATH: Process line by line, checking timestamps.
-            while (line_start < buf_end) {
-                char *next_newline = memchr(line_start, '\n', buf_end - line_start);
-                if (!next_newline) break; // Partial line, will be handled as leftover
-
-                size_t line_len = next_newline - line_start;
-                if (line_len > 0 && line_start[line_len - 1] == '\r') line_len--;
-
-                if (line_len > 0) {
-                    time_t current_line_ts = atoll(line_start);
-
-                    if (is_first_line_in_json) first_line_ts = current_line_ts;
-
-                    if (duration_end_ts > 0 && current_line_ts >= duration_end_ts) {
-                        lines_sent = 10001; // Force exit
-                        break;
-                    }
-
-                    if (!is_first_line_in_json) httpd_resp_send_chunk(req, ",", 1);
-                    httpd_resp_send_chunk(req, "\"", 1);
-                    httpd_resp_send_chunk(req, line_start, line_len);
-                    httpd_resp_send_chunk(req, "\"", 1);
-                    is_first_line_in_json = false;
-                    lines_sent++;
-                }
-                line_start = next_newline + 1;
-                if (lines_sent >= 10000) break;
-            }
+            ESP_LOGE(TAG, "File sending failed!");
+            fclose(f);
+            // Send NULL chunk to indicate failure
+            httpd_resp_send_chunk(req, NULL, 0);
+            return ESP_FAIL;
         }
 
-        // Handle any remaining fractional line
-        if (line_start < buf_end) {
-            int64_t leftover_start_time = esp_timer_get_time();
-            leftover_len = buf_end - line_start;
-            memmove(buf, line_start, leftover_len);
-            ESP_LOGD(TAG, "Trimming last fractional chunk took %lld us for %d bytes.", esp_timer_get_time() - leftover_start_time, leftover_len);
-        } else {
-            leftover_len = 0;
+        // A simple way to limit the total data sent, similar to the old line count
+        lines_sent += 1; // Here, we count chunks instead of lines
+        if (lines_sent > 200) { // ~1MB of data
+            ESP_LOGW(TAG, "Preview data limit reached. Stopping stream.");
+            break;
         }
 
-        ESP_LOGD(TAG, "Processing chunk took %lld us. (Fast path: %s)", esp_timer_get_time() - chunk_process_start_time, fast_path ? "yes" : "no");
-
-        if (lines_sent > 10000) break;
-
-        if (bytes_read == 0 && leftover_len > 0) {
-            break; // Exit the main loop, we are done.
-        }
-        // Yield to other tasks to prevent watchdog timer from triggering on long operations
-        vTaskDelay(pdMS_TO_TICKS(2));
+        vTaskDelay(pdMS_TO_TICKS(5)); // Small delay to allow other tasks to run
     }
 
+    ESP_LOGI(TAG, "Finished sending file preview.");
     fclose(f);
-    httpd_resp_send_chunk(req, "]}", 2); // Close JSON
-    httpd_resp_send_chunk(req, NULL, 0); // Finalize
+    httpd_resp_send_chunk(req, NULL, 0); // Finalize the response
     return ESP_OK;
 }
 
