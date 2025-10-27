@@ -4,10 +4,10 @@ This project is a datalogger built on the ESP32-S3 platform using the ESP-IDF fr
 
 Please refer to the following main guides for usage guidance and documentation:
 
-*   **[Board Design](BOARD_DESIGN.md)**: Details on the custom PCB, hardware components, and pinout.
 *   **[User Interface Guide](UI_GUIDE.md)**: A complete guide to the on-screen menu system and controls.
 *   **[Web UI Guide](WEB_UI.md)**: Instructions for using the web interface to manage files.
 *   **[Software Architecture](SOFTWARE_ARCHITECTURE.md)**: An in-depth look at the software design, tasks, and communication mechanisms.
+*   **[Board Design](BOARD_DESIGN.md)**: Details on the custom PCB, hardware components, and pinout.
 
 ## Overview
  

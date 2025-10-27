@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <math.h> // For isnan()
 #include "../ui/time_utils.h"
+#include "esp_timer.h"
 
 static const char *TAG = "web_server";
 static httpd_handle_t server = NULL;
@@ -21,7 +22,7 @@ static regex_t csv_header_regex;
 static bool regex_is_compiled = false;
 
 #define FILE_PATH_MAX (ESP_VFS_PATH_MAX + 128)
-#define SCRATCH_BUFSIZE (10240)
+#define SCRATCH_BUFSIZE (5*10240)
 
 typedef struct
 {
@@ -969,7 +970,7 @@ static esp_err_t download_handler(httpd_req_t *req)
     }
 
     snprintf(filepath, sizeof(filepath), "/sdcard/%s", filename);
-    ESP_LOGD(TAG, "Serving file: %s", filepath);
+    ESP_LOGI(TAG, "Serving file: %s", filepath);
 
     int fd = open(filepath, O_RDONLY, 0);
     if (fd == -1)
@@ -1288,12 +1289,15 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
     bool is_first_line_in_json = true;
     int lines_sent = 0;
     size_t leftover_len = 0;
+    int64_t chunk_read_start_time;
 
     while (lines_sent < 10000)
     {
         // Read new data into the buffer, after any leftover partial line
         size_t bytes_to_read = SCRATCH_BUFSIZE - leftover_len - 1;
+        chunk_read_start_time = esp_timer_get_time();
         size_t bytes_read = fread(buf + leftover_len, 1, bytes_to_read, f);
+        ESP_LOGI(TAG, "Chunk read took %lld us for %d bytes.", esp_timer_get_time() - chunk_read_start_time, bytes_read);
 
         if (duration_sec > 0 && first_line_ts > 0 && duration_end_ts == 0)
         {
@@ -1305,59 +1309,111 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
         }
 
         size_t total_len = leftover_len + bytes_read;
-        line_start = buf; // Reset line_start to the beginning of the buffer for each new chunk
+        buf[total_len] = '\0'; // Null-terminate for string functions
+        int64_t chunk_process_start_time = esp_timer_get_time();
         char *buf_end = buf + total_len;
+        line_start = buf; // Initialize line_start at the beginning of chunk processing
 
-        while (line_start < buf_end) {
-            char *next_newline = memchr(line_start, '\n', buf_end - line_start);
-            if (!next_newline) {
-                // No more complete lines in this buffer, save the rest for the next read
-                leftover_len = buf_end - line_start;
-                memmove(buf, line_start, leftover_len);
-                break;
-            }
-            leftover_len = 0; // We found a line, so reset leftovers for this iteration
-
-            size_t line_len = next_newline - line_start;
-            if (line_len > 0 && line_start[line_len - 1] == '\r') {
-                line_len--; // Trim CR
-            }
-
-            if (line_len > 0) {
-                // Manually parse timestamp to handle potential null characters
-                time_t current_line_ts = 0;
-                char ts_str[21] = {0};
-                char *comma = memchr(line_start, ',', line_len);
-                if (comma) {
-                    size_t ts_len = comma - line_start;
-                    if (ts_len < sizeof(ts_str)) {
-                        memcpy(ts_str, line_start, ts_len);
-                        current_line_ts = atoll(ts_str);
-                    }
+        // --- Optimization: Check if the whole chunk can be sent ---
+        bool fast_path = false;
+        if (duration_end_ts > 0) {
+            // Find the last newline in the buffer to identify the last full line
+            char *last_newline = memrchr(buf, '\n', total_len);
+            if (last_newline) {
+                // Find the start of that last line
+                char *last_line_start = last_newline;
+                while (last_line_start > buf && *(last_line_start - 1) != '\n') {
+                    last_line_start--;
                 }
 
-                if (is_first_line_in_json) {
-                    first_line_ts = current_line_ts;
+                // Parse the timestamp from the last line
+                time_t last_line_ts = atoll(last_line_start);
+                if (last_line_ts < duration_end_ts) {
+                    fast_path = true;
                 }
+            }
+        }
 
-                if (!is_first_line_in_json) httpd_resp_send_chunk(req, ",", 1);
-                httpd_resp_send_chunk(req, "\"", 1);
-                httpd_resp_send_chunk(req, line_start, line_len);
-                httpd_resp_send_chunk(req, "\"", 1);
-                is_first_line_in_json = false;
-                lines_sent++;
+        if (fast_path)
+        {
+            // FAST PATH: The entire chunk is valid. Process line by line for correct JSON formatting.
+            ESP_LOGI(TAG, "Fast path: Entire chunk is valid.");
 
-                // Check duration limit after sending
-                if (duration_end_ts > 0 && current_line_ts >= duration_end_ts) {
-                    lines_sent = 10001; // Force exit from both loops
+            char *current_line_ptr = buf;
+            while (current_line_ptr < buf_end)
+            {
+                char *next_newline = memchr(current_line_ptr, '\n', buf_end - current_line_ptr);
+                if (!next_newline)
+                {
+                    // This means the last part of the buffer is a partial line.
+                    // For the fast path, we only process full lines.
+                    // The remaining part will be handled as leftover.
                     break;
                 }
 
-            }
+                size_t line_len = next_newline - current_line_ptr;
+                if (line_len > 0 && current_line_ptr[line_len - 1] == '\r')
+                {
+                    line_len--; // Remove trailing \r
+                }
 
-            line_start = next_newline + 1; // Move to the start of the next line
-            if (lines_sent >= 10000) break;
+                // Only process and send non-empty lines
+                if (line_len > 0)
+                {
+                    if (!is_first_line_in_json) httpd_resp_send_chunk(req, ",", 1);
+                    httpd_resp_send_chunk(req, "\"", 1);
+                    httpd_resp_send_chunk(req, current_line_ptr, line_len);
+                    httpd_resp_send_chunk(req, "\"", 1);
+                    is_first_line_in_json = false;
+                    lines_sent++;
+                }
+                current_line_ptr = next_newline + 1;
+            }
+            line_start = current_line_ptr; // Update line_start for leftover handling
         }
+        else
+        {
+            // SLOW PATH: Process line by line, checking timestamps.
+            while (line_start < buf_end) {
+                char *next_newline = memchr(line_start, '\n', buf_end - line_start);
+                if (!next_newline) break; // Partial line, will be handled as leftover
+
+                size_t line_len = next_newline - line_start;
+                if (line_len > 0 && line_start[line_len - 1] == '\r') line_len--;
+
+                if (line_len > 0) {
+                    time_t current_line_ts = atoll(line_start);
+
+                    if (is_first_line_in_json) first_line_ts = current_line_ts;
+
+                    if (duration_end_ts > 0 && current_line_ts >= duration_end_ts) {
+                        lines_sent = 10001; // Force exit
+                        break;
+                    }
+
+                    if (!is_first_line_in_json) httpd_resp_send_chunk(req, ",", 1);
+                    httpd_resp_send_chunk(req, "\"", 1);
+                    httpd_resp_send_chunk(req, line_start, line_len);
+                    httpd_resp_send_chunk(req, "\"", 1);
+                    is_first_line_in_json = false;
+                    lines_sent++;
+                }
+                line_start = next_newline + 1;
+                if (lines_sent >= 10000) break;
+            }
+        }
+
+        // Handle any remaining fractional line
+        if (line_start < buf_end) {
+            int64_t leftover_start_time = esp_timer_get_time();
+            leftover_len = buf_end - line_start;
+            memmove(buf, line_start, leftover_len);
+            ESP_LOGD(TAG, "Trimming last fractional chunk took %lld us for %d bytes.", esp_timer_get_time() - leftover_start_time, leftover_len);
+        } else {
+            leftover_len = 0;
+        }
+
+        ESP_LOGD(TAG, "Processing chunk took %lld us. (Fast path: %s)", esp_timer_get_time() - chunk_process_start_time, fast_path ? "yes" : "no");
 
         if (lines_sent > 10000) break;
 
