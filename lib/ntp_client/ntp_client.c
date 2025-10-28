@@ -50,7 +50,9 @@ esp_err_t ntp_client_get_utc_time(const char* ssid, const char* password, uint32
         time(out_timestamp);
         struct tm timeinfo;
         gmtime_r(out_timestamp, &timeinfo);
-        ESP_LOGI(TAG, "Successfully synchronized time: %s", asctime(&timeinfo));
+        char buf[26]; // asctime_r requires a buffer of at least 26 bytes.
+        asctime_r(&timeinfo, buf);
+        ESP_LOGI(TAG, "Successfully synchronized time: %s", buf);
         result = ESP_OK;
     } else {
         ESP_LOGE(TAG, "Failed to synchronize time within the timeout period.");
