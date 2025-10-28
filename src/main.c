@@ -805,7 +805,22 @@ void main_task(void *pvParameters)
         }
 
         // --- USB Mass Storage Connection Logic (Data Port Specific) ---
-        if (spi_sdcard_is_usb_connected() && !is_usb_connected_state)
+        bool is_usb_msc_active = spi_sdcard_is_usb_connected();
+        if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
+        {
+            // This flag is now the single source of truth for the UI about MSC state.
+            if (is_usb_msc_active && !g_sensor_buffer.usb_msc_connected)
+            {
+                g_sensor_buffer.usb_msc_connected = true;
+            }
+            else if (!is_usb_msc_active && g_sensor_buffer.usb_msc_connected)
+            {
+                g_sensor_buffer.usb_msc_connected = false;
+            }
+            xSemaphoreGive(g_sensor_buffer_mutex);
+        }
+
+        if (is_usb_msc_active && !is_usb_connected_state)
         {
             // USB data port was just connected.
             // It has absolute priority. If the web server is running, stop it.
@@ -821,13 +836,6 @@ void main_task(void *pvParameters)
             // Now, do a full init which includes TinyUSB.
             spi_sdcard_full_init();
             is_usb_connected_state = true;
-
-            // Set the write status to indicate USB is connected, so the UI can show the icon.
-            if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)))
-            {
-                g_sensor_buffer.writeStatus = WRITE_STATUS_USB_MSC;
-                xSemaphoreGive(g_sensor_buffer_mutex);
-            }
         }
         else if (!is_externally_powered && is_usb_connected_state)
         {
@@ -837,12 +845,6 @@ void main_task(void *pvParameters)
             // Re-init in SD-only mode for the datalogger.
             spi_sdcard_init_sd_only();
             is_usb_connected_state = false;
-
-            // USB is disconnected, reset the status so the UI shows normal icons.
-            if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50))) {
-                g_sensor_buffer.writeStatus = WRITE_STATUS_UNKNOWN; // Reset status
-                xSemaphoreGive(g_sensor_buffer_mutex);
-            }
         }
 
         // --- UI Inactivity Logic ---

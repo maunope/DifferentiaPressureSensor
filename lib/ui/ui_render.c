@@ -766,7 +766,7 @@ static void draw_status_icons(void)
                       s_local_sensor_buffer.ds3231_available;
     bool is_paused = s_local_sensor_buffer.datalogger_paused;
 
-    bool is_usb_msc = (s_local_sensor_buffer.writeStatus == WRITE_STATUS_USB_MSC);
+    bool is_usb_msc = s_local_sensor_buffer.usb_msc_connected;
 
     // The title bar is inverted on most screens. We render the icon with a non-inverted
     // color (white on black) only for specific full-screen pages that have a black background at the top.
@@ -933,9 +933,6 @@ static void enter_cmd_pending_mode(uint32_t timeout_ms, post_cmd_action_t post_a
 void uiRender_task(void *pvParameters)
 {
     ui_event_queue = xQueueCreate(UI_QUEUE_LEN, sizeof(ui_event_msg_t));
-
-    uint64_t last_sensor_refresh_ms = 0;
-    const uint32_t sensor_refresh_interval_ms = 5000; // 5 seconds
 
     while (1)
     {

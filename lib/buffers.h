@@ -20,8 +20,7 @@ typedef enum {
 typedef enum {
     WRITE_STATUS_OK,
     WRITE_STATUS_FAIL,
-    WRITE_STATUS_UNKNOWN,
-    WRITE_STATUS_USB_MSC
+    WRITE_STATUS_UNKNOWN
 } write_status_t;
 
 typedef enum {
@@ -54,6 +53,7 @@ typedef struct {
     bool bmp280_available;
     bool d6fph_available;
     bool ds3231_available;
+    bool usb_msc_connected;
     bool sensor_read_error;
     command_status_t delete_file_status;
     bool datalogger_paused;
