@@ -841,41 +841,26 @@ static void draw_status_icons(void)
 
     if (is_usb_msc)
     {
-        
-        // Draw USB symbol and suppress other icons
-        current_icon_x -= 10; // Make space for USB symbol
-        // Corrected C Code Snippet for a Horizontal USB Symbol (6 pixels high)
-
-        // Start position: usb_x is the left edge, usb_y is the top edge (e.g., usb_y = 2)
-        // This symbol will occupy pixels from usb_y to usb_y + 5 (6 pixels high)
+        // Draw a new 9x6 pixel USB "trident" symbol and suppress other icons.
+        current_icon_x -= 10; // Make space for the new 9-pixel wide icon.
         int usb_x = current_icon_x;
-        int usb_y = 2;
+        int usb_y = 1; // Start at y=1 to fit within the 8-pixel high title bar.
 
+        // Main vertical trunk (4 pixels tall)
+        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 4, usb_y + 2, 1, 4, !is_inverted);
 
-        // --- 1. Center Line (Vertical) ---
-        // This was the horizontal line; it's now a vertical line 9 pixels tall (x = usb_x + 3)
-        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 3, usb_y, 1, 9, !is_inverted);
+        // Left branch
+        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 2, usb_y + 1, 2, 1, !is_inverted); // Horizontal part
+        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 1, usb_y, 2, 2, !is_inverted);     // Square terminal
 
-        // --- 2. Top Terminal (Square) - Rotated from Left Terminal ---
-        // Vertical line connecting the central line to the top left (now top right) terminal
-        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 4, usb_y + 1, 2, 1, !is_inverted); // Connectors are now horizontal
-        // Square (or box) terminal at the far top (was top left)
-        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 4, usb_y, 2, 2, !is_inverted);
+        // Right branch
+        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 5, usb_y + 1, 2, 1, !is_inverted); // Horizontal part
+        i2c_oled_draw_pixel(s_oled_i2c_num, usb_x + 7, usb_y, !is_inverted);         // Triangle terminal (top)
+        i2c_oled_draw_pixel(s_oled_i2c_num, usb_x + 8, usb_y + 1, !is_inverted);       // Triangle terminal (middle)
+        i2c_oled_draw_pixel(s_oled_i2c_num, usb_x + 7, usb_y + 2, !is_inverted);       // Triangle terminal (bottom)
 
-        // --- 3. Bottom Terminal (Circle/Cross) - Rotated from Right Terminal ---
-        // Vertical line connecting the central line to the bottom right (now bottom left) terminal
-        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 4, usb_y + 7, 2, 1, !is_inverted); // Connectors are horizontal
-        // "Circle" terminal at the far bottom (was top right)
-        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 6, usb_y + 6, 3, 1, !is_inverted); // Horizontal bar (now vertical)
-        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 7, usb_y + 7, 1, 3, !is_inverted); // Vertical bar (now horizontal)
-
-        // --- 4. Middle-Right Terminal (Triangle/Arrowhead) - Rotated from Bottom Terminal ---
-        // Vertical line connecting the central line to the middle-right terminal
-        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 4, usb_y + 4, 2, 1, !is_inverted); // Connectors are horizontal
-        // Simple 3-pixel "triangle" terminal at the center right
-        i2c_oled_draw_pixel(s_oled_i2c_num, usb_x + 5, usb_y + 3, !is_inverted); // Top edge (was left edge)
-        i2c_oled_draw_pixel(s_oled_i2c_num, usb_x + 5, usb_y + 5, !is_inverted); // Bottom edge (was right edge)
-        i2c_oled_draw_pixel(s_oled_i2c_num, usb_x + 6, usb_y + 4, !is_inverted); // Tip (was bottom tip)
+        // Center (bottom) branch
+        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 3, usb_y + 5, 3, 2, !is_inverted); // Circle terminal
     }
     else
     {
