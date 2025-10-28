@@ -3,9 +3,6 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 
-// Use font5x7 from header
-extern const uint8_t font5x7[96][5];
-
 // Store the address for the single OLED device this library manages.
 static i2c_master_dev_handle_t s_oled_dev_handle = NULL;
 
@@ -188,12 +185,12 @@ void i2c_oled_write_text(i2c_port_t i2c_num, uint8_t row, uint8_t col, const cha
     uint16_t x = col * 6;
     uint16_t y = row * 8;
     while (*text) {
-        if (*text < 32 || *text > 127) {
-            text++;
-            continue;
-        }
+        unsigned char c = *text;
+        // The font array now covers all 256 characters.
+        // We can directly use the character code as an index.
+        // Non-printable characters (e.g., 0-31) are defined as blank glyphs in the font array.
         for (int i = 0; i < 5; i++) {
-            s_screen_buffer[x + i + y * OLED_WIDTH / 8] = font5x7[*text - 32][i];
+            s_screen_buffer[x + i + y * OLED_WIDTH / 8] = font5x7[c][i];
         }
         x += 6; // 5 for char, 1 for space
         text++;
@@ -228,7 +225,7 @@ void i2c_oled_write_inverted_text(i2c_port_t i2c_num, uint8_t row, uint8_t col, 
 
     while (*text && current_col < 128) {
         if (*text >= 32 && *text <= 127) {
-            const uint8_t* font_char = font5x7[*text - 32];
+            const uint8_t* font_char = font5x7[(unsigned char)*text];
             for (int i = 0; i < 5 && (current_col + i) < OLED_WIDTH; i++) {
                 line_buffer[current_col + i] = ~font_char[i]; // Invert font bits
             }

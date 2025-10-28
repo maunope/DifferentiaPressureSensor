@@ -287,6 +287,12 @@ static void oled_power_on(void)
         gpio_set_level(OLED_POWER_PIN, 1);
         vTaskDelay(pdMS_TO_TICKS(100)); // Wait for OLED to stabilize
         i2c_oled_send_init_commands(I2C_OLED_NUM);
+        // Immediately clear the screen and show a "Waking up" message
+        // to prevent showing stale "Zzzzz" screen content.
+        i2c_oled_clear(I2C_OLED_NUM);
+        i2c_oled_write_inverted_text(I2C_OLED_NUM, 0, 0, "System");
+        i2c_oled_write_text(I2C_OLED_NUM, 2, 0, "Waking up...");
+        i2c_oled_update_screen(I2C_OLED_NUM);
         vTaskResume(g_uiRender_task_handle);
         uiRender_send_event(UI_EVENT_WAKE_UP, NULL, 0);
     }
@@ -809,11 +815,11 @@ void main_task(void *pvParameters)
         if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
         {
             // This flag is now the single source of truth for the UI about MSC state.
-            if (is_usb_msc_active && !g_sensor_buffer.usb_msc_connected)
+            if (is_usb_msc_active)
             {
                 g_sensor_buffer.usb_msc_connected = true;
             }
-            else if (!is_usb_msc_active && g_sensor_buffer.usb_msc_connected)
+            else if (!is_usb_msc_active)
             {
                 g_sensor_buffer.usb_msc_connected = false;
             }

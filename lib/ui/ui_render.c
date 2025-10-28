@@ -442,11 +442,12 @@ void render_sensor_callback(void)
 {
     if (!s_oled_initialized)
         return;
-    char line_buf[21];
+    char value_buf[21]; // Buffer for the numeric value
+    char line_buf[21];  // Full line buffer
     char uptime_str[21];
 
     i2c_oled_clear(s_oled_i2c_num);        // Clear screen buffer before drawing
-    write_inverted_line(0, "Sensor Data"); // Set a consistent title
+    write_inverted_line(0, "Sensor Data");
 
     if (s_sensor_page_num == 0)
     {
@@ -454,20 +455,35 @@ void render_sensor_callback(void)
         // Current Time
         struct tm local_tm;
         convert_gmt_to_cet(s_local_sensor_buffer.timestamp, &local_tm);
-        strftime(line_buf, sizeof(line_buf), "%Y-%m-%d %H:%M:%S", &local_tm);
-        write_padded_line(2, s_local_sensor_buffer.timestamp > 0 ? line_buf : "Time not set");
+        strftime(value_buf, sizeof(value_buf), "%Y-%m-%d %H:%M:%S", &local_tm);
+        write_padded_line(2, s_local_sensor_buffer.timestamp > 0 ? value_buf : "Time not set");
 
         // Temperature
-        snprintf(line_buf, sizeof(line_buf), "T: %.2f C", s_local_sensor_buffer.temperature_c);
-        write_padded_line(4, isnan(s_local_sensor_buffer.temperature_c) ? "T: N/A" : line_buf);
+        if (isnan(s_local_sensor_buffer.temperature_c)) {
+            snprintf(line_buf, sizeof(line_buf), "T:      N/A");
+        } else {
+            snprintf(value_buf, sizeof(value_buf), "%.2f", s_local_sensor_buffer.temperature_c);
+            snprintf(line_buf, sizeof(line_buf), "T: %6.6s C\xf8", value_buf); // Use character 0xF8 for degree symbol
+        }
+        write_padded_line(4, line_buf);
 
         // Pressure
-        snprintf(line_buf, sizeof(line_buf), "P: %.2f kPa", (float)s_local_sensor_buffer.pressure_pa / 1000.0f);
-        write_padded_line(5, s_local_sensor_buffer.pressure_pa == 0 ? "P: N/A" : line_buf);
+        if (s_local_sensor_buffer.pressure_pa == 0) {
+            snprintf(line_buf, sizeof(line_buf), "P:      N/A");
+        } else {
+            snprintf(value_buf, sizeof(value_buf), "%.2f", (float)s_local_sensor_buffer.pressure_pa / 1000.0f);
+            snprintf(line_buf, sizeof(line_buf), "P: %6.6s kPa", value_buf);
+        }
+        write_padded_line(5, line_buf);
 
         // Differential Pressure
-        snprintf(line_buf, sizeof(line_buf), "DP: %.2f Pa", s_local_sensor_buffer.diff_pressure_pa);
-        write_padded_line(6, isnan(s_local_sensor_buffer.diff_pressure_pa) ? "DP: N/A" : line_buf);
+        if (isnan(s_local_sensor_buffer.diff_pressure_pa)) {
+            snprintf(line_buf, sizeof(line_buf), "D:      N/A");
+        } else {
+            snprintf(value_buf, sizeof(value_buf), "%.2f", s_local_sensor_buffer.diff_pressure_pa);
+            snprintf(line_buf, sizeof(line_buf), "D: %6.6s Pa", value_buf);
+        }
+        write_padded_line(6, line_buf);
     }
     else
     { // s_sensor_page_num == 1
@@ -768,6 +784,8 @@ static void draw_status_icons(void)
 
     bool is_usb_msc = s_local_sensor_buffer.usb_msc_connected;
 
+
+ //ESP_LOGI(TAG, "Drawing status icons:  USB MSC: %d", is_usb_msc);
     // The title bar is inverted on most screens. We render the icon with a non-inverted
     // color (white on black) only for specific full-screen pages that have a black background at the top.
     bool is_fullscreen_no_bar = (s_current_page == &about_page && s_about_page_view == 0) ||
@@ -823,6 +841,7 @@ static void draw_status_icons(void)
 
     if (is_usb_msc)
     {
+        
         // Draw USB symbol and suppress other icons
         current_icon_x -= 10; // Make space for USB symbol
         // Corrected C Code Snippet for a Horizontal USB Symbol (6 pixels high)
