@@ -842,19 +842,19 @@ static void draw_status_icons(void)
     if (is_usb_msc)
     {
         // Draw a new 9x6 pixel USB "trident" symbol and suppress other icons.
-        // Draw a new 11x6 pixel USB plug symbol and suppress other icons.
-        current_icon_x -= 12; // Make space for the 11-pixel wide icon.
+        // Draw a new 12x6 pixel USB plug symbol and suppress other icons.
+        current_icon_x -= 13; // Make space for the 12-pixel wide icon.
         int usb_x = current_icon_x;
         int usb_y = 1; // Start at y=1 to fit within the 8-pixel high title bar.
 
-        // Draw the outer shell of the USB plug (an 11x6 rounded rectangle)
-        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 1, usb_y, 9, 1, !is_inverted);     // Top edge
-        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 1, usb_y + 5, 9, 1, !is_inverted);   // Bottom edge
+        // Draw the outer shell of the USB plug (a 12x6 rounded rectangle)
+        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 1, usb_y, 10, 1, !is_inverted);    // Top edge
+        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 1, usb_y + 5, 10, 1, !is_inverted);  // Bottom edge
         i2c_oled_fill_rect(s_oled_i2c_num, usb_x, usb_y + 1, 1, 4, !is_inverted);       // Left side
-        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 10, usb_y + 1, 1, 4, !is_inverted);    // Right side
+        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 11, usb_y + 1, 1, 4, !is_inverted);   // Right side
 
-        // Draw the internal "tongue" of the USB-A socket
-        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 1, usb_y + 2, 9, 1, !is_inverted);
+        // Draw the internal "tongue" of the USB-A socket (2px high, centered, with 1px gaps)
+        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 2, usb_y + 2, 8, 2, !is_inverted);
     }
     else
     {
