@@ -929,6 +929,7 @@ void uiRender_task(void *pvParameters)
                     // Long press returns to sensor data page (home)
                     // ESP_LOGI(TAG, "UI_EVENT_BTN_LONG in menu mode, returning to sensor page. 1");
                     s_menu_mode = false;
+                    s_sensor_page_num = 0; // Always return to the first sensor page
                     s_current_page = &sensor_page;
                 }
                 else if (msg.event == UI_EVENT_BTN)
@@ -942,7 +943,14 @@ void uiRender_task(void *pvParameters)
                 {
                     // Long press returns to sensor data page (home)
                     // ESP_LOGI(TAG, "UI_EVENT_BTN_LONG in page mode, returning to sensor page. 2");
+                    if (s_current_page == &web_server_page)
+                    {
+                        // If on web server page, a long press should also stop the server.
+                        app_command_t cmd = {.cmd = APP_CMD_STOP_WEB_SERVER, .mode = 0};
+                        xQueueSend(g_app_cmd_queue, &cmd, 0);
+                    }
                     s_menu_mode = false;
+                    s_sensor_page_num = 0; // Always return to the first sensor page
                     s_current_page = &sensor_page;
                 }
                 else if (msg.event == UI_EVENT_CW && s_current_page->on_cw)

@@ -20,13 +20,9 @@ int get_last_sunday(int anno, int mese) {
     time_t time_temp;
     
     // Inizia impostando il 1° giorno del mese successivo (o Gennaio se è Dicembre)
-    if (mese == 12) {
-        t.tm_year = anno + 1 - 1900;
-        t.tm_mon = 0; // Gennaio
-    } else {
-        t.tm_year = anno - 1900;
-        t.tm_mon = mese; // Mese successivo
-    }
+    t.tm_year = anno - 1900;
+    t.tm_mon = mese % 12; // Use modulo 12 to handle December (12 -> 0 for January of next year)
+    if (mese == 12) t.tm_year++;
     t.tm_mday = 1;
     t.tm_hour = 12; // Per evitare problemi di fuso orario durante mktime
 
