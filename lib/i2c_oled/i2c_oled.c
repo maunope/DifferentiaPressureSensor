@@ -67,6 +67,29 @@ void i2c_oled_fill_rect(i2c_port_t i2c_num, int x, int y, int width, int height,
         }
     }
 }
+
+void i2c_oled_draw_bitmap(i2c_port_t i2c_num, int x, int y, const uint8_t *bitmap, bool on)
+{
+    if (!bitmap)
+    {
+        return;
+    }
+
+    for (int row = 0; row < 8; ++row)
+    {
+        uint8_t row_pixels = bitmap[row];
+        for (int col = 0; col < 8; ++col)
+        {
+            // Check if the bit for the current column is set
+            // We check from the most significant bit (leftmost pixel) to the least
+            if ((row_pixels << col) & 0x80)
+            {
+                i2c_oled_draw_pixel(i2c_num, x + col, y + row, on);
+            }
+        }
+    }
+}
+
 /**
  * @brief Sends a buffer of data bytes to the OLED GDDRAM.
  *
