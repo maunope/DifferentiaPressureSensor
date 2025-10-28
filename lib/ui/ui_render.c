@@ -644,104 +644,98 @@ void menu_cancel_on_btn(void)
  */
 void render_cmd_feedback_screen(void)
 {
-    static command_status_t last_rendered_status = CMD_STATUS_IDLE;
+    command_status_t current_status = CMD_STATUS_IDLE;
     uint64_t now = esp_timer_get_time() / 1000;
 
-    command_status_t current_status = CMD_STATUS_IDLE;
-    if (xSemaphoreTake(g_command_status_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
+    // Clear the screen buffer before drawing the feedback screen
+    i2c_oled_clear(s_oled_i2c_num);
+
+    if (xSemaphoreTake(g_command_status_mutex, 0) == pdTRUE)
     {
         current_status = g_command_status;
         xSemaphoreGive(g_command_status_mutex);
     }
 
-    // If the status hasn't changed, don't redraw anything.
-    if (current_status == last_rendered_status && current_status == CMD_STATUS_PENDING) {
-        return;
-    }
-
-    // --- Polling and State Transition Logic ---
     if (current_status == CMD_STATUS_PENDING)
     {
+        // --- Handle PENDING state ---
+        write_inverted_line(0, " "); // Inverted title bar
+        write_padded_line(3, "Loading...");
+
+        // Check for timeout
         if (now - s_cmd_start_time_ms > s_cmd_timeout_ms)
-        { // Use parametric timeout
-            write_padded_line(3, "Timeout");
-            vTaskDelay(pdMS_TO_TICKS(500));
-            s_cmd_pending_mode = false; // Exit loading mode
+        {
+            write_padded_line(3, "Timeout!");
+            i2c_oled_update_screen(s_oled_i2c_num); // Show "Timeout" message
+            vTaskDelay(pdMS_TO_TICKS(1000)); // Wait for 1 second
+
+            // Reset state
+            s_cmd_pending_mode = false;
             if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY))
             {
                 g_command_status = CMD_STATUS_IDLE;
                 xSemaphoreGive(g_command_status_mutex);
             }
-            s_post_cmd_action = POST_ACTION_NONE; // Clear action on timeout
-        }
-        else
-        {
-            write_padded_line(3, "Loading...");
-            write_inverted_line(0, " "); // Inverted title bar
+            s_post_cmd_action = POST_ACTION_NONE;
         }
     }
     else if (current_status == CMD_STATUS_SUCCESS)
     {
-        write_padded_line(3, "Success");
+        // --- Handle SUCCESS state ---
+        write_padded_line(3, "Success!");
+        write_inverted_line(0, " ");
+
         if (s_cmd_feedback_display_start_ms == 0)
         {
-            s_cmd_feedback_display_start_ms = now;
+            s_cmd_feedback_display_start_ms = now; // Start timer
         }
-        else if (now - s_cmd_feedback_display_start_ms > 300)
-        {                               // Show for 300ms
+        else if (now - s_cmd_feedback_display_start_ms > 1000) // Display for 1000ms
+        {
             if (s_post_cmd_action == POST_ACTION_GO_BACK)
             {
                 menu_cancel_on_btn();
             }
-            s_post_cmd_action = POST_ACTION_NONE; // Clear action
-            s_cmd_pending_mode = false; // Exit loading mode
+            s_cmd_pending_mode = false;
             if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY))
             {
                 g_command_status = CMD_STATUS_IDLE;
                 xSemaphoreGive(g_command_status_mutex);
             }
+            s_post_cmd_action = POST_ACTION_NONE;
         }
     }
     else if (current_status == CMD_STATUS_FAIL)
     {
-        write_padded_line(3, "Failed");
-        write_inverted_line(0, " "); // Inverted title bar
+        // --- Handle FAIL state ---
+        write_padded_line(3, "Failed!");
+        write_inverted_line(0, " ");
+
         if (s_cmd_feedback_display_start_ms == 0)
         {
             s_cmd_feedback_display_start_ms = now;
         }
-        else if (now - s_cmd_feedback_display_start_ms > 500)
-        {                               // Show for 500ms
+        else if (now - s_cmd_feedback_display_start_ms > 1000) // Display for 1000ms
+        {
             if (s_post_cmd_action == POST_ACTION_GO_BACK)
             {
                 menu_cancel_on_btn();
             }
-            s_post_cmd_action = POST_ACTION_NONE; // Clear action
-            s_cmd_pending_mode = false; // Exit loading mode
+            s_cmd_pending_mode = false;
             if (xSemaphoreTake(g_command_status_mutex, portMAX_DELAY))
             {
                 g_command_status = CMD_STATUS_IDLE;
                 xSemaphoreGive(g_command_status_mutex);
             }
+            s_post_cmd_action = POST_ACTION_NONE;
         }
     }
     else
     {
+        // --- Handle IDLE or other states ---
         // Should not happen, but as a fallback
         s_cmd_pending_mode = false;
         s_post_cmd_action = POST_ACTION_NONE;
     }
-
-    // Clear other lines
-    for (int i = 1; i < 8; i++)
-    {
-        if (i != 3)
-        {                             // Don't clear the message line
-            write_padded_line(i, ""); // Clear other non-title lines
-        }
-    }
-
-    last_rendered_status = current_status;
 }
 
 /**

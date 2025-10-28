@@ -57,6 +57,13 @@ Please refer to the following main guides for usage guidance and documentation:
 
 For more details on the custom PCB, see the [board design documentation](BOARD_DESIGN.md).
 
+## Hardware Notes
+
+### DS3231 RTC Configuration
+
+Please be aware that this firmware automatically configures any connected DS3231 Real-Time Clock with specific default settings upon boot. These settings are optimized for low-power operation and resilience. For details on the exact register values being set, please refer to the `readme.md` file located in the `lib/i2c_ds3231/` directory.
+
+
 ### Usage
 
 1.  **Configuration**: Copy the `config_sample.ini` file to the root of your SD card and rename it to `config.ini`. Edit this file to set your Wi-Fi credentials, sensor model, and other parameters.

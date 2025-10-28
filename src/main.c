@@ -690,7 +690,7 @@ void main_task(void *pvParameters)
                 break;
             case APP_CMD_SET_DATALOGGER_MODE:
                 ESP_LOGI(TAG, "CMD: Set Datalogger Mode to %d", cmd.mode);
-                if (g_datalogger_cmd_queue != NULL) 
+                if (g_datalogger_cmd_queue != NULL)
                 {
                     datalogger_cmd_msg_t logger_cmd = {
                         .cmd = DATALOGGER_CMD_SET_MODE,
@@ -707,7 +707,7 @@ void main_task(void *pvParameters)
                 // checks here are partially redundant, I could just use the main loop to check all the "no sleep" conditions and update variables accordingly.
                 // or I could just raise a flag, "sleep now requested" and have the main loop handle it. but since debugging sleep issues is a pain in the *ss,
                 // I'll keep the detailed albeit redundant checks and logging here for now. :-P
-                const char* sleep_reason_log = local_buffer.datalogger_paused ? "Logging paused" : "Log complete";
+                const char *sleep_reason_log = local_buffer.datalogger_paused ? "Logging paused" : "Log complete";
                 ESP_LOGI(TAG, "CMD: %s, checking sleep conditions.", sleep_reason_log);
 
                 bool web_server_active = (local_buffer.web_server_status == WEB_SERVER_RUNNING || local_buffer.web_server_status == WEB_SERVER_STARTING);
@@ -934,18 +934,15 @@ void app_main(void)
     // Initialize UI renderer which will handle its own I2C bus and OLED.
     uiRender_init(g_i2c_bus1_handle, OLED_I2C_ADDR);
 
-    if (cause != ESP_SLEEP_WAKEUP_TIMER)
-    {
-        i2c_oled_clear(I2C_OLED_NUM);
-        // Buffer for display messages, 20 chars + null terminator
-        char display_str[21];
-        memset(display_str, 0, sizeof(display_str)); // Ensure the buffer is clean
-
-        // Show appropriate message based on wakeup reason
-        const char *msg = (cause == ESP_SLEEP_WAKEUP_EXT0 || cause == ESP_SLEEP_WAKEUP_GPIO) ? "Waking up..." : "Booting...";
-        snprintf(display_str, sizeof(display_str), "%-20s", msg);
-        i2c_oled_write_text(I2C_OLED_NUM, 1, 0, display_str);
-    }
+    // The uiRender_init function already sends the init commands.
+    // Now we clear the buffer, write our message, and update the screen.
+    i2c_oled_clear(I2C_OLED_NUM);
+    char display_str[21];
+    const char *msg = (cause == ESP_SLEEP_WAKEUP_EXT0 || cause == ESP_SLEEP_WAKEUP_GPIO) ? "Waking up..." : "Booting...";
+    snprintf(display_str, sizeof(display_str), "%-20s", msg);
+    i2c_oled_write_inverted_text(I2C_OLED_NUM, 0, 0, "System");
+    i2c_oled_write_text(I2C_OLED_NUM, 2, 0, display_str);
+    i2c_oled_update_screen(I2C_OLED_NUM); // This is the crucial missing step
 
     // --- Step 2: Initialize RTOS objects (Mutexes and Queues) ---
     g_command_status_mutex = xSemaphoreCreateMutex();
@@ -1054,6 +1051,17 @@ void app_main(void)
     {
         local_ds3231_available = true;
         ESP_LOGI(TAG, "DS3231 RTC initialized successfully.");
+
+        // On a cold boot (not a wakeup from deep sleep), apply the default configuration.
+        if (cause == ESP_SLEEP_WAKEUP_UNDEFINED)
+        {
+            ESP_LOGI(TAG, "Cold boot detected. Applying DS3231 default configuration.");
+            if (xSemaphoreTake(g_i2c_bus_mutex, portMAX_DELAY))
+            {
+                ds3231_set_default_config(&g_rtc);
+                xSemaphoreGive(g_i2c_bus_mutex);
+            }
+        }
 
         // Attempt to read the time from the RTC.
         if (xSemaphoreTake(g_i2c_bus_mutex, portMAX_DELAY))
