@@ -526,7 +526,7 @@ void render_sensor_callback(void)
 void page_fs_stats_render_callback(void)
 {
     char new_lines[8][21] = {{0}}; // Initialize all lines to empty
-    snprintf(new_lines[0], sizeof(new_lines[0]), "File System Stats");
+    snprintf(new_lines[0], sizeof(new_lines[0]), "File Sys. Stats");
 
     int file_count = -2; // Default to loading state
     int free_space_mb = -2;
@@ -842,19 +842,29 @@ static void draw_status_icons(void)
     if (is_usb_msc)
     {
         // Draw a new 9x6 pixel USB "trident" symbol and suppress other icons.
-        // Draw a new 12x6 pixel USB plug symbol and suppress other icons.
-        current_icon_x -= 13; // Make space for the 12-pixel wide icon.
+        // Draw a new 12x6 pixel USB plug icon based on the provided pixel map.
+        current_icon_x -= 13; // Make space for the 12-pixel wide icon + 1px padding.
         int usb_x = current_icon_x;
         int usb_y = 1; // Start at y=1 to fit within the 8-pixel high title bar.
 
-        // Draw the outer shell of the USB plug (a 12x6 rounded rectangle)
-        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 1, usb_y, 10, 1, !is_inverted);    // Top edge
-        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 1, usb_y + 5, 10, 1, !is_inverted);  // Bottom edge
-        i2c_oled_fill_rect(s_oled_i2c_num, usb_x, usb_y + 1, 1, 4, !is_inverted);       // Left side
-        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 11, usb_y + 1, 1, 4, !is_inverted);   // Right side
-
-        // Draw the internal "tongue" of the USB-A socket (2px high, centered, with 1px gaps)
-        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 2, usb_y + 2, 8, 2, !is_inverted);
+        // Line 0: 000011111000
+        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 4, usb_y, 5, 1, !is_inverted);
+        // Line 1: 000100001111
+        i2c_oled_draw_pixel(s_oled_i2c_num, usb_x + 3, usb_y + 1, !is_inverted);
+        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 8, usb_y + 1, 4, 1, !is_inverted);
+        // Lines 2 & 3: 111100101001
+        i2c_oled_fill_rect(s_oled_i2c_num, usb_x, usb_y + 2, 4, 2, !is_inverted);
+        i2c_oled_draw_pixel(s_oled_i2c_num, usb_x + 6, usb_y + 2, !is_inverted);
+        i2c_oled_draw_pixel(s_oled_i2c_num, usb_x + 6, usb_y + 3, !is_inverted);
+        i2c_oled_draw_pixel(s_oled_i2c_num, usb_x + 8, usb_y + 2, !is_inverted);
+        i2c_oled_draw_pixel(s_oled_i2c_num, usb_x + 8, usb_y + 3, !is_inverted);
+        i2c_oled_draw_pixel(s_oled_i2c_num, usb_x + 11, usb_y + 2, !is_inverted);
+        i2c_oled_draw_pixel(s_oled_i2c_num, usb_x + 11, usb_y + 3, !is_inverted);
+        // Line 4: 000100001111
+        i2c_oled_draw_pixel(s_oled_i2c_num, usb_x + 3, usb_y + 4, !is_inverted);
+        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 8, usb_y + 4, 4, 1, !is_inverted);
+        // Line 5: 000011111000
+        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 4, usb_y + 5, 5, 1, !is_inverted);
     }
     else
     {
