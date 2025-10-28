@@ -1414,15 +1414,9 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
  */
 static esp_err_t api_sensordata_handler(httpd_req_t *req)
 {
-    // 1. Request a data refresh from the datalogger task
-    if (g_datalogger_cmd_queue != NULL)
-    {
-        xQueueSend(g_datalogger_cmd_queue, &(datalogger_cmd_msg_t){.cmd = DATALOGGER_CMD_FORCE_REFRESH}, 0);
-    }
-
-    // 2. Give a moment for the refresh to potentially happen.
-    // The datalogger task itself throttles requests, so this is safe.
-    vTaskDelay(pdMS_TO_TICKS(50));
+    // With the new architecture, the datalogger task updates the sensor buffer
+    // autonomously every 5 seconds. We no longer need to force a refresh.
+    // We simply read and return the latest data available in the buffer.
 
     // 3. Read the latest data from the shared buffer
     sensor_buffer_t data;

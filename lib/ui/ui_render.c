@@ -89,7 +89,7 @@ typedef struct
     char value[21]; // Max 20 chars for OLED line + null terminator
 } config_item_t;
 
-#define MAX_CONFIG_ITEMS 9 // Correctly define the number of items
+#define MAX_CONFIG_ITEMS 9      // Correctly define the number of items
 #define NEW_MAX_CONFIG_ITEMS 10 // Increased by 1 for b_volt_threshold
 static config_item_t s_config_items[NEW_MAX_CONFIG_ITEMS];
 
@@ -124,7 +124,8 @@ static sensor_buffer_t s_local_sensor_buffer;
 esp_err_t uiRender_init(i2c_master_bus_handle_t bus_handle, uint8_t oled_i2c_addr)
 {
     esp_err_t ret = i2c_oled_bus_init(bus_handle, oled_i2c_addr);
-    if (ret != ESP_OK) return ret;
+    if (ret != ESP_OK)
+        return ret;
     s_oled_initialized = true;
     return ESP_OK;
 }
@@ -261,9 +262,11 @@ void render_about_callback(void)
 
     i2c_oled_clear(s_oled_i2c_num);
 
-    if (s_about_page_view == 0) { // QR Code View
+    if (s_about_page_view == 0)
+    { // QR Code View
         // If the QR code is not cached, generate it once.
-        if (!s_qr_code_cached) {
+        if (!s_qr_code_cached)
+        {
             esp_qrcode_config_t cfg = ESP_QRCODE_CONFIG_DEFAULT();
             cfg.display_func = oled_display_qr_code; // This will draw to the main buffer
             esp_qrcode_generate(&cfg, PROJECT_GITHUB_URL);
@@ -272,12 +275,16 @@ void render_about_callback(void)
         }
         // Copy the cached QR code to the main screen buffer for display.
         i2c_oled_load_buffer(s_qr_code_buffer, sizeof(s_qr_code_buffer));
-    } else if (s_about_page_view == 1) { // Text URL View
+    }
+    else if (s_about_page_view == 1)
+    { // Text URL View
         write_inverted_line(0, "About");
         write_padded_line(2, "Project URL:");
         write_padded_line(4, "github.com/maunope/");
         write_padded_line(5, "DiffPressSensor");
-    } else { // Build Info View
+    }
+    else
+    { // Build Info View
         write_inverted_line(0, "About");
         write_padded_line(2, "Build Info");
         write_padded_line(4, "Date: " __DATE__);
@@ -369,14 +376,14 @@ void page_web_server_on_btn(void)
     app_command_t cmd = {.cmd = APP_CMD_STOP_WEB_SERVER, .mode = 0};
     xQueueSend(g_app_cmd_queue, &cmd, 0);
     s_web_qr_code_cached = false; // Invalidate cache for next time
-    
+
     // Go back to the main menu.
     // We don't use menu_cancel_on_btn() here because we might not have come from a menu.
     // This ensures we always land on the main menu screen.
     current_page = 0;
     current_item = 0;
-    s_menu_mode = true;     // Switch to menu mode
-    s_current_page = NULL;  // Let the main loop render the menu
+    s_menu_mode = true;    // Switch to menu mode
+    s_current_page = NULL; // Let the main loop render the menu
 }
 
 /**
@@ -495,7 +502,6 @@ void render_sensor_callback(void)
         }
         write_padded_line(4, line_buf);
     }
-
 }
 
 /**
@@ -667,7 +673,7 @@ void render_cmd_feedback_screen(void)
         {
             write_padded_line(3, "Timeout!");
             i2c_oled_update_screen(s_oled_i2c_num); // Show "Timeout" message
-            vTaskDelay(pdMS_TO_TICKS(1000)); // Wait for 1 second
+            vTaskDelay(pdMS_TO_TICKS(1000));        // Wait for 1 second
 
             // Reset state
             s_cmd_pending_mode = false;
@@ -755,10 +761,12 @@ static void draw_status_icons(void)
     bool sd_write_failed = (s_local_sensor_buffer.writeStatus == WRITE_STATUS_FAIL);
     bool hf_mode_enabled = s_local_sensor_buffer.high_freq_mode_enabled;
     bool sensors_ok = s_local_sensor_buffer.bmp280_available &&
-                        !s_local_sensor_buffer.sensor_read_error &&
-                        s_local_sensor_buffer.d6fph_available &&
-                        s_local_sensor_buffer.ds3231_available;
+                      !s_local_sensor_buffer.sensor_read_error &&
+                      s_local_sensor_buffer.d6fph_available &&
+                      s_local_sensor_buffer.ds3231_available;
     bool is_paused = s_local_sensor_buffer.datalogger_paused;
+
+    bool is_usb_msc = (s_local_sensor_buffer.writeStatus == WRITE_STATUS_USB_MSC);
 
     // The title bar is inverted on most screens. We render the icon with a non-inverted
     // color (white on black) only for specific full-screen pages that have a black background at the top.
@@ -813,55 +821,95 @@ static void draw_status_icons(void)
     // --- Draw Conditional Icons (SD Error and HF Mode) ---
     int current_icon_x = 114; // Start from the left edge of the battery icon
 
-    // If SD card write failed or a sensor is missing, draw "!!"
-    if (sd_write_failed || !sensors_ok)
+    if (is_usb_msc)
     {
-        current_icon_x -= 8; // Move left to make space
-        int warning_y = 1;
-        // Draw "!!" using pixel-based rectangles
-        i2c_oled_fill_rect(s_oled_i2c_num, current_icon_x, warning_y, 1, 4, !is_inverted);
-        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x, warning_y + 5, !is_inverted);
-        i2c_oled_fill_rect(s_oled_i2c_num, current_icon_x + 2, warning_y, 1, 4, !is_inverted);
-        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 2, warning_y + 5, !is_inverted);
-    }
+        // Draw USB symbol and suppress other icons
+        current_icon_x -= 10; // Make space for USB symbol
+        // Corrected C Code Snippet for a Horizontal USB Symbol (6 pixels high)
 
-    // If paused, draw 'P'
-    if (is_paused)
-    {
-        current_icon_x -= 8; // Move left to make space
-        int paused_y = 1;
-        // Draw 'P'
-        i2c_oled_fill_rect(s_oled_i2c_num, current_icon_x, paused_y, 1, 6, !is_inverted);
-        i2c_oled_fill_rect(s_oled_i2c_num, current_icon_x + 1, paused_y, 2, 1, !is_inverted);
-        i2c_oled_fill_rect(s_oled_i2c_num, current_icon_x + 1, paused_y + 2, 2, 1, !is_inverted);
-        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 3, paused_y + 1, !is_inverted);
-    }
+        // Start position: usb_x is the left edge, usb_y is the top edge (e.g., usb_y = 2)
+        // This symbol will occupy pixels from usb_y to usb_y + 5 (6 pixels high)
+        int usb_x = current_icon_x;
+        int usb_y = 2;
 
-    // If HF mode is enabled, draw ">>"
-    if (hf_mode_enabled)
+
+        // --- 1. Center Line (Vertical) ---
+        // This was the horizontal line; it's now a vertical line 9 pixels tall (x = usb_x + 3)
+        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 3, usb_y, 1, 9, !is_inverted);
+
+        // --- 2. Top Terminal (Square) - Rotated from Left Terminal ---
+        // Vertical line connecting the central line to the top left (now top right) terminal
+        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 4, usb_y + 1, 2, 1, !is_inverted); // Connectors are now horizontal
+        // Square (or box) terminal at the far top (was top left)
+        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 4, usb_y, 2, 2, !is_inverted);
+
+        // --- 3. Bottom Terminal (Circle/Cross) - Rotated from Right Terminal ---
+        // Vertical line connecting the central line to the bottom right (now bottom left) terminal
+        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 4, usb_y + 7, 2, 1, !is_inverted); // Connectors are horizontal
+        // "Circle" terminal at the far bottom (was top right)
+        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 6, usb_y + 6, 3, 1, !is_inverted); // Horizontal bar (now vertical)
+        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 7, usb_y + 7, 1, 3, !is_inverted); // Vertical bar (now horizontal)
+
+        // --- 4. Middle-Right Terminal (Triangle/Arrowhead) - Rotated from Bottom Terminal ---
+        // Vertical line connecting the central line to the middle-right terminal
+        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 4, usb_y + 4, 2, 1, !is_inverted); // Connectors are horizontal
+        // Simple 3-pixel "triangle" terminal at the center right
+        i2c_oled_draw_pixel(s_oled_i2c_num, usb_x + 5, usb_y + 3, !is_inverted); // Top edge (was left edge)
+        i2c_oled_draw_pixel(s_oled_i2c_num, usb_x + 5, usb_y + 5, !is_inverted); // Bottom edge (was right edge)
+        i2c_oled_draw_pixel(s_oled_i2c_num, usb_x + 6, usb_y + 4, !is_inverted); // Tip (was bottom tip)
+    }
+    else
     {
-        current_icon_x -= 8; // Move left again
-        int hf_icon_y = 1;
-        // Draw ">>" using pixels
-        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 1, hf_icon_y, !is_inverted);
-        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x, hf_icon_y + 1, !is_inverted);
-        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 1, hf_icon_y + 2, !is_inverted);
-        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 1, hf_icon_y + 3, !is_inverted);
-        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x, hf_icon_y + 4, !is_inverted);
-        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 1, hf_icon_y + 5, !is_inverted);
-        // Second '>'
-        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 4, hf_icon_y, !is_inverted);
-        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 3, hf_icon_y + 1, !is_inverted);
-        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 4, hf_icon_y + 2, !is_inverted);
-        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 4, hf_icon_y + 3, !is_inverted);
-        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 3, hf_icon_y + 4, !is_inverted);
-        i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 4, hf_icon_y + 5, !is_inverted);
+        // If SD card write failed or a sensor is missing, draw "!!"
+        if (sd_write_failed || !sensors_ok)
+        {
+            current_icon_x -= 8; // Move left to make space
+            int warning_y = 1;
+            // Draw "!!" using pixel-based rectangles
+            i2c_oled_fill_rect(s_oled_i2c_num, current_icon_x, warning_y, 1, 4, !is_inverted);
+            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x, warning_y + 5, !is_inverted);
+            i2c_oled_fill_rect(s_oled_i2c_num, current_icon_x + 2, warning_y, 1, 4, !is_inverted);
+            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 2, warning_y + 5, !is_inverted);
+        }
+
+        // If paused, draw 'P'
+        if (is_paused)
+        {
+            current_icon_x -= 8; // Move left to make space
+            int paused_y = 1;
+            // Draw 'P'
+            i2c_oled_fill_rect(s_oled_i2c_num, current_icon_x, paused_y, 1, 6, !is_inverted);
+            i2c_oled_fill_rect(s_oled_i2c_num, current_icon_x + 1, paused_y, 2, 1, !is_inverted);
+            i2c_oled_fill_rect(s_oled_i2c_num, current_icon_x + 1, paused_y + 2, 2, 1, !is_inverted);
+            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 3, paused_y + 1, !is_inverted);
+        }
+
+        // If HF mode is enabled, draw ">>"
+        if (hf_mode_enabled)
+        {
+            current_icon_x -= 8; // Move left again
+            int hf_icon_y = 1;
+            // Draw ">>" using pixels
+            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 1, hf_icon_y, !is_inverted);
+            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x, hf_icon_y + 1, !is_inverted);
+            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 1, hf_icon_y + 2, !is_inverted);
+            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 1, hf_icon_y + 3, !is_inverted);
+            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x, hf_icon_y + 4, !is_inverted);
+            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 1, hf_icon_y + 5, !is_inverted);
+            // Second '>'
+            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 4, hf_icon_y, !is_inverted);
+            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 3, hf_icon_y + 1, !is_inverted);
+            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 4, hf_icon_y + 2, !is_inverted);
+            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 4, hf_icon_y + 3, !is_inverted);
+            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 3, hf_icon_y + 4, !is_inverted);
+            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 4, hf_icon_y + 5, !is_inverted);
+        }
     }
 }
 
 /**
  * @brief Enters the command feedback UI mode.
- * 
+ *
  * This function switches the UI to a "Loading..." screen and sets up a timeout.
  * It's used for long-running, asynchronous operations like formatting the SD card.
  * @param timeout_ms The timeout duration in milliseconds.
@@ -885,7 +933,6 @@ static void enter_cmd_pending_mode(uint32_t timeout_ms, post_cmd_action_t post_a
 void uiRender_task(void *pvParameters)
 {
     ui_event_queue = xQueueCreate(UI_QUEUE_LEN, sizeof(ui_event_msg_t));
-   
 
     uint64_t last_sensor_refresh_ms = 0;
     const uint32_t sensor_refresh_interval_ms = 5000; // 5 seconds
@@ -967,19 +1014,6 @@ void uiRender_task(void *pvParameters)
             }
         }
 
-        // --- Periodic Refresh Logic ---
-        uint64_t current_time_ms = esp_timer_get_time() / 1000;
-        if (!s_menu_mode && s_current_page == &sensor_page && (current_time_ms - last_sensor_refresh_ms > sensor_refresh_interval_ms))
-        {
-            // Send command directly to datalogger to prevent resetting the main inactivity timer.
-            if (g_datalogger_cmd_queue != NULL)
-            {
-                datalogger_command_t cmd = DATALOGGER_CMD_FORCE_REFRESH;
-                xQueueSend(g_datalogger_cmd_queue, &cmd, 0);
-            }
-            last_sensor_refresh_ms = current_time_ms;
-        }
-
         // Centralized buffer copy for rendering
         if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)) == pdTRUE)
         {
@@ -1049,17 +1083,6 @@ void menu_sensor_on_btn(void)
     xQueueSend(g_app_cmd_queue, &cmd_file_count, 0);
 
     s_menu_mode = false;
-    // Force a refresh when entering the page to get immediate data.
-    // ESP_LOGI(TAG, "menu_sensor_on_btn called, returning to sensor page. 3");
-    if (g_app_cmd_queue != NULL)
-    {
-        app_command_t cmd = {.cmd = APP_CMD_REFRESH_SENSOR_DATA, .mode = 0};
-        xQueueSend(g_app_cmd_queue, &cmd, 0);
-    }
-    else
-    {
-        ESP_LOGE(TAG, "App command queue not initialized!");
-    }
     s_current_page = &sensor_page;
 }
 

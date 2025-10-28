@@ -1,4 +1,5 @@
-#pragma once
+#ifndef SRC_BUFFERS_H_
+#define SRC_BUFFERS_H_
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -13,7 +14,8 @@
 typedef enum {
     WRITE_STATUS_OK,
     WRITE_STATUS_FAIL,
-    WRITE_STATUS_UNKNOWN
+    WRITE_STATUS_UNKNOWN,
+    WRITE_STATUS_USB_MSC
 } write_status_t;
 
 typedef enum {
@@ -92,3 +94,4 @@ typedef enum {
 
 extern volatile command_status_t g_command_status;
 extern SemaphoreHandle_t g_command_status_mutex;
+#endif // SRC_BUFFERS_H_

@@ -18,6 +18,8 @@
 
 static const char *TAG = "DataloggerTask";
 
+#define SENSOR_REFRESH_INTERVAL_MS 5000
+
 /**
  * @brief Reads all relevant sensors and updates the global sensor buffer.
  *
@@ -120,6 +122,25 @@ static void update_sensor_buffer(datalogger_task_params_t *params)
     }
 }
 
+/**
+ * @brief Reads only the battery status and updates the global sensor buffer.
+ *
+ * This is a lightweight version of update_sensor_buffer, intended for quick
+ * UI updates when only the power state changes (e.g., USB connected/disconnected).
+ */
+static void update_battery_status(void)
+{
+    if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(100)) == pdTRUE)
+    {
+        g_sensor_buffer.battery_voltage = battery_reader_get_voltage();
+        g_sensor_buffer.battery_percentage = battery_reader_get_percentage();
+        g_sensor_buffer.battery_externally_powered = battery_is_externally_powered();
+        xSemaphoreGive(g_sensor_buffer_mutex);
+    } else {
+        ESP_LOGE(TAG, "Failed to acquire mutex to update battery status.");
+    }
+}
+
 void datalogger_task(void *pvParameters)
 {
     // The BMP280 device handle is passed as the task parameter.
@@ -138,32 +159,29 @@ void datalogger_task(void *pvParameters)
     // Perform an initial sensor update right after startup.
     update_sensor_buffer(params);
     // Track the last refresh time to avoid polling sensors too frequently.
-    static uint64_t last_refresh_time_ms = 0;
+    uint64_t last_sensor_refresh_ms = 0;
     static bool is_logging_paused = false;
     static time_t last_sleep_check_ts = 0;
 
     while (1)
     {
         datalogger_cmd_msg_t msg;
+        uint64_t current_time_ms = esp_timer_get_time() / 1000;
 
         // Check for a command without blocking. The main timing is handled by the vTaskDelay at the end.
         if (xQueueReceive(g_datalogger_cmd_queue, &msg, 0) == pdPASS)
         {
             if (msg.cmd == DATALOGGER_CMD_FORCE_REFRESH)
             {
-                // UI requested a refresh. Just update the buffer, don't write to SD.
-                ESP_LOGD(TAG, "UI refresh requested.");
-                uint64_t now = esp_timer_get_time() / 1000;
-                if (now - last_refresh_time_ms > 2000)
-                {
-                    update_sensor_buffer(params);
-                    last_refresh_time_ms = now;
-                }
-                else
-                {
-                    ESP_LOGD(TAG, "Skipping sensor refresh, too recent.");
-                }
-                // No need to set refresh_requested as we handle it immediately
+                // A full refresh was requested.
+                ESP_LOGD(TAG, "Full sensor refresh requested.");
+                update_sensor_buffer(params);
+                last_sensor_refresh_ms = current_time_ms;
+            }
+            else if (msg.cmd == DATALOGGER_CMD_REFRESH_BATTERY)
+            {
+                ESP_LOGD(TAG, "Battery status refresh requested.");
+                update_battery_status();
             }
             else if (msg.cmd == DATALOGGER_CMD_PAUSE_WRITES)
             {
@@ -308,15 +326,21 @@ void datalogger_task(void *pvParameters)
             continue;
         }
 
+        // --- Autonomous Sensor Refresh Logic ---.
+        if (current_time_ms - last_sensor_refresh_ms >= SENSOR_REFRESH_INTERVAL_MS)
+        {
+            // The datalogger task is the sole owner of sensor updates.
+            // It updates the buffer periodically, and other tasks read from it.
+            update_sensor_buffer(params);
+            last_sensor_refresh_ms = current_time_ms;
+        }
+
         // Check if enough time (in seconds) has passed for the next log.
         // ESP_LOGI(TAG, "Current TS: %lld, Last Write TS: %lld, Interval: %lu ms", (long long)current_ts, (long long)last_write_ts, (unsigned long)current_log_interval);
-        if (!is_logging_paused && (current_ts - last_write_ts) * 1000 >= current_log_interval)
+        if (!is_logging_paused && (current_ts - last_write_ts) * 1000 >= current_log_interval && last_write_ts > 0)
         {
             //  ESP_LOGI(TAG, "Scheduled log interval reached. Logging data.");
             // It's time for a scheduled log. This takes priority.
-            // Update sensors and write to SD card.
-            update_sensor_buffer(params);
-            last_refresh_time_ms = esp_timer_get_time() / 1000;
 
             // Create a local copy of the buffer for logging and writing to SD
             sensor_buffer_t local_buffer;
@@ -400,6 +424,8 @@ void datalogger_task(void *pvParameters)
                 else
                 {
                     g_sensor_buffer.writeStatus = WRITE_STATUS_FAIL;
+                    // Also update the timestamp to prevent immediate retries.
+                    g_sensor_buffer.last_successful_write_ts = current_ts;
                     ESP_LOGE(TAG, "Failed to write to SD card after all retries.");
                 }
                 xSemaphoreGive(g_sensor_buffer_mutex);
@@ -416,6 +442,6 @@ void datalogger_task(void *pvParameters)
         }
 
         // This is the main delay for the task loop.
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }

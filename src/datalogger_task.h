@@ -9,7 +9,8 @@
 // --- Datalogger command queue ---
 typedef enum {
     DATALOGGER_CMD_NONE,
-    DATALOGGER_CMD_FORCE_REFRESH,
+    DATALOGGER_CMD_FORCE_REFRESH, // For a full sensor refresh
+    DATALOGGER_CMD_REFRESH_BATTERY, // For a battery-only refresh
     DATALOGGER_CMD_PAUSE_WRITES,
     DATALOGGER_CMD_ROTATE_FILE,
     DATALOGGER_CMD_DELETE_FILE,

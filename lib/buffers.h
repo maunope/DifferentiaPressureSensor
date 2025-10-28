@@ -20,7 +20,8 @@ typedef enum {
 typedef enum {
     WRITE_STATUS_OK,
     WRITE_STATUS_FAIL,
-    WRITE_STATUS_UNKNOWN
+    WRITE_STATUS_UNKNOWN,
+    WRITE_STATUS_USB_MSC
 } write_status_t;
 
 typedef enum {
@@ -28,7 +29,7 @@ typedef enum {
     WEB_SERVER_STARTING,
     WEB_SERVER_RUNNING,
     WEB_SERVER_FAILED,
-    WEB_SERVER_USB_CONNECTED,
+    WEB_SERVER_USB_CONNECTED
 } web_server_status_t;
 
 // Shared sensor data buffer
@@ -85,8 +86,7 @@ typedef enum {
     APP_CMD_FORMAT_SD_CARD,
     APP_CMD_DELETE_FILE,
     APP_CMD_ACTIVITY_DETECTED,
-    APP_CMD_SYNC_RTC_NTP,
-    APP_CMD_REFRESH_SENSOR_DATA,
+    APP_CMD_SYNC_RTC_NTP,    
     APP_CMD_START_WEB_SERVER,
     APP_CMD_STOP_WEB_SERVER,
     APP_CMD_SET_DATALOGGER_MODE,

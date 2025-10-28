@@ -104,6 +104,7 @@ const config_params_t *g_cfg = NULL;
 
 static uint64_t last_activity_ms = 0;
 static bool is_usb_connected_state = false;
+static bool is_externally_powered_state = false;
 
 static web_server_fsm_state_t s_web_server_state = WEB_SERVER_FSM_IDLE;
 
@@ -113,9 +114,9 @@ static void handle_battery_refresh(void)
     ESP_LOGI(TAG, "Refreshing battery status on USB state change.");
     if (g_datalogger_cmd_queue != NULL)
     {
-        if (xQueueSend(g_datalogger_cmd_queue, &(datalogger_cmd_msg_t){.cmd = DATALOGGER_CMD_FORCE_REFRESH}, 0) != pdPASS)
+        if (xQueueSend(g_datalogger_cmd_queue, &(datalogger_cmd_msg_t){.cmd = DATALOGGER_CMD_REFRESH_BATTERY}, 0) != pdPASS)
         {
-            ESP_LOGE(TAG, "Failed to send battery refresh command to datalogger queue");
+            ESP_LOGE(TAG, "Failed to send battery-only refresh command to datalogger queue");
         }
     }
 }
@@ -669,14 +670,6 @@ void main_task(void *pvParameters)
                     xTaskCreate(uiRender_task, "uiRender", 4096, NULL, 6, &g_uiRender_task_handle);
                 }
                 break;
-            case APP_CMD_REFRESH_SENSOR_DATA:
-                ESP_LOGD(TAG, "CMD: Refresh sensor data");
-                if (g_datalogger_cmd_queue != NULL)
-                {
-                    datalogger_cmd_msg_t logger_cmd = {.cmd = DATALOGGER_CMD_FORCE_REFRESH};
-                    xQueueSend(g_datalogger_cmd_queue, &logger_cmd, 0);
-                }
-                break;
             case APP_CMD_START_WEB_SERVER:
                 ESP_LOGI(TAG, "CMD: Start web server");
                 handle_start_web_server();
@@ -786,9 +779,21 @@ void main_task(void *pvParameters)
             wifi_manager_connect(g_cfg->wifi_ssid, g_cfg->wifi_password);
         }
 
-        // --- Main Sleep/Wake Logic ---
-        // --- Power Saving & UI Inactivity Logic ---
         uint64_t current_time_ms = esp_timer_get_time() / 1000ULL;
+
+        // --- Power State Change Detection (for any USB port) ---
+        bool is_externally_powered = battery_is_externally_powered();
+        if (is_externally_powered && !is_externally_powered_state) {
+            // Power was just connected to either port.
+            ESP_LOGI(TAG, "External power connected.");
+            handle_battery_refresh();
+            is_externally_powered_state = true;
+        } else if (!is_externally_powered && is_externally_powered_state) {
+            // Power was just disconnected from either port.
+            ESP_LOGI(TAG, "External power disconnected.");
+            handle_battery_refresh();
+            is_externally_powered_state = false;
+        }
 
         // IMPORTANT, this also affect s the handler of SLEEP NOW message
         // If USB is mounted by a host, treat it as continuous activity to prevent deep sleep.
@@ -799,50 +804,54 @@ void main_task(void *pvParameters)
             last_activity_ms = current_time_ms;
         }
 
-        // The UI inactivity check for turning off the OLED should be separate.
-        bool ui_is_inactive = (current_time_ms - last_activity_ms > g_cfg->inactivity_timeout_ms) && (last_activity_ms != 0);
-
-        // --- OLED Power-Off Logic ---
-        // If UI is inactive but the screen is still on, turn it off.
-        if (g_uiRender_task_handle != NULL && ui_is_inactive && !web_server_active)
+        // --- USB Mass Storage Connection Logic (Data Port Specific) ---
+        if (spi_sdcard_is_usb_connected() && !is_usb_connected_state)
         {
-            // UI timeout occurred, but no new write yet. Just turn off the screen.
-            oled_power_off();
-        }
-
-        // --- USB Connection Logic ---
-        // This block handles the transition between SD card only mode and USB Mass Storage mode.
-        bool is_externally_powered = battery_is_externally_powered();
-
-        if (is_externally_powered && !is_usb_connected_state)
-        {
-            // USB was just connected (or was connected at boot).
-            // USB has absolute priority. If the web server is running, stop it.
+            // USB data port was just connected.
+            // It has absolute priority. If the web server is running, stop it.
             if (local_buffer.web_server_status == WEB_SERVER_RUNNING || local_buffer.web_server_status == WEB_SERVER_STARTING)
             {
                 ESP_LOGI(TAG, "USB connected, stopping web server to grant exclusive access.");
                 handle_stop_web_server();
             }
 
-            // Switch to full USB MSC mode.
-            ESP_LOGI(TAG, "USB power detected. Initializing for MSC.");
+            ESP_LOGI(TAG, "USB data port connected. Initializing for MSC.");
             // De-init SD card first to release resources for TinyUSB to use.
             spi_sdcard_deinit();
             // Now, do a full init which includes TinyUSB.
             spi_sdcard_full_init();
             is_usb_connected_state = true;
-            handle_battery_refresh();
+
+            // Set the write status to indicate USB is connected, so the UI can show the icon.
+            if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)))
+            {
+                g_sensor_buffer.writeStatus = WRITE_STATUS_USB_MSC;
+                xSemaphoreGive(g_sensor_buffer_mutex);
+            }
         }
         else if (!is_externally_powered && is_usb_connected_state)
         {
             // USB was just disconnected.
             ESP_LOGI(TAG, "USB disconnected. Re-initializing SD card for logging.");
-            // De-init everything to be safe.
             spi_sdcard_deinit();
             // Re-init in SD-only mode for the datalogger.
             spi_sdcard_init_sd_only();
             is_usb_connected_state = false;
-            handle_battery_refresh();
+
+            // USB is disconnected, reset the status so the UI shows normal icons.
+            if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50))) {
+                g_sensor_buffer.writeStatus = WRITE_STATUS_UNKNOWN; // Reset status
+                xSemaphoreGive(g_sensor_buffer_mutex);
+            }
+        }
+
+        // --- UI Inactivity Logic ---
+        bool ui_is_inactive = (current_time_ms - last_activity_ms > g_cfg->inactivity_timeout_ms) && (last_activity_ms != 0);
+        // If UI is inactive but the screen is still on, turn it off.
+        if (g_uiRender_task_handle != NULL && ui_is_inactive && !web_server_active)
+        {
+            // UI timeout occurred, but no new write yet. Just turn off the screen.
+            oled_power_off();
         }
 
         vTaskDelay(pdMS_TO_TICKS(10));
