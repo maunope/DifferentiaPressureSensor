@@ -42,6 +42,15 @@ The top-right corner of the screen displays persistent icons that provide at-a-g
     +--------------------+
     ```
 
+*   **USB Connection Icon**: When the device is connected to a computer and mounted as a USB drive, a **USB plug icon** will appear. This indicates that the SD card is accessible from your computer. While this icon is active, other status icons (like SD Error, Paused, and High-Frequency) are hidden, as logging is temporarily suspended.
+
+    ```
+    +--------------------+
+    | Main Menu   [plug] <-- USB Icon
+    | ...                |
+    +--------------------+
+    ```
+
 *   **Paused Icon**: When data logging is paused via the "Sampling Mode" menu, a **P** icon will appear to the left of the battery icon. In this mode, the device will not write any new data to the SD card and will not enter deep sleep automatically.
 
     ```
