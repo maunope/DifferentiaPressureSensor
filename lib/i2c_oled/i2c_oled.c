@@ -54,10 +54,7 @@ void i2c_oled_draw_rect(i2c_port_t i2c_num, int x, int y, int width, int height,
     }
 }
 
-void i2c_oled_write_char(i2c_port_t i2c_num, uint8_t row, uint8_t col, char c) {
-    char str[2] = {c, '\0'};
-    i2c_oled_write_text(i2c_num, row, col, str);
-}
+
 
 
 void i2c_oled_fill_rect(i2c_port_t i2c_num, int x, int y, int width, int height, bool on) {
@@ -68,7 +65,7 @@ void i2c_oled_fill_rect(i2c_port_t i2c_num, int x, int y, int width, int height,
     }
 }
 
-void i2c_oled_draw_bitmap(i2c_port_t i2c_num, int x, int y, const uint8_t *bitmap, bool on)
+void i2c_oled_draw_bitmap(i2c_port_t i2c_num, int x, int y, const uint8_t *bitmap, bool on, bool inverted)
 {
     if (!bitmap)
     {
@@ -82,10 +79,17 @@ void i2c_oled_draw_bitmap(i2c_port_t i2c_num, int x, int y, const uint8_t *bitma
         {
             // Check if the bit for the current column is set
             // We check from the most significant bit (leftmost pixel) to the least
-            if ((row_pixels << col) & 0x80)
-            {
-                i2c_oled_draw_pixel(i2c_num, x + col, y + row, on);
+            bool is_pixel_on = (row_pixels << col) & 0x80;
+            bool draw_pixel_on;
+
+            if (is_pixel_on) {
+                // This is a foreground pixel from the bitmap
+                draw_pixel_on = inverted ? !on : on;
+            } else {
+                // This is a background pixel. It should be the opposite of the foreground.
+                draw_pixel_on = inverted ? on : !on;
             }
+            i2c_oled_draw_pixel(i2c_num, x + col, y + row, draw_pixel_on);
         }
     }
 }
@@ -204,16 +208,37 @@ void i2c_oled_update_screen(i2c_port_t i2c_num)
  * @param col The column to start writing at (0-20).
  * @param text The null-terminated string to write.
  */
-void i2c_oled_write_text(i2c_port_t i2c_num, uint8_t row, uint8_t col, const char *text) {
-    uint16_t x = col * 6;
-    uint16_t y = row * 8;
+void i2c_oled_write_text(i2c_port_t i2c_num, uint8_t row, uint8_t col, uint8_t row_shift, uint8_t col_shift, const char *text) {
+    uint16_t x = (col * 6) + col_shift;
+    uint16_t y = (row * 8) + row_shift;
+
     while (*text) {
+        if (x + 6 > OLED_WIDTH) break; // Stop if character would go off-screen
+
         unsigned char c = *text;
-        // The font array now covers all 256 characters.
-        // We can directly use the character code as an index.
-        // Non-printable characters (e.g., 0-31) are defined as blank glyphs in the font array.
+        const uint8_t* font_char = font5x7[c];
+
         for (int i = 0; i < 5; i++) {
-            s_screen_buffer[x + i + y * OLED_WIDTH / 8] = font5x7[c][i];
+            uint8_t font_byte = font_char[i];
+            int current_x = x + i;
+
+            // Calculate page and bit offset for the shift
+            int page = y / 8;
+            int shift = y % 8;
+
+            if (page < OLED_HEIGHT / 8) {
+                // Clear the 8-pixel column before drawing to prevent artifacts
+                s_screen_buffer[current_x + page * OLED_WIDTH] &= ~(0xFF << shift);
+                // Write the top part of the character
+                s_screen_buffer[current_x + page * OLED_WIDTH] |= (font_byte << shift);
+            }
+
+            if (shift > 0 && (page + 1) < OLED_HEIGHT / 8) {
+                // Clear the area in the next page
+                s_screen_buffer[current_x + (page + 1) * OLED_WIDTH] &= ~(0xFF >> (8 - shift));
+                // Write the bottom part of the character that spills into the next page
+                s_screen_buffer[current_x + (page + 1) * OLED_WIDTH] |= (font_byte >> (8 - shift));
+            }
         }
         x += 6; // 5 for char, 1 for space
         text++;
@@ -244,7 +269,7 @@ void i2c_oled_write_inverted_text(i2c_port_t i2c_num, uint8_t row, uint8_t col, 
     uint8_t line_buffer[128];
     memset(line_buffer, 0xFF, sizeof(line_buffer)); // Fill with 1s for an inverted background
 
-    uint8_t current_col = col * 6;
+    uint16_t current_col = col * 6;
 
     while (*text && current_col < 128) {
         if (*text >= 32 && *text <= 127) {
@@ -256,7 +281,7 @@ void i2c_oled_write_inverted_text(i2c_port_t i2c_num, uint8_t row, uint8_t col, 
         }
         text++;
     }
-    memcpy(&s_screen_buffer[row * OLED_WIDTH], line_buffer, sizeof(line_buffer));
+    memcpy(&s_screen_buffer[(row) * OLED_WIDTH], line_buffer, sizeof(line_buffer));
 }
 
 void i2c_oled_get_buffer(uint8_t* out_buffer, size_t len) {

@@ -275,12 +275,11 @@ esp_err_t i2c_oled_bus_init(i2c_master_bus_handle_t bus_handle, uint8_t i2c_addr
 void i2c_oled_bus_deinit(void);
 void i2c_oled_send_init_commands(i2c_port_t i2c_num);
 void i2c_oled_clear(i2c_port_t i2c_num);
-void i2c_oled_write_text(i2c_port_t i2c_num, uint8_t row, uint8_t col, const char *text);
+void i2c_oled_write_text(i2c_port_t i2c_num, uint8_t row, uint8_t col,uint8_t row_shift,uint8_t col_shift, const char *text);
 void i2c_oled_update_screen(i2c_port_t i2c_num);
 void i2c_oled_set_invert(i2c_port_t i2c_num, bool invert);
-void i2c_oled_write_inverted_text(i2c_port_t i2c_num, uint8_t row, uint8_t col, const char *text);
+void i2c_oled_write_inverted_text(i2c_port_t i2c_num, uint8_t y_pixel, uint8_t col, const char *text);
 void i2c_oled_draw_rect(i2c_port_t i2c_num, int x, int y, int width, int height, bool on);
-void i2c_oled_write_char(i2c_port_t i2c_num, uint8_t row, uint8_t col, char c);
 void i2c_oled_fill_rect(i2c_port_t i2c_num, int x, int y, int width, int height, bool on) ;
 void i2c_oled_draw_pixel(i2c_port_t i2c_num, int x, int y, bool on);
 void i2c_oled_get_buffer(uint8_t* out_buffer, size_t len);
@@ -295,4 +294,4 @@ void i2c_oled_load_buffer(const uint8_t* in_buffer, size_t len);
  * @param bitmap A pointer to an 8-byte array representing the 8x8 bitmap.
  * @param on True to draw lit pixels, false to draw dark pixels.
  */
-void i2c_oled_draw_bitmap(i2c_port_t i2c_num, int x, int y, const uint8_t *bitmap, bool on);
+void i2c_oled_draw_bitmap(i2c_port_t i2c_num, int x, int y, const uint8_t *bitmap, bool on, bool inverted);

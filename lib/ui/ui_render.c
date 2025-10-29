@@ -18,6 +18,7 @@
 #include "wifi_manager.h"
 #include "web_server.h"
 
+#include "bitmaps.h"
 #include "esp_netif.h"
 // --- QR Code Caching ---
 // A dedicated buffer to store the rendered QR code image to avoid re-generating it.
@@ -91,6 +92,7 @@ typedef struct
 
 #define MAX_CONFIG_ITEMS 9      // Correctly define the number of items
 #define NEW_MAX_CONFIG_ITEMS 10 // Increased by 1 for b_volt_threshold
+
 static config_item_t s_config_items[NEW_MAX_CONFIG_ITEMS];
 
 // Define the actual configuration keys here, in one place.
@@ -142,21 +144,34 @@ void uiRender_send_event(int event, float *values, int value_count)
     xQueueSend(ui_event_queue, &msg, 0);
 }
 
-// --- Helper to write a flicker-free, padded line ---
+
 /**
- * @brief Writes a line of text to the OLED, padding it with spaces to clear the line.
+
+ * @brief Base function to write a padded line with row and column shifts.
  *
- * @param row The row (0-7) to write to.
- * @param text The text to display.
+ * All other `write_padded_line` variants are macros that call this function with default values.
  */
-static void write_padded_line(uint8_t row, const char *text)
+static void write_padded_line_shift(uint8_t row, uint8_t col, uint8_t row_shift, uint8_t col_shift, const char *text)
 {
     if (!s_oled_initialized)
         return;
     char padded_buffer[21]; // 20 chars + null terminator
-    snprintf(padded_buffer, sizeof(padded_buffer), "%-20s", text ? text : "");
-    i2c_oled_write_text(s_oled_i2c_num, row, 0, padded_buffer);
+    int padding_width = 20 - col;
+    if (padding_width < 0)
+    {
+        padding_width = 0;
+    }
+    char format_string[8];
+    snprintf(format_string, sizeof(format_string), "%%-%ds", padding_width);
+    snprintf(padded_buffer, sizeof(padded_buffer), format_string, text ? text : "");
+    i2c_oled_write_text(s_oled_i2c_num, row, col, row_shift, col_shift, padded_buffer);
 }
+
+static void write_padded_line(uint8_t row, const char* text)
+{
+    write_padded_line_shift(row, 0, 0, 0, text);
+}
+
 
 // --- Helper to write a flicker-free, inverted line ---
 /**
@@ -172,7 +187,7 @@ static void write_inverted_line(uint8_t row, const char *text)
     char padded_buffer[21]; // 20 chars + null terminator
     snprintf(padded_buffer, sizeof(padded_buffer), "%-20s", text ? text : "");
     // This new function handles inversion at the pixel level, preventing flicker.
-    i2c_oled_write_inverted_text(s_oled_i2c_num, row, 0, padded_buffer);
+    i2c_oled_write_inverted_text(s_oled_i2c_num, row , 0, padded_buffer);
 }
 
 // --- Menu rendering callback ---
@@ -430,8 +445,9 @@ void render_sleeping_screen(void)
     // Clear screen once, then do nothing to save power.
     i2c_oled_clear(s_oled_i2c_num);
     write_inverted_line(0, "Sleep mode");
+    write_padded_line(4, "Zzzzz....");
+
     i2c_oled_update_screen(s_oled_i2c_num);
-    i2c_oled_write_text(s_oled_i2c_num, 4, 5, "Zzzzz....");
 }
 
 // --- Sensor rendering callback ---
@@ -446,7 +462,7 @@ void render_sensor_callback(void)
     char line_buf[21];  // Full line buffer
     char uptime_str[21];
 
-    i2c_oled_clear(s_oled_i2c_num);        // Clear screen buffer before drawing
+    i2c_oled_clear(s_oled_i2c_num); // Clear screen buffer before drawing
     write_inverted_line(0, "Sensor Data");
 
     if (s_sensor_page_num == 0)
@@ -459,31 +475,43 @@ void render_sensor_callback(void)
         write_padded_line(2, s_local_sensor_buffer.timestamp > 0 ? value_buf : "Time not set");
 
         // Temperature
-        if (isnan(s_local_sensor_buffer.temperature_c)) {
-            snprintf(line_buf, sizeof(line_buf), "T:      N/A");
-        } else {
-            snprintf(value_buf, sizeof(value_buf), "%.2f", s_local_sensor_buffer.temperature_c);
-            snprintf(line_buf, sizeof(line_buf), "T: %6.6s C\xf8", value_buf); // Use character 0xF8 for degree symbol
+        if (isnan(s_local_sensor_buffer.temperature_c))
+        {
+            snprintf(line_buf, sizeof(line_buf), "       N/A");
         }
-        write_padded_line(4, line_buf);
+        else
+        {
+            snprintf(value_buf, sizeof(value_buf), "%.2f", s_local_sensor_buffer.temperature_c);
+            snprintf(line_buf, sizeof(line_buf), " %6.6s C\xf8", value_buf); // Use character 0xF8 for degree symbol
+        }
+        i2c_oled_draw_bitmap(s_oled_i2c_num, 1, 4 * 8, temp_icon, true, false);
+        write_padded_line_shift(4, 2, 0, 0, line_buf);
 
         // Pressure
-        if (s_local_sensor_buffer.pressure_pa == 0) {
-            snprintf(line_buf, sizeof(line_buf), "P:      N/A");
-        } else {
-            snprintf(value_buf, sizeof(value_buf), "%.2f", (float)s_local_sensor_buffer.pressure_pa / 1000.0f);
-            snprintf(line_buf, sizeof(line_buf), "P: %6.6s kPa", value_buf);
+        if (s_local_sensor_buffer.pressure_pa == 0)
+        {
+            snprintf(line_buf, sizeof(line_buf), "       N/A");
         }
-        write_padded_line(5, line_buf);
+        else
+        {
+            snprintf(value_buf, sizeof(value_buf), "%.2f", (float)s_local_sensor_buffer.pressure_pa / 1000.0f);
+            snprintf(line_buf, sizeof(line_buf), " %6.6s kPa", value_buf);
+        }
+        i2c_oled_draw_bitmap(s_oled_i2c_num, 1, 5 * 8 + 2, press_icon, true, false);
+        write_padded_line_shift(5, 2, 2, 0, line_buf);
 
         // Differential Pressure
-        if (isnan(s_local_sensor_buffer.diff_pressure_pa)) {
-            snprintf(line_buf, sizeof(line_buf), "D:      N/A");
-        } else {
-            snprintf(value_buf, sizeof(value_buf), "%.2f", s_local_sensor_buffer.diff_pressure_pa);
-            snprintf(line_buf, sizeof(line_buf), "D: %6.6s Pa", value_buf);
+        if (isnan(s_local_sensor_buffer.diff_pressure_pa))
+        {
+            snprintf(line_buf, sizeof(line_buf), "       N/A");
         }
-        write_padded_line(6, line_buf);
+        else
+        {
+            snprintf(value_buf, sizeof(value_buf), "%.2f", s_local_sensor_buffer.diff_pressure_pa);
+            snprintf(line_buf, sizeof(line_buf), " %6.6s Pa", value_buf);
+        }
+        i2c_oled_draw_bitmap(s_oled_i2c_num, 1, 6 * 8 + 4, diff_press_icon, true, false);
+        write_padded_line_shift(6, 2, 4, 0, line_buf);
     }
     else
     { // s_sensor_page_num == 1
@@ -681,7 +709,7 @@ void render_cmd_feedback_screen(void)
     if (current_status == CMD_STATUS_PENDING)
     {
         // --- Handle PENDING state ---
-        write_inverted_line(0, " "); // Inverted title bar
+        write_inverted_line(0, " "); // Inverted title bar with no text
         write_padded_line(3, "Loading...");
 
         // Check for timeout
@@ -705,7 +733,7 @@ void render_cmd_feedback_screen(void)
     {
         // --- Handle SUCCESS state ---
         write_padded_line(3, "Success!");
-        write_inverted_line(0, " ");
+        write_inverted_line(0, " "); // Inverted title bar with no text
 
         if (s_cmd_feedback_display_start_ms == 0)
         {
@@ -730,7 +758,7 @@ void render_cmd_feedback_screen(void)
     {
         // --- Handle FAIL state ---
         write_padded_line(3, "Failed!");
-        write_inverted_line(0, " ");
+        write_inverted_line(0, " "); // Inverted title bar with no text
 
         if (s_cmd_feedback_display_start_ms == 0)
         {
@@ -784,10 +812,9 @@ static void draw_status_icons(void)
 
     bool is_usb_msc = s_local_sensor_buffer.usb_msc_connected;
 
-
- //ESP_LOGI(TAG, "Drawing status icons:  USB MSC: %d", is_usb_msc);
-    // The title bar is inverted on most screens. We render the icon with a non-inverted
-    // color (white on black) only for specific full-screen pages that have a black background at the top.
+    // ESP_LOGI(TAG, "Drawing status icons:  USB MSC: %d", is_usb_msc);
+    //  The title bar is inverted on most screens. We render the icon with a non-inverted
+    //  color (white on black) only for specific full-screen pages that have a black background at the top.
     bool is_fullscreen_no_bar = (s_current_page == &about_page && s_about_page_view == 0) ||
                                 (s_current_page == &web_server_page && s_local_sensor_buffer.web_server_status == WEB_SERVER_RUNNING && s_web_page_view == 0);
 
@@ -839,79 +866,41 @@ static void draw_status_icons(void)
     // --- Draw Conditional Icons (SD Error and HF Mode) ---
     int current_icon_x = 114; // Start from the left edge of the battery icon
 
-    if (is_usb_msc)
-    {
-        // Draw a new 9x6 pixel USB "trident" symbol and suppress other icons.
-        // Draw a new 12x6 pixel USB plug icon based on the provided pixel map.
-        current_icon_x -= 13; // Make space for the 12-pixel wide icon + 1px padding.
-        int usb_x = current_icon_x;
-        int usb_y = 1; // Start at y=1 to fit within the 8-pixel high title bar.
-
-        // Line 0: 000011111000
-        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 4, usb_y, 5, 1, !is_inverted);
-        // Line 1: 000100001111
-        i2c_oled_draw_pixel(s_oled_i2c_num, usb_x + 3, usb_y + 1, !is_inverted);
-        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 8, usb_y + 1, 4, 1, !is_inverted);
-        // Lines 2 & 3: 111100101001
-        i2c_oled_fill_rect(s_oled_i2c_num, usb_x, usb_y + 2, 4, 2, !is_inverted);
-        i2c_oled_draw_pixel(s_oled_i2c_num, usb_x + 6, usb_y + 2, !is_inverted);
-        i2c_oled_draw_pixel(s_oled_i2c_num, usb_x + 6, usb_y + 3, !is_inverted);
-        i2c_oled_draw_pixel(s_oled_i2c_num, usb_x + 8, usb_y + 2, !is_inverted);
-        i2c_oled_draw_pixel(s_oled_i2c_num, usb_x + 8, usb_y + 3, !is_inverted);
-        i2c_oled_draw_pixel(s_oled_i2c_num, usb_x + 11, usb_y + 2, !is_inverted);
-        i2c_oled_draw_pixel(s_oled_i2c_num, usb_x + 11, usb_y + 3, !is_inverted);
-        // Line 4: 000100001111
-        i2c_oled_draw_pixel(s_oled_i2c_num, usb_x + 3, usb_y + 4, !is_inverted);
-        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 8, usb_y + 4, 4, 1, !is_inverted);
-        // Line 5: 000011111000
-        i2c_oled_fill_rect(s_oled_i2c_num, usb_x + 4, usb_y + 5, 5, 1, !is_inverted);
-    }
-    else
+    // Only draw these other icons if USB is NOT connected.
+    if (!is_usb_msc)
     {
         // If SD card write failed or a sensor is missing, draw "!!"
         if (sd_write_failed || !sensors_ok)
         {
-            current_icon_x -= 8; // Move left to make space
-            int warning_y = 1;
-            // Draw "!!" using pixel-based rectangles
-            i2c_oled_fill_rect(s_oled_i2c_num, current_icon_x, warning_y, 1, 4, !is_inverted);
-            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x, warning_y + 5, !is_inverted);
-            i2c_oled_fill_rect(s_oled_i2c_num, current_icon_x + 2, warning_y, 1, 4, !is_inverted);
-            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 2, warning_y + 5, !is_inverted);
+            current_icon_x -= 9; // Move left to make space for the 8-pixel wide icon + 1px padding
+            i2c_oled_draw_bitmap(s_oled_i2c_num, current_icon_x, 0, logging_error_icon, true, is_inverted);
         }
 
         // If paused, draw 'P'
         if (is_paused)
         {
-            current_icon_x -= 8; // Move left to make space
-            int paused_y = 1;
-            // Draw 'P'
-            i2c_oled_fill_rect(s_oled_i2c_num, current_icon_x, paused_y, 1, 6, !is_inverted);
-            i2c_oled_fill_rect(s_oled_i2c_num, current_icon_x + 1, paused_y, 2, 1, !is_inverted);
-            i2c_oled_fill_rect(s_oled_i2c_num, current_icon_x + 1, paused_y + 2, 2, 1, !is_inverted);
-            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 3, paused_y + 1, !is_inverted);
+            current_icon_x -= 9; // Move left to make space
+            i2c_oled_draw_bitmap(s_oled_i2c_num, current_icon_x, 0, logging_pause_icon, true, is_inverted);
         }
 
         // If HF mode is enabled, draw ">>"
         if (hf_mode_enabled)
         {
-            current_icon_x -= 8; // Move left again
-            int hf_icon_y = 1;
-            // Draw ">>" using pixels
-            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 1, hf_icon_y, !is_inverted);
-            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x, hf_icon_y + 1, !is_inverted);
-            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 1, hf_icon_y + 2, !is_inverted);
-            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 1, hf_icon_y + 3, !is_inverted);
-            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x, hf_icon_y + 4, !is_inverted);
-            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 1, hf_icon_y + 5, !is_inverted);
-            // Second '>'
-            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 4, hf_icon_y, !is_inverted);
-            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 3, hf_icon_y + 1, !is_inverted);
-            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 4, hf_icon_y + 2, !is_inverted);
-            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 4, hf_icon_y + 3, !is_inverted);
-            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 3, hf_icon_y + 4, !is_inverted);
-            i2c_oled_draw_pixel(s_oled_i2c_num, current_icon_x + 4, hf_icon_y + 5, !is_inverted);
+            current_icon_x -= 9; // Move left again
+            i2c_oled_draw_bitmap(s_oled_i2c_num, current_icon_x, 0, logging_hf_icon, true, is_inverted);
         }
+    }
+    else
+    {
+        // The icon is 16 pixels wide (2x 8px bitmaps).
+        // The battery icon starts at 114, so we start this at 114 - 16 - 1 = 97.
+        int usb_icon_x = 97;
+        // Draw the left part of the icon.
+        i2c_oled_draw_bitmap(s_oled_i2c_num, usb_icon_x, 0, usb_icon_l, true, is_inverted);
+        // Draw the right part of the icon immediately next to it.
+        i2c_oled_draw_bitmap(s_oled_i2c_num, usb_icon_x + 8, 0, usb_icon_r, true, is_inverted);
+        // Set the starting point for any subsequent icons to the left of the USB icon.
+        // current_icon_x = usb_icon_x;
     }
 }
 

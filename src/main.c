@@ -290,7 +290,7 @@ static void oled_power_on(void)
         // to prevent showing stale "Zzzzz" screen content.
         i2c_oled_clear(I2C_OLED_NUM);
         i2c_oled_write_inverted_text(I2C_OLED_NUM, 0, 0, "System");
-        i2c_oled_write_text(I2C_OLED_NUM, 2, 0, "Waking up...");
+        i2c_oled_write_text(I2C_OLED_NUM, 2, 0,0,0, "Waking up...");
         i2c_oled_update_screen(I2C_OLED_NUM);
         vTaskResume(g_uiRender_task_handle);
         uiRender_send_event(UI_EVENT_WAKE_UP, NULL, 0);
@@ -954,7 +954,7 @@ void app_main(void)
     const char *msg = (cause == ESP_SLEEP_WAKEUP_EXT0 || cause == ESP_SLEEP_WAKEUP_GPIO) ? "Waking up..." : "Booting...";
     snprintf(display_str, sizeof(display_str), "%-20s", msg);
     i2c_oled_write_inverted_text(I2C_OLED_NUM, 0, 0, "System");
-    i2c_oled_write_text(I2C_OLED_NUM, 2, 0, display_str);
+    i2c_oled_write_text(I2C_OLED_NUM, 2, 0,0,0, display_str);
     i2c_oled_update_screen(I2C_OLED_NUM); // This is the crucial missing step
 
     // --- Step 2: Initialize RTOS objects (Mutexes and Queues) ---
