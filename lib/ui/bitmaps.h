@@ -8,7 +8,7 @@ static const uint8_t usb_icon_l[8] = {
     0x03, // Row 1
     0x04, // Row 2
     0x3C, // Row 3
-    0x3C, / Row 4
+    0x3C, // Row 4
     0x04, // Row 5
     0x03, // Row 6
     0x00, // Row 7

@@ -136,6 +136,9 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         ".sensor-panel h3 { color: #e0e0e0; margin-top: 0; margin-bottom: 15px; border-bottom: 1px solid #373737; padding-bottom: 10px; }"
         ".sensor-item { background-color: #373737; padding: 10px; border-radius: 4px; }"
         ".sensor-item h3 { margin-top: 0; font-size: 0.9em; color: #aaa; text-transform: uppercase; }"
+        ".sensor-item-header { display: flex; align-items: flex-start; margin-bottom: 5px; }"
+        ".sensor-item-header svg { width: 24px; height: 24px; margin-right: 8px; flex-shrink: 0; stroke: #bb86fc; }"
+        ".sensor-item-header h3 { margin-top: 0; margin-bottom: 0; flex-grow: 1; }"
         ".file-info { padding: 12px 15px; flex-grow: 1; min-width: 0; }"
         ".file-info a { text-decoration: none; color: #03dac6; font-weight: 500; font-size: 1.1em; display: block; word-break: break-all; }"
         "#sparkline-container { display: none; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 15px; }"
@@ -189,11 +192,47 @@ static esp_err_t index_html_handler(httpd_req_t *req)
         "<h1>Live Data</h1>"
         "<div class=\"sensor-panel\">"
         "<div class=\"sensor-grid\">"
-        "<div class=\"sensor-item\"><h3>Timestamp</h3><p id=\"sensor-timestamp\">-</p></div>"
-        "<div class=\"sensor-item\"><h3>Temperature</h3><p id=\"sensor-temp\">-</p></div>"
-        "<div class=\"sensor-item\"><h3>Pressure</h3><p id=\"sensor-press\">-</p></div>"
-        "<div class=\"sensor-item\"><h3>Diff. Pressure</h3><p id=\"sensor-diff-press\">-</p></div>"
-        "<div class=\"sensor-item\"><h3>Battery</h3><p id=\"sensor-batt\">-</p></div>"
+        "<div class=\"sensor-item\">"
+        "  <div class=\"sensor-item-header\">"
+        "    <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"10\"></circle><polyline points=\"12 6 12 12 16 14\"></polyline></svg>"
+        "    <h3>Timestamp</h3>"
+        "  </div>"
+        "  <p id=\"sensor-timestamp\">-</p>"
+        "</div>"
+        "<div class=\"sensor-item\">"
+        "  <div class=\"sensor-item-header\">"
+        "    <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z\"></path></svg>"
+        "    <h3>Temperature</h3>"
+        "  </div>"
+        "  <p id=\"sensor-temp\">-</p>"
+        "</div>"
+        "<div class=\"sensor-item\">"
+        "  <div class=\"sensor-item-header\">"
+        "    <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"10\"></circle><circle cx=\"12\" cy=\"12\" r=\"1.5\" fill=\"#bb86fc\"></circle><line x1=\"12\" y1=\"12\" x2=\"6\" y2=\"10\"></line></svg>"
+        "    <h3>Pressure</h3>"
+        "  </div>"
+        "  <p id=\"sensor-press\">-</p>"
+        "</div>"
+        "<div class=\"sensor-item\">"
+        "  <div class=\"sensor-item-header\">"
+        "    <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\">"
+        "      <circle cx=\"12\" cy=\"12\" r=\"10\"></circle>"
+        "      <line x1=\"7\" y1=\"8\" x2=\"10\" y2=\"8\"></line>"
+        "      <line x1=\"8.5\" y1=\"6.5\" x2=\"8.5\" y2=\"9.5\"></line>"
+        "      <line x1=\"14\" y1=\"16\" x2=\"17\" y2=\"16\"></line>"
+        "      <line x1=\"16.5\" y1=\"7.5\" x2=\"7.5\" y2=\"16.5\"></line>"
+        "    </svg>"
+        "    <h3>Diff. Pressure</h3>"
+        "  </div>"
+        "  <p id=\"sensor-diff-press\">-</p>"
+        "</div>"
+        "<div class=\"sensor-item\">"
+        "  <div class=\"sensor-item-header\">"
+        "    <svg viewBox=\"0 0 24 24\" fill=\"#bb86fc\" stroke=\"#bb86fc\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"2\" y=\"7\" width=\"18\" height=\"10\" rx=\"2\" ry=\"2\"></rect><line x1=\"20\" y1=\"11\" x2=\"22\" y2=\"11\" stroke-width=\"3\"></line><line x1=\"20\" y1=\"13\" x2=\"22\" y2=\"13\" stroke-width=\"3\"></line></svg>"
+        "    <h3>Battery</h3>"
+        "  </div>"
+        "  <p id=\"sensor-batt\">-</p>"
+        "</div>"
         "</div></div>" /* Ends sensor-panel and sensor-grid */
         "<h1>File Browser</h1>"
         "<div id=\"preview-container\" class=\"sensor-panel\" style=\"display: none; margin-top: 20px;\">"
@@ -953,17 +992,7 @@ static esp_err_t api_file_delete_handler(httpd_req_t *req)
     }
 }
 
-/**
- * @brief Cleanup function to free the request-specific auxiliary data.
- *
- * This is registered with the HTTP server and called automatically when a
- * request is finished.
- */
-static void free_request_aux_data(void *aux)
-{
-    ESP_LOGD(TAG, "Freeing request aux data");
-    free(aux);
-}
+
 
 
 /* Handler to download a file */
