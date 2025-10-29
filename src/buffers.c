@@ -17,7 +17,7 @@
 // This is the single source of truth for the global sensor buffer.
 sensor_buffer_t g_sensor_buffer = {
     .temperature_c = NAN,
-    .pressure_pa = 0, // Use 0 as the sentinel for an invalid integer reading
+    .pressure_kpa = NAN, // Use 0 as the sentinel for an invalid integer reading
     .diff_pressure_pa = NAN,
     .battery_voltage = NAN,
     .battery_percentage = 0,

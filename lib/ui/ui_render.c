@@ -463,7 +463,7 @@ void render_sensor_callback(void)
         // Temperature
         if (isnan(s_local_sensor_buffer.temperature_c))
         {
-            snprintf(line_buf, sizeof(line_buf), "       N/A");
+            snprintf(line_buf, sizeof(line_buf), "        n/a");
         }
         else
         {
@@ -474,13 +474,13 @@ void render_sensor_callback(void)
         write_padded_line_shift(4, 2, 0, 0, line_buf);
 
         // Pressure
-        if (s_local_sensor_buffer.pressure_pa == 0)
+        if (isnan(s_local_sensor_buffer.pressure_kpa))
         {
-            snprintf(line_buf, sizeof(line_buf), "       N/A");
+            snprintf(line_buf, sizeof(line_buf), "        n/a");
         }
         else
-        {
-            snprintf(value_buf, sizeof(value_buf), "%.2f", (float)s_local_sensor_buffer.pressure_pa / 1000.0f);
+        {   
+            snprintf(value_buf, sizeof(value_buf), "%.2f", s_local_sensor_buffer.pressure_kpa );
             snprintf(line_buf, sizeof(line_buf), " %6.6s kPa", value_buf);
         }
         i2c_oled_draw_bitmap(s_oled_i2c_num, 1, 5 * 8 + 2, press_icon, true, false);
@@ -1098,7 +1098,7 @@ void menu_format_sd_confirm_on_btn(void)
     {
         app_command_t cmd = {.cmd = APP_CMD_FORMAT_SD_CARD, .mode = 0};
         xQueueSend(g_app_cmd_queue, &cmd, 0);
-        enter_cmd_pending_mode(30000, POST_ACTION_GO_BACK); // 30s timeout, then go back
+        enter_cmd_pending_mode(60000, POST_ACTION_GO_BACK); // 30s timeout, then go back
     }
     else
     {

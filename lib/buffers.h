@@ -36,7 +36,7 @@ typedef struct {
     write_status_t writeStatus;
     web_server_status_t web_server_status;
     char web_server_url[64];
-    long pressure_pa;
+    float pressure_kpa;
     float temperature_c;
     float diff_pressure_pa;
     time_t timestamp;

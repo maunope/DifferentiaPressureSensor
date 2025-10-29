@@ -36,7 +36,7 @@ static void update_sensor_buffer(datalogger_task_params_t *params)
     // --- Read all sensor values first ---
     float temperature_c = NAN;
     float diff_pressure_pa = NAN;
-    float pressure_pa = NAN; // Use NAN for consistency
+    float pressure_kpa = NAN; // Use NAN for consistency
     bool read_error = false;
 
     if (xSemaphoreTake(g_i2c_bus_mutex, pdMS_TO_TICKS(2000)) == pdTRUE)
@@ -45,16 +45,16 @@ static void update_sensor_buffer(datalogger_task_params_t *params)
         esp_err_t d6fph_err = ESP_FAIL;
 
         temperature_c = NAN;
-        pressure_pa = NAN;
+        pressure_kpa = NAN;
         if (params->bmp280_available)
         {
             // Use forced mode to ensure sensor is correctly configured for each read.
             // This is more robust, especially after waking from deep sleep.
-            long pressure_pa_long; // Use long for bmp280_force_read
+            long pressure_kpa_long; // Use long for bmp280_force_read
 
             for (int retries = 0; retries < MAX_I2C_RETRIES; retries++)
             {
-                bmp_err = bmp280_force_read(params->bmp280_dev, &temperature_c, &pressure_pa_long);
+                bmp_err = bmp280_force_read(params->bmp280_dev, &temperature_c, &pressure_kpa_long);
                 if (bmp_err == ESP_OK)
                     break; // Success, exit retry loop
                 vTaskDelay(pdMS_TO_TICKS(RETRY_DELAY_MS));
@@ -66,7 +66,7 @@ static void update_sensor_buffer(datalogger_task_params_t *params)
             }
             else
             {
-                pressure_pa = (float)pressure_pa_long;
+                pressure_kpa = (float)pressure_kpa_long/1000.0f; // Convert from Pa to kPa    
             }
         }
         else
@@ -107,7 +107,7 @@ static void update_sensor_buffer(datalogger_task_params_t *params)
     if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(100)) == pdTRUE)
     {
         g_sensor_buffer.temperature_c = temperature_c;
-        g_sensor_buffer.pressure_pa = pressure_pa;
+        g_sensor_buffer.pressure_kpa = pressure_kpa;
         g_sensor_buffer.diff_pressure_pa = diff_pressure_pa;
         g_sensor_buffer.timestamp = time(NULL);
         g_sensor_buffer.battery_voltage = battery_reader_get_voltage();
@@ -222,7 +222,7 @@ void datalogger_task(void *pvParameters)
                         if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY))
                         {
                             g_sensor_buffer.temperature_c = temp;
-                            g_sensor_buffer.pressure_pa = press;
+                            g_sensor_buffer.pressure_kpa = press;
                             g_sensor_buffer.diff_pressure_pa = diff_press;
                             g_sensor_buffer.timestamp = time(NULL);
                             g_sensor_buffer.battery_voltage = battery_reader_get_voltage();
@@ -387,15 +387,15 @@ void datalogger_task(void *pvParameters)
             strftime(local_time_str, sizeof(local_time_str), "%Y-%m-%d %H:%M:%S", &local_tm);
 
             // Log to console
-            ESP_LOGI(TAG, "TS: %s, Temp: %.2fC, Press: %.0fPa, Diff: %.2fPa Batt: %d%% (%.2fV), Charging: %d, WriteSD: %d", local_time_str, local_buffer.temperature_c, local_buffer.pressure_pa, local_buffer.diff_pressure_pa, local_buffer.battery_percentage, local_buffer.battery_voltage, local_buffer.battery_externally_powered, local_buffer.writeStatus);
+            ESP_LOGI(TAG, "TS: %s, Temp: %.2fC, Press: %.0fPa, Diff: %.2fPa Batt: %d%% (%.2fV), Charging: %d, WriteSD: %d", local_time_str, local_buffer.temperature_c, local_buffer.pressure_kpa, local_buffer.diff_pressure_pa, local_buffer.battery_percentage, local_buffer.battery_voltage, local_buffer.battery_externally_powered, local_buffer.writeStatus);
 
             // Format the data into a CSV string
             char csv_line[200];
             snprintf(csv_line, sizeof(csv_line), "%lld,%s,%.2f,%.3f,%.2f,%.2f,%d,%llu",
                      (long long)local_buffer.timestamp,
                      local_time_str,
-                     local_buffer.temperature_c,         // snprintf handles nan
-                     local_buffer.pressure_pa / 1000.0f, // Convert Pa to kPa
+                     local_buffer.temperature_c,    // snprintf handles nan
+                     local_buffer.pressure_kpa,      // Already in kPa
                      local_buffer.diff_pressure_pa,      // snprintf handles nan
                      local_buffer.battery_voltage,       // snprintf handles nan
                      local_buffer.battery_percentage,

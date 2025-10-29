@@ -1494,14 +1494,14 @@ static esp_err_t api_sensordata_handler(httpd_req_t *req)
     snprintf(batt_volt_str, sizeof(batt_volt_str), isnan(data.battery_voltage) ? "null" : "%.2f", data.battery_voltage);
 
     // Convert pressure from Pa (long) to kPa (float) for JSON compatibility
-    float pressure_kpa = (data.pressure_pa != 0) ? (float)data.pressure_pa / 1000.0f : 0.0f;
+ 
 
     snprintf(json_buffer, sizeof(json_buffer),
              "{\"timestamp\":%lld,\"datetime_local\":\"%s\",\"temperature_c\":%s,\"pressure_kpa\":%.3f,\"diff_pressure_pa\":%s,\"battery_voltage\":%s,\"battery_percentage\":%d,\"battery_externally_powered\":%s}",
              (long long)data.timestamp,
              local_time_str,
              temp_str,
-             pressure_kpa,
+             data.pressure_kpa, // Already in kPa
              diff_press_str,
              batt_volt_str,
              data.battery_percentage,
