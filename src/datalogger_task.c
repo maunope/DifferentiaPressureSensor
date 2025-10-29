@@ -136,7 +136,9 @@ static void update_battery_status(void)
         g_sensor_buffer.battery_percentage = battery_reader_get_percentage();
         g_sensor_buffer.battery_externally_powered = battery_is_externally_powered();
         xSemaphoreGive(g_sensor_buffer_mutex);
-    } else {
+    }
+    else
+    {
         ESP_LOGE(TAG, "Failed to acquire mutex to update battery status.");
     }
 }
@@ -299,7 +301,7 @@ void datalogger_task(void *pvParameters)
                 else
                 {
                     // Device has been awake longer than an interval, so allow the write.
-                    last_write_ts = 0;
+                    last_write_ts = 1;
                 }
             }
             else
@@ -335,11 +337,12 @@ void datalogger_task(void *pvParameters)
             last_sensor_refresh_ms = current_time_ms;
         }
 
-        // Check if enough time (in seconds) has passed for the next log.
-        // ESP_LOGI(TAG, "Current TS: %lld, Last Write TS: %lld, Interval: %lu ms", (long long)current_ts, (long long)last_write_ts, (unsigned long)current_log_interval);
-        if (!is_logging_paused && (current_ts - last_write_ts) * 1000 >= current_log_interval && last_write_ts > 0)
+        // ESP_LOGI(TAG, "Checking log time. Current: %lu, Last write: %lu, Interval: %lu ms, Paused: %d", (unsigned long)current_ts, (unsigned long)last_write_ts, (unsigned long)current_log_interval, is_logging_paused);
+        //  Check if enough time (in seconds) has passed for the next log.
+        //  ESP_LOGI(TAG, "Current TS: %lld, Last Write TS: %lld, Interval: %lu ms", (long long)current_ts, (long long)last_write_ts, (unsigned long)current_log_interval); // This line was commented out, but I'll fix it too just in case.
+        if (!is_logging_paused && (current_ts - last_write_ts) * 1000 >= current_log_interval)
         {
-            //  ESP_LOGI(TAG, "Scheduled log interval reached. Logging data.");
+            //     ESP_LOGI(TAG, "Scheduled log interval reached. Logging data.");
             // It's time for a scheduled log. This takes priority.
 
             // Create a local copy of the buffer for logging and writing to SD

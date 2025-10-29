@@ -313,8 +313,6 @@ static void go_to_deep_sleep(void)
         rtc_datalogger_mode = g_sensor_buffer.datalogger_paused ? DATALOGGER_MODE_PAUSED : (g_sensor_buffer.high_freq_mode_enabled ? DATALOGGER_MODE_HF : DATALOGGER_MODE_NORMAL);
         rtc_last_write_status = g_sensor_buffer.writeStatus;
         xSemaphoreGive(g_sensor_buffer_mutex);
-        rtc_last_write_status = g_sensor_buffer.writeStatus;
-        xSemaphoreGive(g_sensor_buffer_mutex);
 
         uint64_t current_awake_time_s = (esp_timer_get_time() - rtc_last_boot_time_ms * 1000) / 1000000ULL;
         rtc_total_awake_time_s += current_awake_time_s;
