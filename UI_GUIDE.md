@@ -33,52 +33,44 @@ The top-right corner of the screen displays persistent icons that provide at-a-g
     +--------------------+
     ```
 
-*   **SD Card Error**: If the device fails to write to the SD card, a two exclamation marks (**!!**) will appear to the **left** of the battery icon. This icon persists until the next successful write.
+*   **SD Card or Sensor Error**: If the device fails to write to the SD card or a sensor fails to initialize or read, an **error icon (!!)** will appear to the **left** of the battery icon. This icon persists until the condition is resolved.
 
     ```
     +--------------------+
-    | Main Menu   !! [[]] <-- SD Error
+| Main Menu   !! [[]] <-- Error Icon
     | ...                |
     +--------------------+
     ```
 
 *   **USB Connection Icon**: When the device is connected to a computer and mounted as a USB drive, a **USB plug icon** will appear. This indicates that the SD card is accessible from your computer. While this icon is active, other status icons (like SD Error, Paused, and High-Frequency) are hidden, as logging is temporarily suspended.
 
+*   **Paused Icon**: When data logging is paused via the "Sampling Mode" menu, a **pause icon (||)** will appear to the left of the battery icon. In this mode, the device will not write any new data to the SD card and will not enter deep sleep automatically.
+
     ```
     +--------------------+
-    | Main Menu   [plug] <-- USB Icon
+| Main Menu   || [[]] <-- Paused Icon
     | ...                |
     +--------------------+
     ```
 
-*   **Paused Icon**: When data logging is paused via the "Sampling Mode" menu, a **P** icon will appear to the left of the battery icon. In this mode, the device will not write any new data to the SD card and will not enter deep sleep automatically.
+*   **High-Frequency Mode**: When enabled, a **fast-forward icon (>>)** appears to the left of the battery icon. This indicates that the device is using shorter logging and sleep intervals.
 
     ```
     +--------------------+
-    | Main Menu    P [[]] <-- Paused Icon
-    | ...                |
-    +--------------------+
-    ```
-
-*   **High-Frequency Mode**: When enabled, a `>>` symbol appears in the top-left corner. This indicates that the device is using shorter logging and sleep intervals.
-    If an SD card error occurs, the `>>` icon will shift to the right to make space for the `!!` warning icon.
-
-    ```
-    +--------------------+
-    | >> !! Main Menu[[]] <-- HF and SD Error
+| Main Menu   >> [[]] <-- HF Mode Icon
     | ...                |
     +--------------------+
     ```
 
 ## Main Screens
 
-### Sensor Data Screen
+### Sensor Data Screen (Home)
 
 This is the default screen shown on startup. It is composed of two pages that you can cycle through by **rotating the encoder**. A **short press** on the button will take you to the Main Menu.
 
 #### Page 1: Sensor Readings
 
-This page shows the primary environmental sensor data.
+This page shows the primary environmental sensor data, now with icons for clarity.
 
 ```
 +--------------------+
