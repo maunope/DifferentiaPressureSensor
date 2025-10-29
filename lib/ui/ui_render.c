@@ -434,21 +434,7 @@ static void oled_display_qr_code(esp_qrcode_handle_t qrcode)
     }
 }
 
-// --- Sleeping screen rendering callback ---
-/**
- * @brief Renders a simple "Sleep mode" message to the screen.
- */
-void render_sleeping_screen(void)
-{
-    if (!s_oled_initialized)
-        return;
-    // Clear screen once, then do nothing to save power.
-    i2c_oled_clear(s_oled_i2c_num);
-    write_inverted_line(0, "Sleep mode");
-    write_padded_line(4, "Zzzzz....");
 
-    i2c_oled_update_screen(s_oled_i2c_num);
-}
 
 // --- Sensor rendering callback ---
 /**
@@ -941,12 +927,11 @@ void uiRender_task(void *pvParameters)
             {
                 s_waking_up = false; // Clear waking up flag if we are going to sleep
                 s_sleeping_mode = true;
-                render_sleeping_screen(); // Draw the sleeping message immediately
+                i2c_oled_clear(s_oled_i2c_num);
             }
             else if (msg.event == UI_EVENT_WAKE_UP)
             {
                 s_sleeping_mode = false;
-                i2c_oled_clear(s_oled_i2c_num);
                 s_waking_up = true;             // Set the waking up flag
                 i2c_oled_clear(s_oled_i2c_num); // Clear the screen on wake up
             }

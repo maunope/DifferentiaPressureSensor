@@ -265,7 +265,6 @@ static void oled_power_off(void)
         vTaskSuspend(g_uiRender_task_handle);
         uiRender_send_event(UI_EVENT_PREPARE_SLEEP, NULL, 0);
         vTaskDelay(pdMS_TO_TICKS(200)); // Give UI time to draw sleep message
-        // i2c_driver_delete(I2C_OLED_NUM);
         gpio_set_level(OLED_POWER_PIN, 0);
     }
 }
@@ -438,7 +437,14 @@ static void handle_web_server_fsm(void)
         if (wifi_manager_is_connected())
         {
             ESP_LOGI(TAG, "Wi-Fi connected. Starting web server.");
-            start_web_server();
+            esp_err_t err= start_web_server();
+            if (err != ESP_OK)
+            {
+                ESP_LOGE(TAG, "Failed to start web server: %s", esp_err_to_name(err));
+                s_web_server_state = WEB_SERVER_FAILED;
+                handle_stop_web_server();
+                return;
+            }
 
             esp_netif_ip_info_t ip_info;
             esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
@@ -955,7 +961,7 @@ void app_main(void)
     snprintf(display_str, sizeof(display_str), "%-20s", msg);
     i2c_oled_write_inverted_text(I2C_OLED_NUM, 0, 0, "System");
     i2c_oled_write_text(I2C_OLED_NUM, 2, 0,0,0, display_str);
-    i2c_oled_update_screen(I2C_OLED_NUM); // This is the crucial missing step
+    i2c_oled_update_screen(I2C_OLED_NUM); 
 
     // --- Step 2: Initialize RTOS objects (Mutexes and Queues) ---
     g_command_status_mutex = xSemaphoreCreateMutex();

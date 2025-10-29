@@ -1,28 +1,14 @@
 #pragma once
-
 #include <stdint.h>
 
-/**
- * @brief 12x6 pixel bitmap for a USB plug icon.
- *
- * This bitmap represents a USB plug symbol, designed to be drawn in the status bar.
- * The icon is 12 pixels wide and 6 pixels high. The data is structured as an array
- * of 6 bytes, where each byte represents a horizontal row of 8 pixels. Since the
- * icon is wider than 8 pixels, it's intended to be drawn with an offset or by a
- * function that can handle bitmaps wider than 8 pixels.
- *
- * The pixel data is as follows (1 = pixel on):
- * Row 0: 000011111000  -> 0x0F, 0x80 (shifted) -> This is complex for 8-bit rows.
- * Let's represent it as a simple 8x8 for now, which is what `i2c_oled_draw_bitmap` expects.
- * A 12x6 icon is better drawn manually or with a more advanced bitmap function.
- * For this request, I will create an 8x8 version.
- */
+//* built with buffers.xlsx
+
 static const uint8_t usb_icon_l[8] = {
     0x00, // Row 0
     0x03, // Row 1
     0x04, // Row 2
     0x3C, // Row 3
-    0x3C, // Row 4
+    0x3C, / Row 4
     0x04, // Row 5
     0x03, // Row 6
     0x00, // Row 7

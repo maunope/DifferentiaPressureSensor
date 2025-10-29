@@ -1,6 +1,7 @@
 #include "web_server.h"
 #include "esp_http_server.h"
 #include "../buffers.h"
+#include "esp_system.h"
 #include "esp_log.h"
 #include "../../src/datalogger_task.h"
 #include "esp_vfs.h"
@@ -27,6 +28,7 @@ static bool regex_is_compiled = false;
 typedef struct
 {
     char *scratch;
+    SemaphoreHandle_t scratch_mutex;
 } file_server_data_t;
 
 /* Forward declarations */
@@ -951,6 +953,19 @@ static esp_err_t api_file_delete_handler(httpd_req_t *req)
     }
 }
 
+/**
+ * @brief Cleanup function to free the request-specific auxiliary data.
+ *
+ * This is registered with the HTTP server and called automatically when a
+ * request is finished.
+ */
+static void free_request_aux_data(void *aux)
+{
+    ESP_LOGD(TAG, "Freeing request aux data");
+    free(aux);
+}
+
+
 /* Handler to download a file */
 /**
  * @brief HTTP GET handler for the `/download` endpoint.
@@ -1030,6 +1045,13 @@ static esp_err_t download_handler(httpd_req_t *req)
     httpd_resp_set_type(req, "application/octet-stream");
     httpd_resp_set_hdr(req, "Content-Disposition", content_disposition);
 
+    if (xSemaphoreTake(server_data->scratch_mutex, pdMS_TO_TICKS(5000)) != pdTRUE) {
+        ESP_LOGE(TAG, "Failed to acquire scratch buffer mutex for download");
+        close(fd);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
     ssize_t read_bytes;
     do
     {
@@ -1039,12 +1061,14 @@ static esp_err_t download_handler(httpd_req_t *req)
             if (httpd_resp_send_chunk(req, server_data->scratch, read_bytes) != ESP_OK)
             {
                 close(fd);
+                xSemaphoreGive(server_data->scratch_mutex);
                 ESP_LOGE(TAG, "File sending failed!");
                 return ESP_FAIL;
             }
         }
     } while (read_bytes > 0);
 
+    xSemaphoreGive(server_data->scratch_mutex);
     close(fd);
     httpd_resp_send_chunk(req, NULL, 0); // Final chunk
     return ESP_OK;
@@ -1159,10 +1183,11 @@ static long find_offset_by_timestamp(FILE *f, time_t target_timestamp, long data
  */
 static esp_err_t api_preview_handler(httpd_req_t *req)
 {
+    file_server_data_t *server_data = (file_server_data_t *)req->user_ctx;
+
     char filepath[FILE_PATH_MAX];
     char filename[64] = {0};
  //   int requested_start_line = 0;       /* 0-indexed, after header */
-    int line_count = 100;               // Default to 100 lines for chunk size
     int duration_sec = -1;              // Default to no duration limit
     time_t requested_timestamp = 0;     // 0 indicates no timestamp search
     char direction_str[16] = "forward"; // Default direction
@@ -1184,17 +1209,7 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
             if (httpd_query_key_value(query_buf, "file", param, sizeof(param)) == ESP_OK)
             {
                 strncpy(filename, param, sizeof(filename) - 1);
-                url_decode(filename); // Decode the URL-encoded filename
-            }
-          /*  if (httpd_query_key_value(query_buf, "start", param, sizeof(param)) == ESP_OK)
-            {
-                requested_start_line = atoi(param);
-            }*/
-            if (httpd_query_key_value(query_buf, "count", param, sizeof(param)) == ESP_OK)
-            {
-                int val = atoi(param);
-                if (val > 0)
-                    line_count = val;
+                url_decode(filename);
             }
             if (httpd_query_key_value(query_buf, "timestamp", param, sizeof(param)) == ESP_OK)
             {
@@ -1233,7 +1248,6 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    file_server_data_t *server_data = (file_server_data_t *)req->user_ctx;
     // Use parts of the scratch buffer for local string operations to avoid stack allocation
     char *line = server_data->scratch;
     char *header_line = server_data->scratch + 256;
@@ -1244,6 +1258,7 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
     if (fgets(header_line, 256, f) == NULL)
     {
         fclose(f);
+        xSemaphoreGive(server_data->scratch_mutex);
         httpd_resp_send_500(req);
         ESP_LOGE(TAG, "Failed to read header line from %s", filename);
         return ESP_FAIL;
@@ -1255,6 +1270,7 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
     if (!regex_is_compiled)
     {
         fclose(f);
+        xSemaphoreGive(server_data->scratch_mutex);
         ESP_LOGE(TAG, "CSV header regex not compiled!");
         httpd_resp_send_500(req);
         return ESP_FAIL;
@@ -1267,12 +1283,11 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
         ESP_LOGI(TAG, "File '%s' does not match generic CSV header format. Sending as plain text.", filename);
         httpd_resp_set_type(req, "text/plain");
 
-        // Rewind to the beginning of the file to send the content from the start
         fseek(f, header_pos, SEEK_SET);
 
         int lines_sent = 0;
-        while (fgets(line, sizeof(line), f) != NULL && lines_sent < line_count)
-        { // Use line_count for raw text too
+        while (fgets(line, 256, f) != NULL && lines_sent < 100)
+        {
             httpd_resp_send_chunk(req, line, strlen(line));
             lines_sent++;
         }
@@ -1281,6 +1296,7 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
             httpd_resp_send_chunk(req, "\n(TRUNCATED)", 12);
         }
         httpd_resp_send_chunk(req, NULL, 0);
+        xSemaphoreGive(server_data->scratch_mutex);
         fclose(f);
         return ESP_OK;
     }
@@ -1290,6 +1306,7 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
         char msgbuf[100];
         regerror(reti, &csv_header_regex, msgbuf, sizeof(msgbuf));
         ESP_LOGE(TAG, "Regex match failed: %s", msgbuf);
+        xSemaphoreGive(server_data->scratch_mutex);
         fclose(f);
         httpd_resp_send_500(req);
         return ESP_FAIL;
@@ -1381,6 +1398,7 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
         if (httpd_resp_send_chunk(req, buf, bytes_read) != ESP_OK)
         {
             ESP_LOGE(TAG, "File sending failed!");
+            xSemaphoreGive(server_data->scratch_mutex);
             fclose(f);
             // Send NULL chunk to indicate failure
             httpd_resp_send_chunk(req, NULL, 0);
@@ -1399,6 +1417,7 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
     }
 
     ESP_LOGI(TAG, "Finished sending file preview.");
+    xSemaphoreGive(server_data->scratch_mutex);
     fclose(f);
     httpd_resp_send_chunk(req, NULL, 0); // Finalize the response
     return ESP_OK;
@@ -1471,7 +1490,6 @@ esp_err_t start_web_server(void)
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.uri_match_fn = httpd_uri_match_wildcard;
-    config.max_uri_handlers = 8;
 
     file_server_data_t *server_data = calloc(1, sizeof(file_server_data_t));
     if (!server_data)
@@ -1486,7 +1504,13 @@ esp_err_t start_web_server(void)
         free(server_data);
         return ESP_ERR_NO_MEM;
     }
-
+    server_data->scratch_mutex = xSemaphoreCreateMutex();
+    if (!server_data->scratch_mutex) {
+        ESP_LOGE(TAG, "Failed to create scratch mutex");
+        free(server_data->scratch);
+        free(server_data);
+        return ESP_ERR_NO_MEM;
+    }
     // Compile the regex for CSV header detection at startup
     const char *csv_pattern = "^[a-zA-Z0-9_\\.]+[a-zA-Z0-9_\\.\\s]*(,[a-zA-Z0-9_\\.\\s]+)+";
     int reg_err_code = regcomp(&csv_header_regex, csv_pattern, REG_EXTENDED | REG_NOSUB);
@@ -1495,18 +1519,22 @@ esp_err_t start_web_server(void)
         char msgbuf[100];
         regerror(reg_err_code, &csv_header_regex, msgbuf, sizeof(msgbuf));
         ESP_LOGE(TAG, "Could not compile regex for CSV header: %s", msgbuf);
+        vSemaphoreDelete(server_data->scratch_mutex);
         free(server_data->scratch);
         free(server_data);
         return ESP_FAIL;
     }
     regex_is_compiled = true;
 
+    config.global_user_ctx = server_data;
+
+    config.max_uri_handlers = 8;
     ESP_LOGI(TAG, "Starting HTTP Server");
     if (httpd_start(&server, &config) != ESP_OK)
     {
         ESP_LOGE(TAG, "Failed to start httpd");
+        vSemaphoreDelete(server_data->scratch_mutex);
         free(server_data->scratch);
-        free(server_data);
         server = NULL;
         return ESP_FAIL;
     }
@@ -1571,8 +1599,9 @@ void stop_web_server(void)
         file_server_data_t *server_data = (file_server_data_t *)httpd_get_global_user_ctx(server);
         if (server_data)
         {
+            vSemaphoreDelete(server_data->scratch_mutex);
             free(server_data->scratch);
-            free(server_data);
+            // server_data itself is freed by httpd_stop()
         }
         if (regex_is_compiled)
         {
@@ -1581,5 +1610,6 @@ void stop_web_server(void)
         }
         httpd_stop(server);
         server = NULL;
+        ESP_LOGI(TAG, "Web server stopped. Free heap: %zu bytes", esp_get_free_heap_size());
     }
 }
