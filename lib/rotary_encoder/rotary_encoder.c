@@ -4,6 +4,8 @@
 #include "esp_sleep.h"
 static const char *TAG = "ROTARY_ENCODER";
 
+#define LONG_PRESS_DURATION_MS 2000
+
 rotaryencoder_config_t g_encoder_cfg;
 static QueueHandle_t gpio_evt_queue = NULL;
 static volatile encoder_direction_t g_encoder_direction = ENC_DIR_NONE;
@@ -12,11 +14,9 @@ static volatile encoder_button_state_t g_encoder_button_state = ENC_BTN_IDLE;
 // For state-machine based decoding
 static volatile uint8_t g_encoder_state = 0;
 
-// Table for full-step quadrature decoding, moved to file scope.
-// Index is (old_state << 2) | new_state. Values: 0=no change, 1=CW, -1=CCW.
-// static makes it private to this file. const places it in flash.
-#define LONG_PRESS_DURATION_MS 2000
-static const int8_t KNOB_STATES[] = {0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0};
+// Half-step state transition table for robust decoding
+static const int8_t half_step_table[] = {0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0};
+
 
 /**
  * @brief GPIO ISR handler that sends the triggered GPIO number to a queue.
@@ -94,7 +94,6 @@ static void rotary_encoder_task(void *arg)
     TickType_t last_rotation_time = 0;
     TickType_t button_down_time = 0; // Time when button was pressed
     bool long_press_fired = false;   // Flag to prevent short press after a long press
-    int32_t encoder_position = 0; // Track absolute position
 
     while (1)
     {
@@ -131,36 +130,24 @@ static void rotary_encoder_task(void *arg)
             else if (gpio_num == g_encoder_cfg.pin_a || gpio_num == g_encoder_cfg.pin_b)
             {
                 TickType_t current_time = xTaskGetTickCount();
-                if ((current_time - last_rotation_time) * portTICK_PERIOD_MS > 2) // 2ms debounce
+                if ((current_time - last_rotation_time) * portTICK_PERIOD_MS > g_encoder_cfg.rotation_debounce_ms)
                 {
-                    // Read the new state of the encoder pins
+                    // --- More Robust Half-step decoding logic ---
                     uint8_t new_state = (gpio_get_level(g_encoder_cfg.pin_a) << 1) | gpio_get_level(g_encoder_cfg.pin_b);
-                    
-                    // Use the state table to find the direction
-                    int8_t direction = KNOB_STATES[(g_encoder_state << 2) | new_state];
+                    int8_t direction = half_step_table[(g_encoder_state << 2) | new_state];
 
                     if (direction != 0) {
-                        last_rotation_time = current_time; // Update time on valid rotation
-                        if (direction == 1) { // Clockwise
-                            encoder_position++;
-                            g_encoder_direction = ENC_DIR_CW;
-                            if (g_encoder_cfg.on_rotate_cw)
-                            {
-                                // Send event only on even positions (full step)
-                                if ((encoder_position % 2) == 0) g_encoder_cfg.on_rotate_cw();
+                        g_encoder_state = new_state; // Move to the next state
+                        // A valid half-step has occurred. Now wait for the next half-step to confirm a full detent click.
+                        if ((g_encoder_state == 0x00) || (g_encoder_state == 0x03)) {
+                            if (direction == 1) { // Clockwise
+                                if (g_encoder_cfg.on_rotate_cw) g_encoder_cfg.on_rotate_cw();
+                            } else { // Counter-Clockwise
+                                if (g_encoder_cfg.on_rotate_ccw) g_encoder_cfg.on_rotate_ccw();
                             }
-                        } else { // Counter-Clockwise (direction == -1)
-                            encoder_position--;
-                            g_encoder_direction = ENC_DIR_CCW;
-                            if (g_encoder_cfg.on_rotate_ccw)
-                            {
-                                // Send event only on even positions (full step)
-                                if ((encoder_position % 2) == 0) g_encoder_cfg.on_rotate_ccw();
-                            }
+                            last_rotation_time = current_time;
                         }
                     }
-                    // Update the state for the next transition
-                    g_encoder_state = new_state;
                 }
             }
         }
@@ -172,7 +159,7 @@ static void rotary_encoder_task(void *arg)
                 TickType_t current_time = xTaskGetTickCount();
                 if ((current_time - button_down_time) * portTICK_PERIOD_MS >= LONG_PRESS_DURATION_MS)
                 {
-                    // Before firing, double-check if the button is still physically pressed.
+        // Before firing, double-check if the button is still physically pressed.
                     // This prevents a spurious long press if the release event was dropped.
                     if (gpio_get_level(g_encoder_cfg.button_pin) == 0) {
                         if (g_encoder_cfg.on_button_long_press) g_encoder_cfg.on_button_long_press();

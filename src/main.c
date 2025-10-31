@@ -45,25 +45,26 @@
 
 #define UNKNOWN_FILE_WRITE_STATUS 2
 
-#define DEVICES_POWER_PIN GPIO_NUM_15
-#define OLED_POWER_PIN GPIO_NUM_16
+#define DEVICES_POWER_PIN GPIO_NUM_7
+#define OLED_POWER_PIN GPIO_NUM_15
 
 // --- I2C Configuration for peripherals ---
 #define I2C_MASTER_NUM I2C_NUM_0
-#define I2C_MASTER_SCL_IO GPIO_NUM_37
-#define I2C_MASTER_SDA_IO GPIO_NUM_38
+#define I2C_MASTER_SCL_IO GPIO_NUM_36
+#define I2C_MASTER_SDA_IO GPIO_NUM_35
 #define I2C_MASTER_FREQ_HZ 100000 // 100kHz I2C clock
 
 // --- I2C Configuration for OLED ---
 #define I2C_OLED_NUM I2C_NUM_1
-#define I2C_OLED_SCL_IO GPIO_NUM_39
-#define I2C_OLED_SDA_IO GPIO_NUM_40
+#define I2C_OLED_SCL_IO GPIO_NUM_45
+#define I2C_OLED_SDA_IO GPIO_NUM_48
 
 // --- Rotary Encoder Configuration ---
-#define ROTARY_ENCODER_PIN_A GPIO_NUM_41
-#define ROTARY_ENCODER_PIN_B GPIO_NUM_42
-#define ROTARY_ENCODER_BUTTON_PIN GPIO_NUM_2
-#define BUTTON_DEBOUNCE_TIME_MS 80
+#define ROTARY_ENCODER_PIN_A GPIO_NUM_4
+#define ROTARY_ENCODER_PIN_B GPIO_NUM_16
+#define ROTARY_ENCODER_BUTTON_PIN GPIO_NUM_17
+#define BUTTON_DEBOUNCE_TIME_MS 100
+#define ROTATION_DEBOUNCE_TIME_MS 20
 
 // --- Battery ADC Configuration ---
 #define BATTERY_PWR_PIN GPIO_NUM_5 // This pin is used to enable the battery voltage divider
@@ -1195,6 +1196,7 @@ void app_main(void)
         .pin_b = ROTARY_ENCODER_PIN_B,
         .button_pin = ROTARY_ENCODER_BUTTON_PIN,
         .button_debounce_ms = (uint32_t)BUTTON_DEBOUNCE_TIME_MS,
+        .rotation_debounce_ms = (uint32_t)ROTATION_DEBOUNCE_TIME_MS,  
         .on_rotate_cw = on_encoder_rotate_cw,
         .on_rotate_ccw = on_encoder_rotate_ccw,
         .on_button_press = on_encoder_button_press,

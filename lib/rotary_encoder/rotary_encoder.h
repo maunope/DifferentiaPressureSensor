@@ -25,6 +25,7 @@ typedef struct
     gpio_num_t pin_b;
     gpio_num_t button_pin;
     uint32_t button_debounce_ms;
+    uint32_t rotation_debounce_ms;
     // Callbacks for events
     rotary_encoder_callback_t on_rotate_cw;
     rotary_encoder_callback_t on_rotate_ccw;

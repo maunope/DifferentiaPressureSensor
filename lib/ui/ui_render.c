@@ -489,7 +489,7 @@ void render_sensor_callback(void)
         // Differential Pressure
         if (isnan(s_local_sensor_buffer.diff_pressure_pa))
         {
-            snprintf(line_buf, sizeof(line_buf), "       N/A");
+            snprintf(line_buf, sizeof(line_buf), "        n/a");
         }
         else
         {
@@ -524,7 +524,7 @@ void render_sensor_callback(void)
 
         if (isnan(s_local_sensor_buffer.battery_voltage))
         {
-            snprintf(line_buf, sizeof(line_buf), "Batt: N/A");
+            snprintf(line_buf, sizeof(line_buf), "Batt: n/a");
         }
         else
         {
