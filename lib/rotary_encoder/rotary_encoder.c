@@ -14,9 +14,6 @@ static volatile encoder_button_state_t g_encoder_button_state = ENC_BTN_IDLE;
 // For state-machine based decoding
 static volatile uint8_t g_encoder_state = 0;
 
-// Half-step state transition table for robust decoding
-static const int8_t half_step_table[] = {0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0};
-
 
 /**
  * @brief GPIO ISR handler that sends the triggered GPIO number to a queue.
@@ -111,6 +108,8 @@ static void rotary_encoder_task(void *arg)
                         if (gpio_get_level(g_encoder_cfg.button_pin) == 0) {
                             button_down_time = xTaskGetTickCount();
                             long_press_fired = false; // Reset flag on new press
+                            // Clear any spurious rotation events caused by the button press
+                            xQueueReset(gpio_evt_queue);
                         }
                     }
                 }
@@ -124,6 +123,8 @@ static void rotary_encoder_task(void *arg)
                             if (g_encoder_cfg.on_button_press) g_encoder_cfg.on_button_press();
                         }
                     }
+                    // Clear any spurious rotation events caused by the button release
+                    xQueueReset(gpio_evt_queue);
                     button_down_time = 0; // Reset press time
                 }
             }
@@ -132,21 +133,30 @@ static void rotary_encoder_task(void *arg)
                 TickType_t current_time = xTaskGetTickCount();
                 if ((current_time - last_rotation_time) * portTICK_PERIOD_MS > g_encoder_cfg.rotation_debounce_ms)
                 {
-                    // --- More Robust Half-step decoding logic ---
+                    // --- Simplified and More Robust Decoding Logic ---
                     uint8_t new_state = (gpio_get_level(g_encoder_cfg.pin_a) << 1) | gpio_get_level(g_encoder_cfg.pin_b);
-                    int8_t direction = half_step_table[(g_encoder_state << 2) | new_state];
 
-                    if (direction != 0) {
-                        g_encoder_state = new_state; // Move to the next state
-                        // A valid half-step has occurred. Now wait for the next half-step to confirm a full detent click.
-                        if ((g_encoder_state == 0x00) || (g_encoder_state == 0x03)) {
-                            if (direction == 1) { // Clockwise
-                                if (g_encoder_cfg.on_rotate_cw) g_encoder_cfg.on_rotate_cw();
-                            } else { // Counter-Clockwise
-                                if (g_encoder_cfg.on_rotate_ccw) g_encoder_cfg.on_rotate_ccw();
-                            }
-                            last_rotation_time = current_time;
-                        }
+                    // This state machine is designed to only trigger on a full detent click.
+                    // It requires the encoder to pass through an intermediate state (01 or 10)
+                    // before settling back into a stable state (00 or 11).
+                    // This inherently filters out most bounce noise.
+                    switch (g_encoder_state) {
+                        case 0: // Stable state
+                            if (new_state == 1) g_encoder_state = 1; // CW intermediate
+                            else if (new_state == 2) g_encoder_state = 2; // CCW intermediate
+                            break;
+                        case 1: // CW intermediate state
+                            if (new_state == 3) g_encoder_state = 3; // Continue CW
+                            else if (new_state == 0) { if (g_encoder_cfg.on_rotate_cw) g_encoder_cfg.on_rotate_cw(); g_encoder_state = 0; last_rotation_time = current_time; }
+                            break;
+                        case 2: // CCW intermediate state
+                            if (new_state == 3) g_encoder_state = 3; // Continue CCW
+                            else if (new_state == 0) { if (g_encoder_cfg.on_rotate_ccw) g_encoder_cfg.on_rotate_ccw(); g_encoder_state = 0; last_rotation_time = current_time; }
+                            break;
+                        case 3: // Stable state
+                            if (new_state == 1) g_encoder_state = 1; // CCW intermediate
+                            else if (new_state == 2) g_encoder_state = 2; // CW intermediate
+                            break;
                     }
                 }
             }

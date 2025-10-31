@@ -578,7 +578,7 @@ void main_task(void *pvParameters)
     while (1)
     {
         // --- Create a local, consistent snapshot of the shared buffer ---
-        sensor_buffer_t local_buffer;
+        sensor_buffer_t local_buffer = {0}; // Initialize to a known state
         if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)))
         {
             // Copy the global buffer to a local struct to work with consistent data.
@@ -595,6 +595,7 @@ void main_task(void *pvParameters)
         else
         {
             ESP_LOGE(TAG, "Failed to get sensor buffer snapshot. Loop will use stale data.");
+            // Continue with the zero-initialized local_buffer, which is a safe default.
         }
 
         // --- Process commands from other tasks ---
