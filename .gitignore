@@ -63,3 +63,4 @@ sdkconfig.systemsesp32s3_debug.old
 board/DifferentialPressureSensor/fp-info-cache
 board/DifferentialPressureSensor/DifferentialPressureSensor-backups/*
 lib/ui/.~lock.bitmaps.xlsx#
+board/DifferentialPressureSensor/~DifferentialPressureSensor.kicad_sch.lck
