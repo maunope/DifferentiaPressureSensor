@@ -10,6 +10,10 @@ The following diagram shows how the main peripherals are connected to the ESP32 
 
 ![Overall Architecture](/images/overall_arch.png)
 
+The following image shows a render of the custom PCB layout:
+
+![PCB Layout Screenshot](./images/board_design_pcb_screenshot.png)
+
 ## Hardware & Compatibility
 
 This project was developed and tested on the following hardware:
