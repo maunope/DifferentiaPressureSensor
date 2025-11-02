@@ -28,7 +28,7 @@ The software is designed to be portable and is expected to work on any ESP32-S3 
 *   **Microcontroller**: ESP32-S3-WROOM-1 module.
 *   **Sensors**:
     *   I2C BMP280 for atmospheric pressure and temperature.
-    *   I2C Omron D6F-PH for differential pressure. The software is written to support the `D6F-PH-0505AD3` (+/- 50 Pa), `D6F-PH-0025AD1` (+/- 250 Pa), and `D6F-PH-5050AD4` (+/- 500 Pa) models, selectable via the `config.ini` file.
+    *   I2C [Omron D6F-PH](https://omronfs.omron.com/en_US/ecb/products/pdf/en-d6f_ph.pdf) for differential pressure. The software is written to support the `D6F-PH-0505AD3` (+/- 50 Pa), `D6F-PH-0025AD1` (+/- 250 Pa), and `D6F-PH-5050AD4` (+/- 500 Pa) models, selectable via the `config.ini` file.
 *   **Timekeeping**: A generic **DS3231** I2C Real-Time Clock (RTC) module with a backup battery.
 *   **Storage**: A **SPI bus** microSD card reader for data logging.
 *   **User Interface**:
