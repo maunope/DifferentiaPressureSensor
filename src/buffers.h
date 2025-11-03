@@ -30,11 +30,12 @@ typedef struct {
     write_status_t writeStatus;
     web_server_status_t web_server_status;
     char web_server_url[64];
-    long pressure_pa;
+    float pressure_kpa;
     float temperature_c;
     float diff_pressure_pa;
     time_t timestamp;
-    time_t last_successful_write_ts;
+    time_t last_write_attempt_ts;      // Updated on any write attempt
+    time_t last_successful_write_ts; // Updated only on successful writes
     bool timestamp_from_rtc; 
     float battery_voltage;
     int battery_percentage;
@@ -46,6 +47,13 @@ typedef struct {
     uint64_t uptime_seconds;
     char file_to_delete[64];
     command_status_t delete_file_status;
+    bool bmp280_available;
+    bool d6fph_available;
+    bool ds3231_available;
+    bool usb_msc_connected;
+    bool sensor_read_error;
+    bool datalogger_paused;
+
 } sensor_buffer_t;
 
 // Global buffer and mutex declarations

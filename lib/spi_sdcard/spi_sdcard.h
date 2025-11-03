@@ -8,8 +8,18 @@
 #define SPI_CARD_ERROR_FILE_OPEN   -2
 #define SPI_CARD_OK                 0
 
-void spi_sdcard_full_init(void);
-void spi_sdcard_init_sd_only(void);
+/**
+ * @brief Configuration structure for SPI SD card pins.
+ */
+typedef struct {
+    int mosi_io_num;
+    int miso_io_num;
+    int sclk_io_num;
+    int cs_io_num;
+} spi_sdcard_config_t;
+
+void spi_sdcard_full_init(const spi_sdcard_config_t *config);
+void spi_sdcard_init_sd_only(const spi_sdcard_config_t *config);
 void spi_sdcard_deinit(void);
 void spi_sdcard_rotate_file(void);
 

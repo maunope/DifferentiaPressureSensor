@@ -113,7 +113,7 @@ The sleep sequence is as follows:
 4.  It waits for the `datalogger_task` to confirm it has suspended itself.
 5.  Once paused, it de-initializes the SD card, Wi-Fi, and cuts power to the main peripheral power rail.
 6.  It saves critical state variables (e.g., the timestamp of the last write, total uptime) to RTC memory, which persists through deep sleep.
-7.  It configures two wakeup sources for the ESP32-S3:
+7.  It configures two wakeup sources for the ESP32-S3: 
     *   **GPIO**: A press on the rotary encoder button.
     *   **Timer**: A timer set by the `sleep_duration_ms` configuration value.
 8.  It calls `esp_deep_sleep_start()` to enter deep sleep.

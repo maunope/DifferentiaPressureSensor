@@ -70,6 +70,12 @@
 #define BATTERY_PWR_PIN GPIO_NUM_5 // This pin is used to enable the battery voltage divider
 #define BATTERY_ADC_PIN GPIO_NUM_6
 
+// --- SD Card SPI Configuration ---
+#define SD_CARD_SPI_MOSI_PIN GPIO_NUM_12
+#define SD_CARD_SPI_MISO_PIN GPIO_NUM_10
+#define SD_CARD_SPI_SCLK_PIN GPIO_NUM_11
+#define SD_CARD_SPI_CS_PIN   GPIO_NUM_13
+
 #define OLED_I2C_ADDR 0x3C
 #define DS3231_I2C_ADDR 0x68
 #define BMP280_I2C_ADDR 0x76
@@ -78,6 +84,7 @@
 // --- RTC Memory for State Persistence ---
 // These variables retain their values across deep sleep cycles.
 static RTC_DATA_ATTR write_status_t rtc_last_write_status = WRITE_STATUS_UNKNOWN;
+static RTC_DATA_ATTR time_t rtc_last_write_attempt_ts = 0;
 static RTC_DATA_ATTR time_t rtc_last_successful_write_ts = 0;
 static RTC_DATA_ATTR datalogger_mode_t rtc_datalogger_mode = DATALOGGER_MODE_NORMAL;
 static RTC_DATA_ATTR uint64_t rtc_total_awake_time_s = 0;
@@ -309,6 +316,7 @@ static void go_to_deep_sleep(void)
         // The most critical value is the timestamp of the last successful write.
         // Saving this correctly prevents the race condition where the device wakes
         // and immediately tries to sleep again.
+        rtc_last_write_attempt_ts = g_sensor_buffer.last_write_attempt_ts;
         rtc_last_successful_write_ts = g_sensor_buffer.last_successful_write_ts;
         rtc_datalogger_mode = g_sensor_buffer.datalogger_paused ? DATALOGGER_MODE_PAUSED : (g_sensor_buffer.high_freq_mode_enabled ? DATALOGGER_MODE_HF : DATALOGGER_MODE_NORMAL);
         rtc_last_write_status = g_sensor_buffer.writeStatus;
@@ -338,6 +346,8 @@ static void go_to_deep_sleep(void)
         // In case of failure, assume default mode to be safe.
         local_buffer.high_freq_mode_enabled = false;
         local_buffer.last_successful_write_ts = 0;
+        local_buffer.last_write_attempt_ts = 0;
+        local_buffer.writeStatus = WRITE_STATUS_UNKNOWN;
     }
 
     // --- Smart Sleep Duration Calculation ---
@@ -345,7 +355,7 @@ static void go_to_deep_sleep(void)
     uint32_t log_interval_ms = local_buffer.high_freq_mode_enabled ? g_cfg->hf_log_interval_ms : g_cfg->log_interval_ms;
 
     time_t current_ts = time(NULL);
-    time_t next_log_ts = local_buffer.last_successful_write_ts + (log_interval_ms / 1000);
+    time_t next_log_ts = local_buffer.last_write_attempt_ts + (log_interval_ms / 1000);
     int64_t time_to_next_log_ms = (next_log_ts > current_ts) ? (next_log_ts - current_ts) * 1000 : 0;
 
     // Sleep for the configured duration, but no longer than the time remaining until the next log.
@@ -840,8 +850,15 @@ void main_task(void *pvParameters)
             ESP_LOGI(TAG, "USB power detected. Initializing for MSC.");
             // De-init SD card first to release resources for TinyUSB to use.
             spi_sdcard_deinit();
+            const spi_sdcard_config_t sd_card_pins = {
+                .mosi_io_num = SD_CARD_SPI_MOSI_PIN,
+                .miso_io_num = SD_CARD_SPI_MISO_PIN,
+                .sclk_io_num = SD_CARD_SPI_SCLK_PIN,
+                .cs_io_num = SD_CARD_SPI_CS_PIN,
+            };
+
             // Now, do a full init which includes TinyUSB.
-            spi_sdcard_full_init();
+            spi_sdcard_full_init(&sd_card_pins);
             is_usb_connected_state = true;
             handle_battery_refresh();
         }
@@ -851,8 +868,15 @@ void main_task(void *pvParameters)
             ESP_LOGI(TAG, "USB disconnected. Re-initializing SD card for logging.");
             // De-init everything to be safe.
             spi_sdcard_deinit();
+            const spi_sdcard_config_t sd_card_pins = {
+                .mosi_io_num = SD_CARD_SPI_MOSI_PIN,
+                .miso_io_num = SD_CARD_SPI_MISO_PIN,
+                .sclk_io_num = SD_CARD_SPI_SCLK_PIN,
+                .cs_io_num = SD_CARD_SPI_CS_PIN,
+            };
+
             // Re-init in SD-only mode for the datalogger.
-            spi_sdcard_init_sd_only();
+            spi_sdcard_init_sd_only(&sd_card_pins);
             is_usb_connected_state = false;
             handle_battery_refresh();
         }
@@ -979,6 +1003,7 @@ void app_main(void)
         ESP_LOGI(TAG, "First boot, initializing RTC state.");
         rtc_last_write_status = WRITE_STATUS_UNKNOWN;
         rtc_last_successful_write_ts = 0;
+        rtc_last_write_attempt_ts = 0;
         rtc_datalogger_mode = DATALOGGER_MODE_NORMAL; // Default to normal on cold boot
         rtc_total_awake_time_s = 0;
     }
@@ -989,6 +1014,7 @@ void app_main(void)
     {
         g_sensor_buffer.writeStatus = rtc_last_write_status;
         g_sensor_buffer.last_successful_write_ts = rtc_last_successful_write_ts;
+        g_sensor_buffer.last_write_attempt_ts = rtc_last_write_attempt_ts;
         g_sensor_buffer.high_freq_mode_enabled = (rtc_datalogger_mode == DATALOGGER_MODE_HF);
         g_sensor_buffer.datalogger_paused = (rtc_datalogger_mode == DATALOGGER_MODE_PAUSED);
         // Uptime is calculated dynamically in main_task
@@ -998,7 +1024,14 @@ void app_main(void)
     // --- Step 3: Initialize SD card and Configuration ---
     // Initialize SD card without USB first. The main_task will handle
     // full USB initialization if external power is detected.
-    spi_sdcard_init_sd_only();
+    const spi_sdcard_config_t sd_card_pins = {
+        .mosi_io_num = SD_CARD_SPI_MOSI_PIN,
+        .miso_io_num = SD_CARD_SPI_MISO_PIN,
+        .sclk_io_num = SD_CARD_SPI_SCLK_PIN,
+        .cs_io_num = SD_CARD_SPI_CS_PIN,
+    };
+    spi_sdcard_init_sd_only(&sd_card_pins);
+
     is_usb_connected_state = battery_is_externally_powered();
 
     // Initialize NVS first, as it's required by other components (like Wi-Fi)

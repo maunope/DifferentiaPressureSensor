@@ -66,7 +66,7 @@ static void update_sensor_buffer(datalogger_task_params_t *params)
             }
             else
             {
-                pressure_kpa = (float)pressure_kpa_long/1000.0f; // Convert from Pa to kPa    
+                pressure_kpa = (float)pressure_kpa_long / 1000.0f; // Convert from Pa to kPa
             }
         }
         else
@@ -289,7 +289,7 @@ void datalogger_task(void *pvParameters)
             // fake write time if actual is 0 (no write  made since boot) to avoid issues on first iteration (if it is 0, it will trigger immediately)
             // does no harm to "last write display" on UI because it wont' go to shared buffer until after first write,
             // kind of sucks, but that's that
-            if (g_sensor_buffer.last_successful_write_ts == 0)
+            if (g_sensor_buffer.last_write_attempt_ts == 0)
             {
                 // This is the first check after boot.
                 // If the device has been awake for less than a log interval,
@@ -306,7 +306,7 @@ void datalogger_task(void *pvParameters)
             }
             else
             {
-                last_write_ts = g_sensor_buffer.last_successful_write_ts;
+                last_write_ts = g_sensor_buffer.last_write_attempt_ts;
             }
 
             xSemaphoreGive(g_sensor_buffer_mutex);
@@ -395,9 +395,9 @@ void datalogger_task(void *pvParameters)
                      (long long)local_buffer.timestamp,
                      local_time_str,
                      local_buffer.temperature_c,    // snprintf handles nan
-                     local_buffer.pressure_kpa,      // Already in kPa
-                     local_buffer.diff_pressure_pa,      // snprintf handles nan
-                     local_buffer.battery_voltage,       // snprintf handles nan
+                     local_buffer.pressure_kpa,     // Already in kPa
+                     local_buffer.diff_pressure_pa, // snprintf handles nan
+                     local_buffer.battery_voltage,  // snprintf handles nan
                      local_buffer.battery_percentage,
                      local_buffer.uptime_seconds);
 
@@ -421,26 +421,25 @@ void datalogger_task(void *pvParameters)
                 if (write_err == ESP_OK)
                 {
                     g_sensor_buffer.writeStatus = WRITE_STATUS_OK;
+                    g_sensor_buffer.last_write_attempt_ts = current_ts;
                     g_sensor_buffer.last_successful_write_ts = current_ts; // Mark successful write with current timestamp
                     ESP_LOGI(TAG, "Successfully wrote to SD card.");
                 }
                 else
                 {
                     g_sensor_buffer.writeStatus = WRITE_STATUS_FAIL;
-                    // Also update the timestamp to prevent immediate retries.
-                    g_sensor_buffer.last_successful_write_ts = current_ts;
+                    // Also update the timestamp to prevent immediate retries after waking up.
+                    g_sensor_buffer.last_write_attempt_ts = current_ts;
                     ESP_LOGE(TAG, "Failed to write to SD card after all retries.");
                 }
                 xSemaphoreGive(g_sensor_buffer_mutex);
             }
-            // If the write was successful, signal to the main task that it's safe to sleep.
-            if (write_err == ESP_OK)
+            // send a sleep command regardless of write success, this is a safety measure as sleep
+            // triggers a full power cycle on the SPI card, which can help recover from certain SD card issues
+            if (g_app_cmd_queue != NULL)
             {
-                if (g_app_cmd_queue != NULL)
-                {
-                    app_command_t sleep_cmd = {.cmd = APP_CMD_LOG_COMPLETE_SLEEP_NOW};
-                    xQueueSend(g_app_cmd_queue, &sleep_cmd, 0);
-                }
+                app_command_t sleep_cmd = {.cmd = APP_CMD_LOG_COMPLETE_SLEEP_NOW};
+                xQueueSend(g_app_cmd_queue, &sleep_cmd, 0);
             }
         }
 

@@ -25,6 +25,12 @@
 #include "../buffers.h"
 static const char *TAG = "SPI_SDCARD_V2";
 
+// Default pin configuration if not provided
+#define DEFAULT_SPI_MOSI_PIN GPIO_NUM_12
+#define DEFAULT_SPI_MISO_PIN GPIO_NUM_10
+#define DEFAULT_SPI_SCLK_PIN GPIO_NUM_11
+#define DEFAULT_SPI_CS_PIN   GPIO_NUM_13
+
 // Forward declaration for MSC storage callback
 // void tud_msc_set_spidrv(long drv);
 
@@ -43,27 +49,20 @@ static void create_new_log_file(bool is_hf_mode);
 
 // Global host and mount configuration
 static sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-static sdspi_device_config_t slot_config = {
-    .host_id = SPI2_HOST,
-    .gpio_cs = GPIO_NUM_13,
-    .gpio_cd = -1,
-    .gpio_wp = -1,
-    .gpio_int = -1,
-};
-
+static sdspi_device_config_t slot_config; // Will be initialized in init functions
 static esp_vfs_fat_sdmmc_mount_config_t mount_config = {
     .format_if_mount_failed = true,
     .max_files = 5,
     .allocation_unit_size = 16 * 1024};
 
 
-void spi_sdcard_init_sd_only(void)
+void spi_sdcard_init_sd_only(const spi_sdcard_config_t *config)
 {
     ESP_LOGI(TAG, "Starting SD card only initialization.");
     spi_sdcard_deinit(); // Ensure clean state
 
     gpio_config_t io_conf = {
-        .pin_bit_mask = (1ULL << GPIO_NUM_13),
+        .pin_bit_mask = (1ULL << config->cs_io_num),
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_ENABLE,
@@ -73,9 +72,9 @@ void spi_sdcard_init_sd_only(void)
     host.slot = SPI2_HOST;
     host.max_freq_khz = SDMMC_FREQ_DEFAULT;
     spi_bus_config_t bus_cfg = {
-        .mosi_io_num = GPIO_NUM_12,
-        .miso_io_num = GPIO_NUM_10,
-        .sclk_io_num = GPIO_NUM_11,
+        .mosi_io_num = config->mosi_io_num,
+        .miso_io_num = config->miso_io_num,
+        .sclk_io_num = config->sclk_io_num,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
         .max_transfer_sz = 16384,
@@ -98,10 +97,10 @@ void spi_sdcard_init_sd_only(void)
     }
 }
 
-void spi_sdcard_full_init()
+void spi_sdcard_full_init(const spi_sdcard_config_t *config)
 {
     ESP_LOGI(TAG, "Starting full TinyUSB and SD card initialization.");
-    spi_sdcard_init_sd_only();
+    spi_sdcard_init_sd_only(config);
     if (mounted)
     {
         ESP_LOGI(TAG, "Configuring and installing TinyUSB for MSC.");

@@ -507,6 +507,21 @@ void render_sensor_callback(void)
         snprintf(line_buf, sizeof(line_buf), "Uptime: %.12s", uptime_str);
         write_padded_line(2, line_buf);
 
+        // Last write attempt
+        if (s_local_sensor_buffer.last_write_attempt_ts > 0)
+        {
+            struct tm local_tm;
+            convert_gmt_to_cet(s_local_sensor_buffer.last_write_attempt_ts, &local_tm);
+            char time_buf[10];
+            strftime(time_buf, sizeof(time_buf), "%H:%M:%S", &local_tm);
+            snprintf(line_buf, sizeof(line_buf), "Last att: %s", time_buf);
+        }
+        else
+        {
+            snprintf(line_buf, sizeof(line_buf), "Last att: None");
+        }
+        write_padded_line(3, line_buf);
+
         // Last successful write
         if (s_local_sensor_buffer.last_successful_write_ts > 0)
         {
@@ -514,13 +529,13 @@ void render_sensor_callback(void)
             convert_gmt_to_cet(s_local_sensor_buffer.last_successful_write_ts, &local_tm);
             char time_buf[10];
             strftime(time_buf, sizeof(time_buf), "%H:%M:%S", &local_tm);
-            snprintf(line_buf, sizeof(line_buf), "Last wr.: %s", time_buf);
+            snprintf(line_buf, sizeof(line_buf), "Last OK:  %s", time_buf);
         }
         else
         {
-            snprintf(line_buf, sizeof(line_buf), "Last wr.: None");
+            snprintf(line_buf, sizeof(line_buf), "Last OK:  None");
         }
-        write_padded_line(3, line_buf);
+        write_padded_line(4, line_buf);
 
         if (isnan(s_local_sensor_buffer.battery_voltage))
         {
@@ -530,7 +545,7 @@ void render_sensor_callback(void)
         {
             snprintf(line_buf, sizeof(line_buf), "Batt: %.2fV %d%% %s", s_local_sensor_buffer.battery_voltage, s_local_sensor_buffer.battery_percentage, s_local_sensor_buffer.battery_externally_powered == 1 ? "(C)" : "");
         }
-        write_padded_line(4, line_buf);
+        write_padded_line(5, line_buf);
     }
 }
 
@@ -546,7 +561,8 @@ void page_fs_stats_render_callback(void)
     int free_space_mb = -2;
     file_count = s_local_sensor_buffer.sd_card_file_count;
     free_space_mb = s_local_sensor_buffer.sd_card_free_bytes;
-    time_t last_write_ts = s_local_sensor_buffer.last_successful_write_ts;
+    time_t last_attempt_ts = s_local_sensor_buffer.last_write_attempt_ts;
+    time_t last_ok_ts = s_local_sensor_buffer.last_successful_write_ts;
 
     // Line 1 is blank
 
@@ -579,18 +595,28 @@ void page_fs_stats_render_callback(void)
         snprintf(new_lines[3], sizeof(new_lines[3]), "Free: Error");
     }
 
-    // Display last successful write timestamp
-    snprintf(new_lines[5], sizeof(new_lines[5]), "Last OK write:");
-    if (last_write_ts > 0)
+    // Display last write attempt timestamp
+    snprintf(new_lines[5], sizeof(new_lines[5]), "Last attempt:");
+    if (last_attempt_ts > 0)
     {
         struct tm local_tm;
-        convert_gmt_to_cet(last_write_ts, &local_tm);
+        convert_gmt_to_cet(last_attempt_ts, &local_tm);
         // Format as YYYY-MM-DD HH:MM
         strftime(new_lines[6], sizeof(new_lines[6]), "%Y-%m-%d %H:%M", &local_tm);
     }
     else
     {
         snprintf(new_lines[6], sizeof(new_lines[6]), "None");
+    }
+
+    // Display last successful write timestamp
+    snprintf(new_lines[7], sizeof(new_lines[7]), "Last OK write: %s", (last_ok_ts > 0) ? "" : "None");
+    if (last_ok_ts > 0)
+    {
+        struct tm local_tm;
+        convert_gmt_to_cet(last_ok_ts, &local_tm);
+        // Format as YYYY-MM-DD HH:MM
+        strftime(new_lines[7] + strlen("Last OK write: "), sizeof(new_lines[7]) - strlen("Last OK write: "), "%Y-%m-%d %H:%M", &local_tm);
     }
 
     write_inverted_line(0, new_lines[0]);

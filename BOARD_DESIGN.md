@@ -68,9 +68,9 @@ The following table details the GPIO connections for the main peripherals.
 |                     | `I2C0_SDA`      | 35            |
 | **OLED I2C Bus**    | `I2C1_SCL`      | 45            | Dedicated bus for the display         |
 |                     | `I2C1_SDA`      | 48            |                                       |
-| **SD Card (SPI)**   | `SPI_MOSI`      | 11            | Standard SPI pins for SD card         |
-|                     | `SPI_MISO`      | 12            |                                       |
-|                     | `SPI_CLK`       | 10            |                                       |
+| **SD Card (SPI)**   | `SPI_MOSI`      | 12            | Standard SPI pins for SD card         |
+|                     | `SPI_MISO`      | 10            |                                       |
+|                     | `SPI_CLK`       | 11            |                                       |
 |                     | `SPI_CS`        | 13            |                                       |
 | **Rotary Encoder**  | `ENC_A`         | 4             |                                       |
 |                     | `ENC_B`         | 16            |                                       |
@@ -79,33 +79,6 @@ The following table details the GPIO connections for the main peripherals.
 |                     | `BATT_ADC`      | 6             | ADC input for voltage measurement     |
 
 
-
-
-// --- RTC Memory for State Persistence ---
-// These variables retain their values across deep sleep cycles.
-static RTC_DATA_ATTR write_status_t rtc_last_write_status = WRITE_STATUS_UNKNOWN;
-static RTC_DATA_ATTR time_t rtc_last_successful_write_ts = 0;
-static RTC_DATA_ATTR datalogger_mode_t rtc_datalogger_mode = DATALOGGER_MODE_NORMAL;
-static RTC_DATA_ATTR uint64_t rtc_total_awake_time_s = 0;
-static RTC_DATA_ATTR uint64_t rtc_last_boot_time_ms = 0;
-
-static const char *TAG = "main";
-
-typedef enum
-{
-    I2C_BUS_SENSORS, // I2C_NUM_0 for main peripherals
-    I2C_BUS_OLED,    // I2C_NUM_1 for the display
-    I2C_BUS_ALL      // Both buses
-} i2c_bus_target_t;
-
-ds3231_t g_rtc;    // Global RTC device handle
-bmp280_t g_bmp280; // Global BMP280 device handle
-d6fph_t g_d6fph;   // Global D6F-PH device handle
-
-TaskHandle_t g_datalogger_task_handle = NULL;
-TaskHandle_t g_uiRender_task_handle = NULL;
-i2c_master_bus_handle_t g_i2c_bus0_handle = NULL;
-i2c_master_bus_handle_t g_i2c_bus1_handle = NULL;
 
 ## I2C Bus Considerations
 
