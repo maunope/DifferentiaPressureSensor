@@ -79,7 +79,7 @@ const ui_menu_page_t ui_menu_tree[] = {
      .title = "Sampling Mode",
      .items = {
          {.label = "High Frequency", .has_submenu = false, .on_btn = menu_hf_mode_enable_on_btn},
-         {.label = "Normal", .has_submenu = false, .on_btn = menu_hf_mode_disable_on_btn},
+         {.label = "Normal", .has_submenu = false, .on_btn = menu_hf_mode_disable_on_btn}, // This was correct, but the underlying command changed
          {.label = "Paused", .has_submenu = false, .on_btn = menu_datalogger_pause_on_btn},
          {.label = "Back", .has_submenu = false, .on_btn = menu_cancel_on_btn},
      },

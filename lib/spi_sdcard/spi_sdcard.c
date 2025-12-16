@@ -60,35 +60,49 @@ void spi_sdcard_init_sd_only(const spi_sdcard_config_t *config)
 {
     ESP_LOGI(TAG, "Starting SD card only initialization.");
     spi_sdcard_deinit(); // Ensure clean state
-
-    gpio_config_t io_conf = {
-        .pin_bit_mask = (1ULL << config->cs_io_num),
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_ENABLE,
-        .intr_type = GPIO_INTR_DISABLE};
-    gpio_config(&io_conf);
-
+    
+    // Use the provided config or fall back to defaults
+    int mosi_pin = config ? config->mosi_io_num : DEFAULT_SPI_MOSI_PIN;
+    int miso_pin = config ? config->miso_io_num : DEFAULT_SPI_MISO_PIN;
+    int sclk_pin = config ? config->sclk_io_num : DEFAULT_SPI_SCLK_PIN;
+    int cs_pin = config ? config->cs_io_num : DEFAULT_SPI_CS_PIN;
+    
+    ESP_LOGI(TAG, "Using SPI pins: MOSI=%d, MISO=%d, SCLK=%d, CS=%d", mosi_pin, miso_pin, sclk_pin, cs_pin);
+    
     host.slot = SPI2_HOST;
     host.max_freq_khz = SDMMC_FREQ_DEFAULT;
+
     spi_bus_config_t bus_cfg = {
-        .mosi_io_num = config->mosi_io_num,
-        .miso_io_num = config->miso_io_num,
-        .sclk_io_num = config->sclk_io_num,
+        .mosi_io_num = mosi_pin,
+        .miso_io_num = miso_pin,
+        .sclk_io_num = sclk_pin,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
         .max_transfer_sz = 16384,
     };
+
+    // Fully initialize the slot configuration
+    slot_config = (sdspi_device_config_t)SDSPI_DEVICE_CONFIG_DEFAULT();
+    slot_config.gpio_cs = cs_pin;
+    slot_config.host_id = host.slot;
+
     esp_err_t ret = spi_bus_initialize(host.slot, &bus_cfg, SDSPI_DEFAULT_DMA);
-    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE)
+    if (ret == ESP_ERR_INVALID_STATE)
+    {
+        ESP_LOGW(TAG, "SPI bus already initialized. Continuing...");
+    }
+    else if (ret != ESP_OK)
     {
         ESP_LOGE(TAG, "Failed to initialize SPI bus: %s", esp_err_to_name(ret));
         return;
     }
+
     ret = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_config, &mount_config, &s_card);
     if (ret != ESP_OK)
     {
         ESP_LOGE(TAG, "Failed to mount SD card: %s", esp_err_to_name(ret));
+        // If mount fails, de-initialize the bus to clean up
+        spi_bus_free(host.slot);
     }
     else
     {

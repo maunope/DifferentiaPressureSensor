@@ -109,7 +109,6 @@ static void update_sensor_buffer(datalogger_task_params_t *params)
         g_sensor_buffer.temperature_c = temperature_c;
         g_sensor_buffer.pressure_kpa = pressure_kpa;
         g_sensor_buffer.diff_pressure_pa = diff_pressure_pa;
-        g_sensor_buffer.timestamp = time(NULL);
         g_sensor_buffer.battery_voltage = battery_reader_get_voltage();
         g_sensor_buffer.battery_percentage = battery_reader_get_percentage();
         g_sensor_buffer.battery_externally_powered = battery_is_externally_powered();
@@ -224,7 +223,6 @@ void datalogger_task(void *pvParameters)
                             g_sensor_buffer.temperature_c = temp;
                             g_sensor_buffer.pressure_kpa = press;
                             g_sensor_buffer.diff_pressure_pa = diff_press;
-                            g_sensor_buffer.timestamp = time(NULL);
                             g_sensor_buffer.battery_voltage = battery_reader_get_voltage();
                             g_sensor_buffer.battery_percentage = battery_reader_get_percentage();
                             xSemaphoreGive(g_sensor_buffer_mutex);
@@ -339,10 +337,11 @@ void datalogger_task(void *pvParameters)
 
         // ESP_LOGI(TAG, "Checking log time. Current: %lu, Last write: %lu, Interval: %lu ms, Paused: %d", (unsigned long)current_ts, (unsigned long)last_write_ts, (unsigned long)current_log_interval, is_logging_paused);
         //  Check if enough time (in seconds) has passed for the next log.
-        //  ESP_LOGI(TAG, "Current TS: %lld, Last Write TS: %lld, Interval: %lu ms", (long long)current_ts, (long long)last_write_ts, (unsigned long)current_log_interval); // This line was commented out, but I'll fix it too just in case.
-        if (!is_logging_paused && (current_ts - last_write_ts) * 1000 >= current_log_interval)
+        time_t next_log_ts = last_write_ts + (time_t)ceil((double)current_log_interval / 1000.0);
+        ESP_LOGD(TAG, "Current TS: %lld, Next Log TS: %lld, Paused: %d", (long long)current_ts, (long long)next_log_ts, is_logging_paused);
+        if (!is_logging_paused && current_ts >= next_log_ts)
         {
-            //     ESP_LOGI(TAG, "Scheduled log interval reached. Logging data.");
+            ESP_LOGD(TAG, "Scheduled log interval reached. Logging data.");
             // It's time for a scheduled log. This takes priority.
 
             // Create a local copy of the buffer for logging and writing to SD
@@ -383,7 +382,7 @@ void datalogger_task(void *pvParameters)
             // Format timestamp for logging
             char local_time_str[32];
             struct tm local_tm;
-            convert_gmt_to_cet(local_buffer.timestamp, &local_tm);
+            convert_gmt_to_cet(current_ts, &local_tm);
             strftime(local_time_str, sizeof(local_time_str), "%Y-%m-%d %H:%M:%S", &local_tm);
 
             // Log to console
@@ -391,8 +390,8 @@ void datalogger_task(void *pvParameters)
 
             // Format the data into a CSV string
             char csv_line[200];
-            snprintf(csv_line, sizeof(csv_line), "%lld,%s,%.2f,%.3f,%.2f,%.2f,%d,%llu",
-                     (long long)local_buffer.timestamp,
+            snprintf(csv_line, sizeof(csv_line), "%lld,%s,%.2f,%.3f,%.2f,%.2f,%d,%llu", // Use current_ts for the CSV timestamp
+                     (long long)current_ts,
                      local_time_str,
                      local_buffer.temperature_c,    // snprintf handles nan
                      local_buffer.pressure_kpa,     // Already in kPa

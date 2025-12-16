@@ -100,6 +100,64 @@ static void url_decode(char *str)
     *p = '\0';
 }
 
+/**
+ * @brief Reads the first and last timestamps from a CSV file.
+ *
+ * @param filepath Path to the CSV file.
+ * @param out_first_ts Pointer to store the first timestamp.
+ * @param out_last_ts Pointer to store the last timestamp.
+ * @return esp_err_t ESP_OK on success, or an error code on failure.
+ */
+static esp_err_t get_file_timestamps(const char *filepath, time_t *out_first_ts, time_t *out_last_ts)
+{
+    FILE *f = fopen(filepath, "r");
+    if (!f)
+    {
+        ESP_LOGE(TAG, "Failed to open file: %s", filepath);
+        return ESP_FAIL;
+    }
+
+    char line_buf[256];
+    // Read and discard header
+    if (fgets(line_buf, sizeof(line_buf), f) == NULL)
+    {
+        fclose(f);
+        return ESP_FAIL; // File is empty or read error
+    }
+
+    // Read first data line for first_ts
+    if (fgets(line_buf, sizeof(line_buf), f) != NULL)
+    {
+        *out_first_ts = atoll(line_buf);
+    }
+    else
+    {
+        *out_first_ts = 0; // No data lines
+    }
+
+    // Seek to near the end to find the last line
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    if (size > 1024) // Read a larger chunk from the end to be safe
+        fseek(f, -1024, SEEK_END);
+    else
+        fseek(f, 0, SEEK_SET);
+
+    char last_line[256] = "";
+    while (fgets(line_buf, sizeof(line_buf), f) != NULL)
+    {
+        // The last complete line read will be in line_buf
+        if (strlen(line_buf) > 1) // Ensure it's not an empty line
+        {
+            strncpy(last_line, line_buf, sizeof(last_line) - 1);
+        }
+    }
+    *out_last_ts = atoll(last_line);
+
+    fclose(f);
+    return ESP_OK;
+}
+
 /* Handler to serve the main index.html page */
 /**
  * @brief HTTP GET handler for the root URL ("/").
@@ -868,44 +926,18 @@ static esp_err_t api_fileinfo_handler(httpd_req_t *req)
     }
 
     snprintf(filepath, sizeof(filepath), "/sdcard/%s", filename);
-    FILE *f = fopen(filepath, "r");
-    if (!f)
+
+    if (get_file_timestamps(filepath, &first_ts, &last_ts) != ESP_OK)
     {
-        httpd_resp_send_404(req);
+        // Error logged in helper function
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to read file info");
         return ESP_FAIL;
     }
 
-    char line_buf[256];
-    // Read and discard header
-    if (fgets(line_buf, sizeof(line_buf), f) == NULL)
+    if (first_ts == 0 && last_ts == 0)
     {
-        fclose(f);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
+        ESP_LOGW(TAG, "File %s appears to be empty or has no valid timestamps.", filename);
     }
-
-    // Read first data line for first_ts
-    if (fgets(line_buf, sizeof(line_buf), f) != NULL)
-    {
-        first_ts = atoll(line_buf);
-    }
-
-    // Seek to near the end to find the last line
-    fseek(f, 0, SEEK_END);
-    long size = ftell(f);
-    if (size > 512)
-        fseek(f, -512, SEEK_END);
-    else
-        fseek(f, 0, SEEK_SET);
-
-    char last_line[256] = "";
-    while (fgets(line_buf, sizeof(line_buf), f) != NULL)
-    {
-        strncpy(last_line, line_buf, sizeof(last_line) - 1);
-    }
-    last_ts = atoll(last_line);
-
-    fclose(f);
 
     httpd_resp_set_type(req, "application/json");
     char json_resp[128];
@@ -1266,6 +1298,22 @@ static esp_err_t api_preview_handler(httpd_req_t *req)
     }
 
     snprintf(filepath, sizeof(filepath), "/sdcard/%s", filename);
+
+    // If a timestamp and duration are provided, check if the window needs to be adjusted
+    if (requested_timestamp > 0 && duration_sec > 0)
+    {
+        time_t first_ts, last_ts;
+        if (get_file_timestamps(filepath, &first_ts, &last_ts) == ESP_OK)
+        {
+            if (requested_timestamp + duration_sec > last_ts)
+            {
+                ESP_LOGI(TAG, "Preview window extends beyond EOF. Adjusting start time.");
+                requested_timestamp = last_ts - duration_sec;
+                if (requested_timestamp < first_ts) requested_timestamp = first_ts;
+            }
+        }
+    }
+
     if (query_buf)
         free(query_buf); // Free query buffer now that we are done with it
 
@@ -1483,8 +1531,9 @@ static esp_err_t api_sensordata_handler(httpd_req_t *req)
     httpd_resp_set_type(req, "application/json");
     char json_buffer[512];
     char local_time_str[32];
+    time_t now = time(NULL); // Get live system time
     struct tm local_tm;
-    convert_gmt_to_cet(data.timestamp, &local_tm);
+    convert_gmt_to_cet(now, &local_tm);
     strftime(local_time_str, sizeof(local_time_str), "%Y-%m-%d %H:%M:%S", &local_tm);
 
     // Handle potential NaN values by printing "null" for JSON compatibility.
@@ -1498,7 +1547,7 @@ static esp_err_t api_sensordata_handler(httpd_req_t *req)
 
     snprintf(json_buffer, sizeof(json_buffer),
              "{\"timestamp\":%lld,\"datetime_local\":\"%s\",\"temperature_c\":%s,\"pressure_kpa\":%.3f,\"diff_pressure_pa\":%s,\"battery_voltage\":%s,\"battery_percentage\":%d,\"battery_externally_powered\":%s}",
-             (long long)data.timestamp,
+             (long long)now,
              local_time_str,
              temp_str,
              data.pressure_kpa, // Already in kPa

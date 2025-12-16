@@ -22,10 +22,9 @@ sensor_buffer_t g_sensor_buffer = {
     .battery_voltage = NAN,
     .battery_percentage = 0,
     .battery_externally_powered = 0,
-    .writeStatus = WRITE_STATUS_UNKNOWN,
-    .timestamp = 0,
-    .last_successful_write_ts = 0, // Updated only on successful writes
+    .writeStatus = WRITE_STATUS_UNKNOWN,    
     .last_write_attempt_ts = 0,      // Updated on any write attempt
+    .last_successful_write_ts = 0, // Updated only on successful writes
     .sd_card_file_count = -2, // -2 indicates loading
     .sd_card_free_bytes = -2, // -2 indicates loading
     .high_freq_mode_enabled = false,
@@ -37,7 +36,7 @@ sensor_buffer_t g_sensor_buffer = {
     .sensor_read_error = false,
     .datalogger_paused = false,
 };
-g_sensor_buffer.last_write_attempt_ts = 0;
+
 SemaphoreHandle_t g_sensor_buffer_mutex = NULL;
 QueueHandle_t g_app_cmd_queue = NULL;
 SemaphoreHandle_t g_command_status_mutex = NULL;

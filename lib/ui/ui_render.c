@@ -454,11 +454,12 @@ void render_sensor_callback(void)
     if (s_sensor_page_num == 0)
     {
         // Page 1: Main sensor data
-        // Current Time
+        // Current Time - read live from system, not from buffer
+        time_t now = time(NULL);
         struct tm local_tm;
-        convert_gmt_to_cet(s_local_sensor_buffer.timestamp, &local_tm);
+        convert_gmt_to_cet(now, &local_tm);
         strftime(value_buf, sizeof(value_buf), "%Y-%m-%d %H:%M:%S", &local_tm);
-        write_padded_line(2, s_local_sensor_buffer.timestamp > 0 ? value_buf : "Time not set");
+        write_padded_line(2, now > 0 ? value_buf : "Time not set");
 
         // Temperature
         if (isnan(s_local_sensor_buffer.temperature_c))
@@ -881,8 +882,8 @@ static void draw_status_icons(void)
     // Only draw these other icons if USB is NOT connected.
     if (!is_usb_msc)
     {
-        // If SD card write failed or a sensor is missing, draw "!!"
-        if (sd_write_failed || !sensors_ok)
+        // If SD card write failed OR a sensor is missing, draw "!!"
+        if (sd_write_failed || !sensors_ok) // The OR logic is correct, but let's make it more explicit
         {
             current_icon_x -= 9; // Move left to make space for the 8-pixel wide icon + 1px padding
             i2c_oled_draw_bitmap(s_oled_i2c_num, current_icon_x, 0, logging_error_icon, true, is_inverted);
@@ -1171,7 +1172,7 @@ void menu_set_time_on_btn(void)
  */
 void menu_hf_mode_enable_on_btn(void)
 {
-    app_command_t cmd = {.cmd = APP_CMD_SET_DATALOGGER_MODE, .mode = DATALOGGER_MODE_HF};
+    app_command_t cmd = {.cmd = APP_CMD_SET_DATALOGGER_MODE, .mode = DATALOGGER_MODE_HF };
     xQueueSend(g_app_cmd_queue, &cmd, 0);
     menu_cancel_on_btn();
 }
@@ -1181,7 +1182,7 @@ void menu_hf_mode_enable_on_btn(void)
  */
 void menu_hf_mode_disable_on_btn(void)
 {
-    app_command_t cmd = {.cmd = APP_CMD_SET_DATALOGGER_MODE, .mode = DATALOGGER_MODE_NORMAL};
+    app_command_t cmd = {.cmd = APP_CMD_SET_DATALOGGER_MODE, .mode = DATALOGGER_MODE_NORMAL };
     xQueueSend(g_app_cmd_queue, &cmd, 0);
     menu_cancel_on_btn();
 }
@@ -1191,7 +1192,7 @@ void menu_hf_mode_disable_on_btn(void)
  */
 void menu_datalogger_pause_on_btn(void)
 {
-    app_command_t cmd = {.cmd = APP_CMD_SET_DATALOGGER_MODE, .mode = DATALOGGER_MODE_PAUSED};
+    app_command_t cmd = {.cmd = APP_CMD_SET_DATALOGGER_MODE, .mode = DATALOGGER_MODE_PAUSED };
     xQueueSend(g_app_cmd_queue, &cmd, 0);
     menu_cancel_on_btn();
 }

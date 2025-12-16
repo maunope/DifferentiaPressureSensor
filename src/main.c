@@ -40,6 +40,7 @@
 #include "ui_render.h"
 #include "datalogger_task.h"
 #include "config_params.h"
+#include <math.h>
 // DO NOT use pins 19 and 20, they are used by the flash memory
 // DO NOT use pins 5 and 6, they are used for LiPo battery measurements unless you change the config
 
@@ -84,7 +85,7 @@
 // --- RTC Memory for State Persistence ---
 // These variables retain their values across deep sleep cycles.
 static RTC_DATA_ATTR write_status_t rtc_last_write_status = WRITE_STATUS_UNKNOWN;
-static RTC_DATA_ATTR time_t rtc_last_write_attempt_ts = 0;
+static RTC_DATA_ATTR time_t rtc_last_write_attempt_ts = 0; // This was a duplicate line
 static RTC_DATA_ATTR time_t rtc_last_successful_write_ts = 0;
 static RTC_DATA_ATTR datalogger_mode_t rtc_datalogger_mode = DATALOGGER_MODE_NORMAL;
 static RTC_DATA_ATTR uint64_t rtc_total_awake_time_s = 0;
@@ -355,7 +356,7 @@ static void go_to_deep_sleep(void)
     uint32_t log_interval_ms = local_buffer.high_freq_mode_enabled ? g_cfg->hf_log_interval_ms : g_cfg->log_interval_ms;
 
     time_t current_ts = time(NULL);
-    time_t next_log_ts = local_buffer.last_write_attempt_ts + (log_interval_ms / 1000);
+    time_t next_log_ts = local_buffer.last_write_attempt_ts + (time_t)ceil((double)log_interval_ms / 1000.0);
     int64_t time_to_next_log_ms = (next_log_ts > current_ts) ? (next_log_ts - current_ts) * 1000 : 0;
 
     // Sleep for the configured duration, but no longer than the time remaining until the next log.
@@ -702,7 +703,7 @@ void main_task(void *pvParameters)
                     local_buffer.web_server_status = WEB_SERVER_STOPPED;
                 }
                 break;
-            case APP_CMD_SET_DATALOGGER_MODE:
+            case APP_CMD_SET_DATALOGGER_MODE: // This was APP_CMD_ENABLE_HF_MODE
                 ESP_LOGI(TAG, "CMD: Set Datalogger Mode to %d", cmd.mode);
                 if (g_datalogger_cmd_queue != NULL)
                 {
