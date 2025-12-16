@@ -23,11 +23,11 @@ static const char *TAG = "DataloggerTask";
 
 // --- Kalman Filter States ---
 // Statically allocated to persist across function calls without using global variables in the header.
-static kalman_filter_t kf_temperature;
-static kalman_filter_t kf_pressure;
-static kalman_filter_t kf_diff_pressure;
-static kalman_filter_t kf_battery_voltage;
-static bool kf_initialized = false;
+RTC_DATA_ATTR static kalman_filter_t kf_temperature;
+RTC_DATA_ATTR static kalman_filter_t kf_pressure;
+RTC_DATA_ATTR static kalman_filter_t kf_diff_pressure;
+RTC_DATA_ATTR static kalman_filter_t kf_battery_voltage;
+RTC_DATA_ATTR static bool kf_initialized = false;
 
 /**
  * @brief Reads all relevant sensors and updates the global sensor buffer.
@@ -113,18 +113,6 @@ static void update_sensor_buffer(datalogger_task_params_t *params)
         ESP_LOGE(TAG, "Failed to acquire I2C mutex for sensor readings.");
     }
 
-    // --- Initialize Kalman filters on first valid read ---
-    if (!kf_initialized && !isnan(raw_temperature_c) && !isnan(raw_pressure_kpa) && !isnan(raw_diff_pressure_pa) && !isnan(raw_battery_voltage))
-    {
-        const config_params_t *cfg = config_params_get();
-        kalman_init(&kf_temperature, cfg->kf_temp_q, cfg->kf_temp_r, raw_temperature_c);
-        kalman_init(&kf_pressure, cfg->kf_press_q, cfg->kf_press_r, raw_pressure_kpa);
-        kalman_init(&kf_diff_pressure, cfg->kf_diff_press_q, cfg->kf_diff_press_r, raw_diff_pressure_pa);
-        kalman_init(&kf_battery_voltage, cfg->kf_batt_v_q, cfg->kf_batt_v_r, raw_battery_voltage);
-        kf_initialized = true;
-        ESP_LOGI(TAG, "Kalman filters initialized.");
-    }
-
     // --- Apply Kalman filters if initialized ---
     float filtered_temperature_c = kf_initialized && !isnan(raw_temperature_c) ? kalman_update(&kf_temperature, raw_temperature_c) : raw_temperature_c;
     float filtered_pressure_kpa = kf_initialized && !isnan(raw_pressure_kpa) ? kalman_update(&kf_pressure, raw_pressure_kpa) : raw_pressure_kpa;
@@ -198,6 +186,48 @@ void datalogger_task(void *pvParameters)
     // Wait until the main app signals that all initialization is complete.
     ESP_LOGI(TAG, "Waiting for initialization to complete...");
     xEventGroupWaitBits(g_init_event_group, INIT_DONE_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
+
+    // --- Kalman Filter Initialization ---
+    // Check if this is a cold boot (not from deep sleep) or if filters are uninitialized.
+    esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+    if (cause != ESP_SLEEP_WAKEUP_TIMER || !kf_initialized)
+    {
+        ESP_LOGI(TAG, "Cold boot or uninitialized. Seeding Kalman filters...");
+        // Perform initial sensor readings to get a stable baseline
+        float temp_sum = 0, press_sum = 0, diff_press_sum = 0, batt_v_sum = 0;
+        const int NUM_SAMPLES = 3;  
+
+        for (int i = 0; i < NUM_SAMPLES; i++)
+        {
+            vTaskDelay(pdMS_TO_TICKS(250)); // Small delay between readings
+            if (xSemaphoreTake(g_i2c_bus_mutex, portMAX_DELAY))
+            {
+                float temp, press_pa;
+                if (params->bmp280_available)
+                {
+                    bmp280_force_read(params->bmp280_dev, &temp, (long *)&press_pa);
+                    temp_sum += temp;
+                    press_sum += press_pa / 1000.0f; // to kPa
+                }
+                if (params->d6fph_available)
+                {
+                    float diff_press;
+                    d6fph_read_pressure(params->d6fph_dev, &diff_press);
+                    diff_press_sum += diff_press;
+                }
+                xSemaphoreGive(g_i2c_bus_mutex);
+            }
+            batt_v_sum += battery_reader_get_voltage();
+        }
+
+        const config_params_t *cfg = config_params_get();
+        kalman_init(&kf_temperature, cfg->kf_temp_q, cfg->kf_temp_r, temp_sum / NUM_SAMPLES);
+        kalman_init(&kf_pressure, cfg->kf_press_q, cfg->kf_press_r, press_sum / NUM_SAMPLES);
+        kalman_init(&kf_diff_pressure, cfg->kf_diff_press_q, cfg->kf_diff_press_r, diff_press_sum / NUM_SAMPLES);
+        kalman_init(&kf_battery_voltage, cfg->kf_batt_v_q, cfg->kf_batt_v_r, batt_v_sum / NUM_SAMPLES);
+        kf_initialized = true;
+        ESP_LOGI(TAG, "Kalman filters initialized and seeded.");
+    }
 
     // Set the CSV header for all new log files.
     spi_sdcard_set_csv_header("timestamp_gmt,datetime_local,raw_temp_c,filtered_temp_c,raw_press_kpa,filtered_press_kpa,raw_diff_press_pa,filtered_diff_press_pa,raw_batt_v,filtered_batt_v,batt_perc,uptime_s");
