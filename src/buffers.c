@@ -16,10 +16,14 @@
 // --- Global buffer and mutex definition ---
 // This is the single source of truth for the global sensor buffer.
 sensor_buffer_t g_sensor_buffer = {
-    .temperature_c = NAN,
-    .pressure_kpa = NAN, // Use 0 as the sentinel for an invalid integer reading
-    .diff_pressure_pa = NAN,
-    .battery_voltage = NAN,
+    .raw_temperature_c = NAN,
+    .filtered_temperature_c = NAN,
+    .raw_pressure_kpa = NAN,
+    .filtered_pressure_kpa = NAN,
+    .raw_diff_pressure_pa = NAN,
+    .filtered_diff_pressure_pa = NAN,
+    .raw_battery_voltage = NAN,
+    .filtered_battery_voltage = NAN,
     .battery_percentage = 0,
     .battery_externally_powered = 0,
     .writeStatus = WRITE_STATUS_UNKNOWN,    

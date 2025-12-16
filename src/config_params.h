@@ -24,6 +24,15 @@ typedef struct {
     d6fph_sensor_model_t d6fph_model;
     uint64_t hf_sleep_duration_ms;
     uint32_t hf_log_interval_ms;
+    // Kalman filter coefficients
+    float kf_temp_q;
+    float kf_temp_r;
+    float kf_press_q;
+    float kf_press_r;
+    float kf_diff_press_q;
+    float kf_diff_press_r;
+    float kf_batt_v_q;
+    float kf_batt_v_r;
 } config_params_t;
 
 /**

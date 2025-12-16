@@ -38,13 +38,17 @@ typedef struct {
     write_status_t writeStatus;
     web_server_status_t web_server_status;
     char web_server_url[64];
-    float pressure_kpa;
-    float temperature_c;
-    float diff_pressure_pa;
+    float raw_pressure_kpa;
+    float filtered_pressure_kpa;
+    float raw_temperature_c;
+    float filtered_temperature_c;
+    float raw_diff_pressure_pa;
+    float filtered_diff_pressure_pa;
     time_t last_write_attempt_ts;      // Updated on any write attempt
     time_t last_successful_write_ts; // Updated only on successful writes
     bool timestamp_from_rtc; 
-    float battery_voltage;
+    float raw_battery_voltage;
+    float filtered_battery_voltage;
     int battery_percentage;
     int battery_externally_powered;
     int sd_card_file_count;

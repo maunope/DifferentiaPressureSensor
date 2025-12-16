@@ -91,9 +91,9 @@ typedef struct
 } config_item_t;
 
 #define MAX_CONFIG_ITEMS 9      // Correctly define the number of items
-#define NEW_MAX_CONFIG_ITEMS 10 // Increased by 1 for b_volt_threshold
+#define NEW_MAX_CONFIG_ITEMS 18 // Increased for Kalman params
 
-static config_item_t s_config_items[NEW_MAX_CONFIG_ITEMS];
+static config_item_t s_config_items[NEW_MAX_CONFIG_ITEMS]; // Increased size
 
 // Define the actual configuration keys here, in one place.
 static const char *s_config_keys[NEW_MAX_CONFIG_ITEMS] = {
@@ -104,8 +104,16 @@ static const char *s_config_keys[NEW_MAX_CONFIG_ITEMS] = {
     "hf_sleep_ms",
     "log_int_ms",
     "hf_log_int_ms",
-    "d6fph_model",
-    "wifi_ssid", "wifi_password"};
+    "d6fph_model", "wifi_ssid", "wifi_password",
+    "kf_temp_q",
+    "kf_temp_r",
+    "kf_press_q",
+    "kf_press_r",
+    "kf_diff_press_q",
+    "kf_diff_press_r",
+    "kf_batt_v_q",
+    "kf_batt_v_r"
+};
 static int s_num_config_items = 0;
 
 static int s_config_current_page_index = 0;
@@ -462,39 +470,39 @@ void render_sensor_callback(void)
         write_padded_line(2, now > 0 ? value_buf : "Time not set");
 
         // Temperature
-        if (isnan(s_local_sensor_buffer.temperature_c))
+        if (isnan(s_local_sensor_buffer.filtered_temperature_c))
         {
             snprintf(line_buf, sizeof(line_buf), "        n/a");
         }
         else
         {
-            snprintf(value_buf, sizeof(value_buf), "%.2f", s_local_sensor_buffer.temperature_c);
+            snprintf(value_buf, sizeof(value_buf), "%.2f", s_local_sensor_buffer.filtered_temperature_c);
             snprintf(line_buf, sizeof(line_buf), " %6.6s C\xf8", value_buf); // Use character 0xF8 for degree symbol
         }
         i2c_oled_draw_bitmap(s_oled_i2c_num, 1, 4 * 8, temp_icon, true, false);
         write_padded_line_shift(4, 2, 0, 0, line_buf);
 
         // Pressure
-        if (isnan(s_local_sensor_buffer.pressure_kpa))
+        if (isnan(s_local_sensor_buffer.filtered_pressure_kpa))
         {
             snprintf(line_buf, sizeof(line_buf), "        n/a");
         }
         else
         {   
-            snprintf(value_buf, sizeof(value_buf), "%.2f", s_local_sensor_buffer.pressure_kpa );
+            snprintf(value_buf, sizeof(value_buf), "%.2f", s_local_sensor_buffer.filtered_pressure_kpa );
             snprintf(line_buf, sizeof(line_buf), " %6.6s kPa", value_buf);
         }
         i2c_oled_draw_bitmap(s_oled_i2c_num, 1, 5 * 8 + 2, press_icon, true, false);
         write_padded_line_shift(5, 2, 2, 0, line_buf);
 
         // Differential Pressure
-        if (isnan(s_local_sensor_buffer.diff_pressure_pa))
+        if (isnan(s_local_sensor_buffer.filtered_diff_pressure_pa))
         {
             snprintf(line_buf, sizeof(line_buf), "        n/a");
         }
         else
         {
-            snprintf(value_buf, sizeof(value_buf), "%.2f", s_local_sensor_buffer.diff_pressure_pa);
+            snprintf(value_buf, sizeof(value_buf), "%.2f", s_local_sensor_buffer.filtered_diff_pressure_pa);
             snprintf(line_buf, sizeof(line_buf), " %6.6s Pa", value_buf);
         }
         i2c_oled_draw_bitmap(s_oled_i2c_num, 1, 6 * 8 + 4, diff_press_icon, true, false);
@@ -538,13 +546,13 @@ void render_sensor_callback(void)
         }
         write_padded_line(4, line_buf);
 
-        if (isnan(s_local_sensor_buffer.battery_voltage))
+        if (isnan(s_local_sensor_buffer.filtered_battery_voltage))
         {
             snprintf(line_buf, sizeof(line_buf), "Batt: n/a");
         }
         else
         {
-            snprintf(line_buf, sizeof(line_buf), "Batt: %.2fV %d%% %s", s_local_sensor_buffer.battery_voltage, s_local_sensor_buffer.battery_percentage, s_local_sensor_buffer.battery_externally_powered == 1 ? "(C)" : "");
+            snprintf(line_buf, sizeof(line_buf), "Batt: %.2fV %d%% %s", s_local_sensor_buffer.filtered_battery_voltage, s_local_sensor_buffer.battery_percentage, s_local_sensor_buffer.battery_externally_powered == 1 ? "(C)" : "");
         }
         write_padded_line(5, line_buf);
     }
@@ -1392,6 +1400,24 @@ static void ui_config_page_prepare_data(void)
     {
         snprintf(s_config_items[9].value, sizeof(s_config_items[9].value), "(not set)");
     }
+
+    // Kalman Filter Coefficients
+    s_config_items[10].full_key = s_config_keys[10];
+    snprintf(s_config_items[10].value, sizeof(s_config_items[10].value), "%.4f", params->kf_temp_q);
+    s_config_items[11].full_key = s_config_keys[11];
+    snprintf(s_config_items[11].value, sizeof(s_config_items[11].value), "%.4f", params->kf_temp_r);
+    s_config_items[12].full_key = s_config_keys[12];
+    snprintf(s_config_items[12].value, sizeof(s_config_items[12].value), "%.4f", params->kf_press_q);
+    s_config_items[13].full_key = s_config_keys[13];
+    snprintf(s_config_items[13].value, sizeof(s_config_items[13].value), "%.4f", params->kf_press_r);
+    s_config_items[14].full_key = s_config_keys[14];
+    snprintf(s_config_items[14].value, sizeof(s_config_items[14].value), "%.4f", params->kf_diff_press_q);
+    s_config_items[15].full_key = s_config_keys[15];
+    snprintf(s_config_items[15].value, sizeof(s_config_items[15].value), "%.4f", params->kf_diff_press_r);
+    s_config_items[16].full_key = s_config_keys[16];
+    snprintf(s_config_items[16].value, sizeof(s_config_items[16].value), "%.4f", params->kf_batt_v_q);
+    s_config_items[17].full_key = s_config_keys[17];
+    snprintf(s_config_items[17].value, sizeof(s_config_items[17].value), "%.4f", params->kf_batt_v_r);
 }
 
 /**

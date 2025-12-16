@@ -1276,7 +1276,7 @@ void app_main(void)
     {
         g_uiRender_task_handle = NULL; // Ensure handle is null if task is not created
     }
-    xTaskCreate(datalogger_task, "datalogger", 4096, datalogger_params, 5, &g_datalogger_task_handle); // Pass pointer to heap-allocated struct
+    xTaskCreate(datalogger_task, "datalogger", 8192, datalogger_params, 5, &g_datalogger_task_handle); // Pass pointer to heap-allocated struct
     xTaskCreate(main_task, "main_task", 4096, NULL, 5, NULL);                                          // Main command processing task at priority 5
 
     // Signal that all initialization is done

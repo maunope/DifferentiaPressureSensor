@@ -23,7 +23,14 @@ static const config_params_t s_default_params = {
     .d6fph_model = D6FPH_MODEL_0505AD3,
     .hf_sleep_duration_ms = 5000,
     .hf_log_interval_ms = 4900,
-    
+    .kf_temp_q = 0.01f,       // Process noise for temperature (low, as it changes slowly)
+    .kf_temp_r = 0.5f,        // Measurement noise for temperature
+    .kf_press_q = 0.01f,      // Process noise for pressure
+    .kf_press_r = 0.5f,       // Measurement noise for pressure
+    .kf_diff_press_q = 0.1f,  // Process noise for differential pressure (can be a bit more noisy)
+    .kf_diff_press_r = 4.0f,  // Measurement noise for differential pressure
+    .kf_batt_v_q = 0.001f,    // Process noise for battery voltage (very slow change)
+    .kf_batt_v_r = 0.1f,      // Measurement noise for battery voltage
 };
 
 void config_params_init(void) {
@@ -40,6 +47,14 @@ void config_params_init(void) {
     g_config_params.d6fph_model = (d6fph_sensor_model_t)config_get_int("d6fph_model", s_default_params.d6fph_model);                 // Index 7
     g_config_params.hf_sleep_duration_ms = config_get_int("hf_sleep_ms", s_default_params.hf_sleep_duration_ms);                     // Index 8
     g_config_params.hf_log_interval_ms = config_get_int("hf_log_int_ms", s_default_params.hf_log_interval_ms);                     // Index 9
+    g_config_params.kf_temp_q = config_get_float("kf_temp_q", s_default_params.kf_temp_q);
+    g_config_params.kf_temp_r = config_get_float("kf_temp_r", s_default_params.kf_temp_r);
+    g_config_params.kf_press_q = config_get_float("kf_press_q", s_default_params.kf_press_q);
+    g_config_params.kf_press_r = config_get_float("kf_press_r", s_default_params.kf_press_r);
+    g_config_params.kf_diff_press_q = config_get_float("kf_diff_press_q", s_default_params.kf_diff_press_q);
+    g_config_params.kf_diff_press_r = config_get_float("kf_diff_press_r", s_default_params.kf_diff_press_r);
+    g_config_params.kf_batt_v_q = config_get_float("kf_batt_v_q", s_default_params.kf_batt_v_q);
+    g_config_params.kf_batt_v_r = config_get_float("kf_batt_v_r", s_default_params.kf_batt_v_r);
 
     ESP_LOGI(TAG, "--- Loaded Configuration ---");
     ESP_LOGI(TAG, "v_div_ratio: %.4f", g_config_params.battery_voltage_divider_ratio);
@@ -52,6 +67,11 @@ void config_params_init(void) {
     ESP_LOGI(TAG, "ssid: '%s'", g_config_params.wifi_ssid);
     ESP_LOGI(TAG, "pass: %s", strlen(g_config_params.wifi_password) > 0 ? "(set)" : "(not set)");
     ESP_LOGI(TAG, "d6fph_model: %d", g_config_params.d6fph_model);
+    ESP_LOGI(TAG, "--- Kalman Filter ---");
+    ESP_LOGI(TAG, "Temp (Q/R): %.4f/%.4f", g_config_params.kf_temp_q, g_config_params.kf_temp_r);
+    ESP_LOGI(TAG, "Press (Q/R): %.4f/%.4f", g_config_params.kf_press_q, g_config_params.kf_press_r);
+    ESP_LOGI(TAG, "Diff.Press (Q/R): %.4f/%.4f", g_config_params.kf_diff_press_q, g_config_params.kf_diff_press_r);
+    ESP_LOGI(TAG, "Batt. V (Q/R): %.4f/%.4f", g_config_params.kf_batt_v_q, g_config_params.kf_batt_v_r);
     ESP_LOGI(TAG, "--------------------------");
 }
 

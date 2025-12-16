@@ -14,11 +14,20 @@
 #include "../lib/lipo_battery/lipo_battery.h"
 #include "../lib/spi_sdcard/spi_sdcard.h"
 #include "../lib/ui/time_utils.h"
+#include "../lib/kalman/kalman.h"
 #include "config_params.h"
 
 static const char *TAG = "DataloggerTask";
 
 #define SENSOR_REFRESH_INTERVAL_MS 5000
+
+// --- Kalman Filter States ---
+// Statically allocated to persist across function calls without using global variables in the header.
+static kalman_filter_t kf_temperature;
+static kalman_filter_t kf_pressure;
+static kalman_filter_t kf_diff_pressure;
+static kalman_filter_t kf_battery_voltage;
+static bool kf_initialized = false;
 
 /**
  * @brief Reads all relevant sensors and updates the global sensor buffer.
@@ -33,10 +42,11 @@ static void update_sensor_buffer(datalogger_task_params_t *params)
     const int RETRY_DELAY_MS = 50;
     ESP_LOGD(TAG, "Updating sensor buffer...");
 
-    // --- Read all sensor values first ---
-    float temperature_c = NAN;
-    float diff_pressure_pa = NAN;
-    float pressure_kpa = NAN; // Use NAN for consistency
+    // --- Read all raw sensor values first ---
+    float raw_temperature_c = NAN;
+    float raw_diff_pressure_pa = NAN;
+    float raw_pressure_kpa = NAN; // Use NAN for consistency
+    float raw_battery_voltage = battery_reader_get_voltage();
     bool read_error = false;
 
     if (xSemaphoreTake(g_i2c_bus_mutex, pdMS_TO_TICKS(2000)) == pdTRUE)
@@ -44,8 +54,8 @@ static void update_sensor_buffer(datalogger_task_params_t *params)
         esp_err_t bmp_err = ESP_FAIL;
         esp_err_t d6fph_err = ESP_FAIL;
 
-        temperature_c = NAN;
-        pressure_kpa = NAN;
+        raw_temperature_c = NAN;
+        raw_pressure_kpa = NAN;
         if (params->bmp280_available)
         {
             // Use forced mode to ensure sensor is correctly configured for each read.
@@ -54,7 +64,7 @@ static void update_sensor_buffer(datalogger_task_params_t *params)
 
             for (int retries = 0; retries < MAX_I2C_RETRIES; retries++)
             {
-                bmp_err = bmp280_force_read(params->bmp280_dev, &temperature_c, &pressure_kpa_long);
+                bmp_err = bmp280_force_read(params->bmp280_dev, &raw_temperature_c, &pressure_kpa_long);
                 if (bmp_err == ESP_OK)
                     break; // Success, exit retry loop
                 vTaskDelay(pdMS_TO_TICKS(RETRY_DELAY_MS));
@@ -66,7 +76,7 @@ static void update_sensor_buffer(datalogger_task_params_t *params)
             }
             else
             {
-                pressure_kpa = (float)pressure_kpa_long / 1000.0f; // Convert from Pa to kPa
+                raw_pressure_kpa = (float)pressure_kpa_long / 1000.0f; // Convert from Pa to kPa
             }
         }
         else
@@ -74,12 +84,12 @@ static void update_sensor_buffer(datalogger_task_params_t *params)
             ESP_LOGI(TAG, "BMP280 not available, skipping temperature and pressure read.");
         }
 
-        diff_pressure_pa = NAN;
+        raw_diff_pressure_pa = NAN;
         if (params->d6fph_available)
         {
             for (int retries = 0; retries < MAX_I2C_RETRIES; retries++)
             {
-                d6fph_err = d6fph_read_pressure(params->d6fph_dev, &diff_pressure_pa);
+                d6fph_err = d6fph_read_pressure(params->d6fph_dev, &raw_diff_pressure_pa);
                 if (d6fph_err == ESP_OK)
                     break; // Success, exit retry loop
                 vTaskDelay(pdMS_TO_TICKS(RETRY_DELAY_MS));
@@ -103,13 +113,41 @@ static void update_sensor_buffer(datalogger_task_params_t *params)
         ESP_LOGE(TAG, "Failed to acquire I2C mutex for sensor readings.");
     }
 
+    // --- Initialize Kalman filters on first valid read ---
+    if (!kf_initialized && !isnan(raw_temperature_c) && !isnan(raw_pressure_kpa) && !isnan(raw_diff_pressure_pa) && !isnan(raw_battery_voltage))
+    {
+        const config_params_t *cfg = config_params_get();
+        kalman_init(&kf_temperature, cfg->kf_temp_q, cfg->kf_temp_r, raw_temperature_c);
+        kalman_init(&kf_pressure, cfg->kf_press_q, cfg->kf_press_r, raw_pressure_kpa);
+        kalman_init(&kf_diff_pressure, cfg->kf_diff_press_q, cfg->kf_diff_press_r, raw_diff_pressure_pa);
+        kalman_init(&kf_battery_voltage, cfg->kf_batt_v_q, cfg->kf_batt_v_r, raw_battery_voltage);
+        kf_initialized = true;
+        ESP_LOGI(TAG, "Kalman filters initialized.");
+    }
+
+    // --- Apply Kalman filters if initialized ---
+    float filtered_temperature_c = kf_initialized && !isnan(raw_temperature_c) ? kalman_update(&kf_temperature, raw_temperature_c) : raw_temperature_c;
+    float filtered_pressure_kpa = kf_initialized && !isnan(raw_pressure_kpa) ? kalman_update(&kf_pressure, raw_pressure_kpa) : raw_pressure_kpa;
+    float filtered_diff_pressure_pa = kf_initialized && !isnan(raw_diff_pressure_pa) ? kalman_update(&kf_diff_pressure, raw_diff_pressure_pa) : raw_diff_pressure_pa;
+    float filtered_battery_voltage = kf_initialized && !isnan(raw_battery_voltage) ? kalman_update(&kf_battery_voltage, raw_battery_voltage) : raw_battery_voltage;
+
     // --- Now, lock the buffer and update it with all new values ---
     if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(100)) == pdTRUE)
     {
-        g_sensor_buffer.temperature_c = temperature_c;
-        g_sensor_buffer.pressure_kpa = pressure_kpa;
-        g_sensor_buffer.diff_pressure_pa = diff_pressure_pa;
-        g_sensor_buffer.battery_voltage = battery_reader_get_voltage();
+        g_sensor_buffer.raw_temperature_c = raw_temperature_c;
+        g_sensor_buffer.filtered_temperature_c = filtered_temperature_c;
+
+        g_sensor_buffer.raw_pressure_kpa = raw_pressure_kpa;
+        g_sensor_buffer.filtered_pressure_kpa = filtered_pressure_kpa;
+
+        g_sensor_buffer.raw_diff_pressure_pa = raw_diff_pressure_pa;
+        g_sensor_buffer.filtered_diff_pressure_pa = filtered_diff_pressure_pa;
+
+        // Battery voltage is read outside the I2C mutex
+        g_sensor_buffer.raw_battery_voltage = raw_battery_voltage;
+        g_sensor_buffer.filtered_battery_voltage = filtered_battery_voltage;
+
+        // These don't need filtering
         g_sensor_buffer.battery_percentage = battery_reader_get_percentage();
         g_sensor_buffer.battery_externally_powered = battery_is_externally_powered();
         g_sensor_buffer.sensor_read_error = read_error;
@@ -129,9 +167,16 @@ static void update_sensor_buffer(datalogger_task_params_t *params)
  */
 static void update_battery_status(void)
 {
+    float raw_voltage = battery_reader_get_voltage();
     if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(100)) == pdTRUE)
     {
-        g_sensor_buffer.battery_voltage = battery_reader_get_voltage();
+        g_sensor_buffer.raw_battery_voltage = raw_voltage;
+        if (kf_initialized) {
+            g_sensor_buffer.filtered_battery_voltage = kalman_update(&kf_battery_voltage, raw_voltage);
+        } else {
+            // Pass through raw value if filter is not ready
+            g_sensor_buffer.filtered_battery_voltage = raw_voltage;
+        }
         g_sensor_buffer.battery_percentage = battery_reader_get_percentage();
         g_sensor_buffer.battery_externally_powered = battery_is_externally_powered();
         xSemaphoreGive(g_sensor_buffer_mutex);
@@ -155,7 +200,7 @@ void datalogger_task(void *pvParameters)
     xEventGroupWaitBits(g_init_event_group, INIT_DONE_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
 
     // Set the CSV header for all new log files.
-    spi_sdcard_set_csv_header("timestamp_gmt,datetime_local,temperature_c,pressure_kpa,diff_pressure_pa,battery_voltage,battery_percentage,uptime_seconds");
+    spi_sdcard_set_csv_header("timestamp_gmt,datetime_local,raw_temp_c,filtered_temp_c,raw_press_kpa,filtered_press_kpa,raw_diff_press_pa,filtered_diff_press_pa,raw_batt_v,filtered_batt_v,batt_perc,uptime_s");
 
     // Perform an initial sensor update right after startup.
     update_sensor_buffer(params);
@@ -218,12 +263,12 @@ void datalogger_task(void *pvParameters)
                     if (force_read_err == ESP_OK)
                     {
                         // Now update the global buffer with this guaranteed fresh data
-                        if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY))
+                        if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(100)))
                         {
-                            g_sensor_buffer.temperature_c = temp;
-                            g_sensor_buffer.pressure_kpa = press;
-                            g_sensor_buffer.diff_pressure_pa = diff_press;
-                            g_sensor_buffer.battery_voltage = battery_reader_get_voltage();
+                            g_sensor_buffer.raw_temperature_c = temp;
+                            g_sensor_buffer.raw_pressure_kpa = press / 1000.0f; // Convert Pa to kPa
+                            g_sensor_buffer.raw_diff_pressure_pa = diff_press;
+                            g_sensor_buffer.raw_battery_voltage = battery_reader_get_voltage();
                             g_sensor_buffer.battery_percentage = battery_reader_get_percentage();
                             xSemaphoreGive(g_sensor_buffer_mutex);
                         }
@@ -360,10 +405,10 @@ void datalogger_task(void *pvParameters)
             // --- Battery Level Check ---
 
             const config_params_t *cfg = config_params_get();
-            if (local_buffer.battery_voltage > 0 && local_buffer.battery_voltage < cfg->battery_voltage_treshold)
+            if (local_buffer.filtered_battery_voltage > 0 && local_buffer.filtered_battery_voltage < cfg->battery_voltage_treshold)
             {
 
-                ESP_LOGE(TAG, "Cannot log data: Battery voltage (%.2fV) is below threshold (%.2fV)", local_buffer.battery_voltage, cfg->battery_voltage_treshold);
+                ESP_LOGE(TAG, "Cannot log data: Battery voltage (%.2fV) is below threshold (%.2fV)", local_buffer.filtered_battery_voltage, cfg->battery_voltage_treshold);
 
                 if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(100)) == pdTRUE)
                 {
@@ -386,17 +431,21 @@ void datalogger_task(void *pvParameters)
             strftime(local_time_str, sizeof(local_time_str), "%Y-%m-%d %H:%M:%S", &local_tm);
 
             // Log to console
-            ESP_LOGI(TAG, "TS: %s, Temp: %.2fC, Press: %.0fPa, Diff: %.2fPa Batt: %d%% (%.2fV), Charging: %d, WriteSD: %d", local_time_str, local_buffer.temperature_c, local_buffer.pressure_kpa, local_buffer.diff_pressure_pa, local_buffer.battery_percentage, local_buffer.battery_voltage, local_buffer.battery_externally_powered, local_buffer.writeStatus);
+            ESP_LOGI(TAG, "TS: %s, Temp: %.2fC, Press: %.2fkPa, Diff: %.2fPa Batt: %d%% (%.2fV), Charging: %d, WriteSD: %d", local_time_str, local_buffer.filtered_temperature_c, local_buffer.filtered_pressure_kpa, local_buffer.filtered_diff_pressure_pa, local_buffer.battery_percentage, local_buffer.filtered_battery_voltage, local_buffer.battery_externally_powered, local_buffer.writeStatus);
 
             // Format the data into a CSV string
             char csv_line[200];
-            snprintf(csv_line, sizeof(csv_line), "%lld,%s,%.2f,%.3f,%.2f,%.2f,%d,%llu", // Use current_ts for the CSV timestamp
+            snprintf(csv_line, sizeof(csv_line), "%lld,%s,%.2f,%.2f,%.3f,%.3f,%.2f,%.2f,%.2f,%.2f,%d,%llu", // Use current_ts for the CSV timestamp
                      (long long)current_ts,
                      local_time_str,
-                     local_buffer.temperature_c,    // snprintf handles nan
-                     local_buffer.pressure_kpa,     // Already in kPa
-                     local_buffer.diff_pressure_pa, // snprintf handles nan
-                     local_buffer.battery_voltage,  // snprintf handles nan
+                     local_buffer.raw_temperature_c,
+                     local_buffer.filtered_temperature_c,
+                     local_buffer.raw_pressure_kpa,
+                     local_buffer.filtered_pressure_kpa,
+                     local_buffer.raw_diff_pressure_pa,
+                     local_buffer.filtered_diff_pressure_pa,
+                     local_buffer.raw_battery_voltage,
+                     local_buffer.filtered_battery_voltage,
                      local_buffer.battery_percentage,
                      local_buffer.uptime_seconds);
 
