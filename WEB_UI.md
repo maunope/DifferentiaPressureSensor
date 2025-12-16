@@ -10,7 +10,6 @@ The interface is divided into three main sections:
 1.  **Live Sensor Data**: A real-time dashboard of sensor readings.
 2.  **File Browser**: A list of all data log files stored on the SD card.
 3.  **File Previewer**: An interactive tool for viewing the contents of log files without downloading them.
-
 ## Live Sensor Data
 
 The panel at the top of the page displays the most recent data read from the device's sensors. This data is automatically refreshed every 5 seconds and includes:
@@ -60,6 +59,7 @@ Additionally, mobile apps like Smart CSV are excellent for processing and visual
 
 The previewer is designed to handle very large files efficiently by only loading small chunks of data at a time.
 
+
 #### Time Window and Navigation
 
 The previewer has two sets of controls for navigation:
@@ -72,6 +72,15 @@ The previewer has two sets of controls for navigation:
     *   This is the fastest way to move through large files, as it avoids loading all the data in between.
 
 For extremely large or dense files, the most efficient way to perform a full analysis is to download the file and open it on your computer.
+
+#### Data View Toggle
+
+When previewing a CSV file, the sparkline graphs can display either the raw sensor data or the smoothed (Kalman-filtered) data.
+
+*   **Smoothed View (Default)**: This view shows the data after it has been processed by the Kalman filter. It is generally cleaner and easier to interpret, as it removes sensor noise.
+*   **Raw View**: This view shows the unprocessed data directly from the sensors. It is useful for diagnostics and for observing the unfiltered sensor behavior.
+
+You can switch between these views using the **"Smoothed"** and **"Raw"** toggle buttons located in the "Controls" panel above the data table.
 
 #### Scrolling
 

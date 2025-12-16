@@ -19,6 +19,7 @@ Please refer to the following main guides for usage guidance and documentation:
     *   Differential pressure from an Omron D6F-PH sensor.
     *   LiPo battery voltage and percentage. 
     *   Device uptime in seconds.
+*   **Sensor Data Smoothing**: Configurable Kalman filtering is applied to all sensors readings
 *   **SD Card Storage**: Logs sensor data to CSV files on an SD card, with support for file rotation based on size (1MB limit, approx. 2 weeks of recording at 1 point per minute).
 *   **Real-Time Clock (RTC)**: Utilizes a DS3231 RTC for accurate timestamps. The system can synchronize its time from the RTC on startup.
 *   **OLED Display & UI**: Features a menu-driven user interface on an OLED display, controlled by a rotary encoder with a push-button. The UI displays:
@@ -81,6 +82,7 @@ Please be aware that this firmware automatically configures any connected DS3231
     *   `i2c_d6fph`: Driver for the Omron D6F-PH sensor.
     *   `i2c_ds3231`: Driver for the DS3231 RTC.
     *   `i2c_oled`: Driver for the OLED display.
+    *   `kalman`: kalman filter implementation.
     *   `lipo_battery`: Logic for reading battery voltage.
     *   `ntp_client`: Helper for synchronizing time from an NTP server.
     *   `rotary_encoder`: Driver for the rotary encoder input.
