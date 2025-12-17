@@ -31,6 +31,15 @@ static const config_params_t s_default_params = {
     .kf_diff_press_r = 4.0f,  // Measurement noise for differential pressure
     .kf_batt_v_q = 0.001f,    // Process noise for battery voltage (very slow change)
     .kf_batt_v_r = 0.1f,      // Measurement noise for battery voltage
+    // High-frequency defaults can be more aggressive (trust measurements more)
+    .kf_temp_q_hf = 0.02f,
+    .kf_temp_r_hf = 0.8f,
+    .kf_press_q_hf = 0.02f,
+    .kf_press_r_hf = 0.8f,
+    .kf_diff_press_q_hf = 0.2f,
+    .kf_diff_press_r_hf = 5.0f,
+    .kf_batt_v_q_hf = 0.002f,
+    .kf_batt_v_r_hf = 0.2f,
 };
 
 void config_params_init(void) {
@@ -55,6 +64,15 @@ void config_params_init(void) {
     g_config_params.kf_diff_press_r = config_get_float("kf_diff_press_r", s_default_params.kf_diff_press_r);
     g_config_params.kf_batt_v_q = config_get_float("kf_batt_v_q", s_default_params.kf_batt_v_q);
     g_config_params.kf_batt_v_r = config_get_float("kf_batt_v_r", s_default_params.kf_batt_v_r);
+    // Load HF Kalman parameters
+    g_config_params.kf_temp_q_hf = config_get_float("kf_temp_q_hf", s_default_params.kf_temp_q_hf);
+    g_config_params.kf_temp_r_hf = config_get_float("kf_temp_r_hf", s_default_params.kf_temp_r_hf);
+    g_config_params.kf_press_q_hf = config_get_float("kf_press_q_hf", s_default_params.kf_press_q_hf);
+    g_config_params.kf_press_r_hf = config_get_float("kf_press_r_hf", s_default_params.kf_press_r_hf);
+    g_config_params.kf_diff_press_q_hf = config_get_float("kf_diff_press_q_hf", s_default_params.kf_diff_press_q_hf);
+    g_config_params.kf_diff_press_r_hf = config_get_float("kf_diff_press_r_hf", s_default_params.kf_diff_press_r_hf);
+    g_config_params.kf_batt_v_q_hf = config_get_float("kf_batt_v_q_hf", s_default_params.kf_batt_v_q_hf);
+    g_config_params.kf_batt_v_r_hf = config_get_float("kf_batt_v_r_hf", s_default_params.kf_batt_v_r_hf);
 
     ESP_LOGI(TAG, "--- Loaded Configuration ---");
     ESP_LOGI(TAG, "v_div_ratio: %.4f", g_config_params.battery_voltage_divider_ratio);
@@ -72,6 +90,11 @@ void config_params_init(void) {
     ESP_LOGI(TAG, "Press (Q/R): %.4f/%.4f", g_config_params.kf_press_q, g_config_params.kf_press_r);
     ESP_LOGI(TAG, "Diff.Press (Q/R): %.4f/%.4f", g_config_params.kf_diff_press_q, g_config_params.kf_diff_press_r);
     ESP_LOGI(TAG, "Batt. V (Q/R): %.4f/%.4f", g_config_params.kf_batt_v_q, g_config_params.kf_batt_v_r);
+    ESP_LOGI(TAG, "--- Kalman Filter (HF) ---");
+    ESP_LOGI(TAG, "Temp (Q/R): %.4f/%.4f", g_config_params.kf_temp_q_hf, g_config_params.kf_temp_r_hf);
+    ESP_LOGI(TAG, "Press (Q/R): %.4f/%.4f", g_config_params.kf_press_q_hf, g_config_params.kf_press_r_hf);
+    ESP_LOGI(TAG, "Diff.Press (Q/R): %.4f/%.4f", g_config_params.kf_diff_press_q_hf, g_config_params.kf_diff_press_r_hf);
+    ESP_LOGI(TAG, "Batt. V (Q/R): %.4f/%.4f", g_config_params.kf_batt_v_q_hf, g_config_params.kf_batt_v_r_hf);
     ESP_LOGI(TAG, "--------------------------");
 }
 

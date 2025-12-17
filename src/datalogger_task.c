@@ -190,16 +190,14 @@ void datalogger_task(void *pvParameters)
     const config_params_t *cfg = config_params_get();
 
     // --- Kalman Filter Initialization ---
-    // Check if this is a cold boot (not from deep sleep) or if filters are uninitialized.
-    const esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
-    const bool is_cold_boot = (cause != ESP_SLEEP_WAKEUP_TIMER && cause != ESP_SLEEP_WAKEUP_GPIO);
-
-    const bool params_changed = kf_initialized && (
-        kf_temperature.q != cfg->kf_temp_q || kf_temperature.r != cfg->kf_temp_r ||
-        kf_pressure.q != cfg->kf_press_q || kf_pressure.r != cfg->kf_press_r ||
-        kf_diff_pressure.q != cfg->kf_diff_press_q || kf_diff_pressure.r != cfg->kf_diff_press_r ||
-        kf_battery_voltage.q != cfg->kf_batt_v_q || kf_battery_voltage.r != cfg->kf_batt_v_r
-    );
+    ecups;sol is_cold_boot = (cause != ESP_SLEEP_WAKEUP_TIMER && cause != ESP_SLEEP_WAKEUP_GPIO);
+ be either the normal or HF values.
+  bool is_normal = (kf_temperature.q == cfg->kf_temp_q && kf_temperature.r == cfg->kf_temp_r);
+        bool is_hf = (kf_temperature.q == cfg->kf_temp_q_hf && kf_temperature.r == cfg->kf_temp_r_hf);
+        if (!is_normal && !is_hf) {
+            params_changed = true;
+        }
+    }
 
     if (params_changed)
     {
@@ -239,12 +237,22 @@ void datalogger_task(void *pvParameters)
             batt_v_sum += battery_reader_get_voltage();
         }
 
+        // Initialize with normal frequency parameters by default.
+        // The mode setting command will switch them if needed.
         kalman_init(&kf_temperature, cfg->kf_temp_q, cfg->kf_temp_r, temp_sum / NUM_SAMPLES);
         kalman_init(&kf_pressure, cfg->kf_press_q, cfg->kf_press_r, press_sum / NUM_SAMPLES);
         kalman_init(&kf_diff_pressure, cfg->kf_diff_press_q, cfg->kf_diff_press_r, diff_press_sum / NUM_SAMPLES);
         kalman_init(&kf_battery_voltage, cfg->kf_batt_v_q, cfg->kf_batt_v_r, batt_v_sum / NUM_SAMPLES);
         kf_initialized = true;
         ESP_LOGI(TAG, "Kalman filters initialized and seeded.");
+
+        // If waking from sleep into HF mode, immediately switch to HF params.
+        if (!is_cold_boot && g_sensor_buffer.high_freq_mode_enabled) {
+            ESP_LOGI(TAG, "Woke up in HF mode, switching to HF Kalman parameters.");
+            datalogger_cmd_msg_t hf_cmd = {.cmd = DATALOGGER_CMD_SET_MODE, .mode = DATALOGGER_MODE_HF};
+            // Send to self to trigger the parameter switch logic.
+            xQueueSend(g_datalogger_cmd_queue, &hf_cmd, 0);
+        }
     }
 
     // Set the CSV header for all new log files.
@@ -337,6 +345,31 @@ void datalogger_task(void *pvParameters)
 
                 ESP_LOGI(TAG, "Datalogger mode set to: %d (Paused: %d, HF: %d)", msg.mode, is_logging_paused, (msg.mode == DATALOGGER_MODE_HF));
 
+                // --- Switch Kalman Filter Parameters ---
+                // This preserves the filter's state (x, p) but updates the noise coefficients.
+                if (kf_initialized) {
+                    if (msg.mode == DATALOGGER_MODE_HF) {
+                        ESP_LOGI(TAG, "Switching to High-Frequency Kalman parameters.");
+                        kf_temperature.q = cfg->kf_temp_q_hf;
+                        kf_temperature.r = cfg->kf_temp_r_hf;
+                        kf_pressure.q = cfg->kf_press_q_hf;
+                        kf_pressure.r = cfg->kf_press_r_hf;
+                        kf_diff_pressure.q = cfg->kf_diff_press_q_hf;
+                        kf_diff_pressure.r = cfg->kf_diff_press_r_hf;
+                        kf_battery_voltage.q = cfg->kf_batt_v_q_hf;
+                        kf_battery_voltage.r = cfg->kf_batt_v_r_hf;
+                    } else { // DATALOGGER_MODE_NORMAL or DATALOGGER_MODE_PAUSED
+                        ESP_LOGI(TAG, "Switching to Normal-Frequency Kalman parameters.");
+                        kf_temperature.q = cfg->kf_temp_q;
+                        kf_temperature.r = cfg->kf_temp_r;
+                        kf_pressure.q = cfg->kf_press_q;
+                        kf_pressure.r = cfg->kf_press_r;
+                        kf_diff_pressure.q = cfg->kf_diff_press_q;
+                        kf_diff_pressure.r = cfg->kf_diff_press_r;
+                        kf_battery_voltage.q = cfg->kf_batt_v_q;
+                        kf_battery_voltage.r = cfg->kf_batt_v_r;
+                    }
+                }
                 // Force a file rotation on any mode change to clearly separate data segments.
                 // Especially important when coming out of a paused state.
                 if (was_paused && !is_logging_paused)

@@ -33,6 +33,15 @@ typedef struct {
     float kf_diff_press_r;
     float kf_batt_v_q;
     float kf_batt_v_r;
+    // Kalman filter coefficients for High-Frequency mode
+    float kf_temp_q_hf;
+    float kf_temp_r_hf;
+    float kf_press_q_hf;
+    float kf_press_r_hf;
+    float kf_diff_press_q_hf;
+    float kf_diff_press_r_hf;
+    float kf_batt_v_q_hf;
+    float kf_batt_v_r_hf;
 } config_params_t;
 
 /**

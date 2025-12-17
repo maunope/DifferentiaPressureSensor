@@ -90,8 +90,8 @@ typedef struct
     char value[21]; // Max 20 chars for OLED line + null terminator
 } config_item_t;
 
-#define MAX_CONFIG_ITEMS 9      // Correctly define the number of items
-#define NEW_MAX_CONFIG_ITEMS 18 // Increased for Kalman params
+#define MAX_CONFIG_ITEMS 9       // Correctly define the number of items
+#define NEW_MAX_CONFIG_ITEMS 26  // Increased for all Kalman params (normal + HF)
 
 static config_item_t s_config_items[NEW_MAX_CONFIG_ITEMS]; // Increased size
 
@@ -111,8 +111,17 @@ static const char *s_config_keys[NEW_MAX_CONFIG_ITEMS] = {
     "kf_press_r",
     "kf_diff_press_q",
     "kf_diff_press_r",
-    "kf_batt_v_q",
-    "kf_batt_v_r"
+    "kf_batt_v_q", // Index 16
+    "kf_batt_v_r", // Index 17
+    // High-frequency Kalman parameters
+    "kf_temp_q_hf",        // Index 18
+    "kf_temp_r_hf",        // Index 19
+    "kf_press_q_hf",       // Index 20
+    "kf_press_r_hf",       // Index 21
+    "kf_diff_press_q_hf",  // Index 22
+    "kf_diff_press_r_hf",  // Index 23
+    "kf_batt_v_q_hf",      // Index 24
+    "kf_batt_v_r_hf"       // Index 25
 };
 static int s_num_config_items = 0;
 
@@ -1418,6 +1427,24 @@ static void ui_config_page_prepare_data(void)
     snprintf(s_config_items[16].value, sizeof(s_config_items[16].value), "%.4f", params->kf_batt_v_q);
     s_config_items[17].full_key = s_config_keys[17];
     snprintf(s_config_items[17].value, sizeof(s_config_items[17].value), "%.4f", params->kf_batt_v_r);
+
+    // High-frequency Kalman Filter Coefficients
+    s_config_items[18].full_key = s_config_keys[18];
+    snprintf(s_config_items[18].value, sizeof(s_config_items[18].value), "%.4f", params->kf_temp_q_hf);
+    s_config_items[19].full_key = s_config_keys[19];
+    snprintf(s_config_items[19].value, sizeof(s_config_items[19].value), "%.4f", params->kf_temp_r_hf);
+    s_config_items[20].full_key = s_config_keys[20];
+    snprintf(s_config_items[20].value, sizeof(s_config_items[20].value), "%.4f", params->kf_press_q_hf);
+    s_config_items[21].full_key = s_config_keys[21];
+    snprintf(s_config_items[21].value, sizeof(s_config_items[21].value), "%.4f", params->kf_press_r_hf);
+    s_config_items[22].full_key = s_config_keys[22];
+    snprintf(s_config_items[22].value, sizeof(s_config_items[22].value), "%.4f", params->kf_diff_press_q_hf);
+    s_config_items[23].full_key = s_config_keys[23];
+    snprintf(s_config_items[23].value, sizeof(s_config_items[23].value), "%.4f", params->kf_diff_press_r_hf);
+    s_config_items[24].full_key = s_config_keys[24];
+    snprintf(s_config_items[24].value, sizeof(s_config_items[24].value), "%.4f", params->kf_batt_v_q_hf);
+    s_config_items[25].full_key = s_config_keys[25];
+    snprintf(s_config_items[25].value, sizeof(s_config_items[25].value), "%.4f", params->kf_batt_v_r_hf);
 }
 
 /**
