@@ -9,11 +9,11 @@
  * It contains all the necessary state variables for the filter.
  */
 typedef struct {
-    float q; // Process noise covariance
-    float r; // Measurement noise covariance
-    float p; // Estimation error covariance
-    float x; // Value
-    float k; // Kalman gain
+    double q; // Process noise covariance
+    double r; // Measurement noise covariance
+    double p; // Estimation error covariance
+    double x; // Value
+    double k; // Kalman gain
 } kalman_filter_t;
 
 /**

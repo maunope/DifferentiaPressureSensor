@@ -11,11 +11,11 @@
  */
 void kalman_init(kalman_filter_t *kf, float q, float r, float initial_value) {
     kf->q = q;
-    kf->r = r;
+    kf->r = r; 
     // Initialize with some uncertainty. Setting p to 0 would make the filter
     // completely ignore the first measurement.
     kf->p = 1.0f;
-    kf->x = initial_value;
+    kf->x = (double)initial_value;
     kf->k = 0.0f;
 }
 
@@ -27,13 +27,13 @@ void kalman_init(kalman_filter_t *kf, float q, float r, float initial_value) {
  * @return The new filtered value.
  */
 float kalman_update(kalman_filter_t *kf, float measurement) {
-    // Prediction update
+    // Prediction update (now using double precision)
     kf->p = kf->p + kf->q;
 
     // Measurement update
     kf->k = kf->p / (kf->p + kf->r);
-    kf->x = kf->x + kf->k * (measurement - kf->x);
-    kf->p = (1.0f - kf->k) * kf->p;
+    kf->x = kf->x + kf->k * ((double)measurement - kf->x);
+    kf->p = (1.0 - kf->k) * kf->p;
 
-    return kf->x;
+    return (float)kf->x;
 }
