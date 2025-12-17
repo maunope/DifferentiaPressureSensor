@@ -190,22 +190,25 @@ void datalogger_task(void *pvParameters)
     const config_params_t *cfg = config_params_get();
 
     // --- Kalman Filter Initialization ---
-    ecups;sol is_cold_boot = (cause != ESP_SLEEP_WAKEUP_TIMER && cause != ESP_SLEEP_WAKEUP_GPIO);
- be either the normal or HF values.
-  bool is_normal = (kf_temperature.q == cfg->kf_temp_q && kf_temperature.r == cfg->kf_temp_r);
+    esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+    bool is_cold_boot = (cause != ESP_SLEEP_WAKEUP_TIMER && cause != ESP_SLEEP_WAKEUP_GPIO);
+    bool params_changed = false;
+
+    // Check if the currently loaded Kalman parameters (from RTC memory) match the
+    // parameters from the config file. If not, it means the config has changed.
+    if (kf_initialized) {
+        bool is_normal = (kf_temperature.q == cfg->kf_temp_q && kf_temperature.r == cfg->kf_temp_r);
         bool is_hf = (kf_temperature.q == cfg->kf_temp_q_hf && kf_temperature.r == cfg->kf_temp_r_hf);
         if (!is_normal && !is_hf) {
             params_changed = true;
         }
     }
 
-    if (params_changed)
-    {
+    if (params_changed) {
         ESP_LOGW(TAG, "Kalman filter parameters have changed. Re-seeding filters.");
     }
 
-    if (is_cold_boot || !kf_initialized || params_changed)
-    {
+    if (is_cold_boot || !kf_initialized || params_changed) {
         if (is_cold_boot && !params_changed)
         {
             ESP_LOGI(TAG, "Cold boot or filters uninitialized. Seeding Kalman filters...");
