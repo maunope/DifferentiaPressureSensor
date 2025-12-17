@@ -187,12 +187,31 @@ void datalogger_task(void *pvParameters)
     ESP_LOGI(TAG, "Waiting for initialization to complete...");
     xEventGroupWaitBits(g_init_event_group, INIT_DONE_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
 
+    const config_params_t *cfg = config_params_get();
+
     // --- Kalman Filter Initialization ---
     // Check if this is a cold boot (not from deep sleep) or if filters are uninitialized.
-    esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
-    if (cause != ESP_SLEEP_WAKEUP_TIMER || !kf_initialized)
+    const esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+    const bool is_cold_boot = (cause != ESP_SLEEP_WAKEUP_TIMER && cause != ESP_SLEEP_WAKEUP_GPIO);
+
+    const bool params_changed = kf_initialized && (
+        kf_temperature.q != cfg->kf_temp_q || kf_temperature.r != cfg->kf_temp_r ||
+        kf_pressure.q != cfg->kf_press_q || kf_pressure.r != cfg->kf_press_r ||
+        kf_diff_pressure.q != cfg->kf_diff_press_q || kf_diff_pressure.r != cfg->kf_diff_press_r ||
+        kf_battery_voltage.q != cfg->kf_batt_v_q || kf_battery_voltage.r != cfg->kf_batt_v_r
+    );
+
+    if (params_changed)
     {
-        ESP_LOGI(TAG, "Cold boot or uninitialized. Seeding Kalman filters...");
+        ESP_LOGW(TAG, "Kalman filter parameters have changed. Re-seeding filters.");
+    }
+
+    if (is_cold_boot || !kf_initialized || params_changed)
+    {
+        if (is_cold_boot && !params_changed)
+        {
+            ESP_LOGI(TAG, "Cold boot or filters uninitialized. Seeding Kalman filters...");
+        }
         // Perform initial sensor readings to get a stable baseline
         float temp_sum = 0, press_sum = 0, diff_press_sum = 0, batt_v_sum = 0;
         const int NUM_SAMPLES = 3;  
@@ -220,7 +239,6 @@ void datalogger_task(void *pvParameters)
             batt_v_sum += battery_reader_get_voltage();
         }
 
-        const config_params_t *cfg = config_params_get();
         kalman_init(&kf_temperature, cfg->kf_temp_q, cfg->kf_temp_r, temp_sum / NUM_SAMPLES);
         kalman_init(&kf_pressure, cfg->kf_press_q, cfg->kf_press_r, press_sum / NUM_SAMPLES);
         kalman_init(&kf_diff_pressure, cfg->kf_diff_press_q, cfg->kf_diff_press_r, diff_press_sum / NUM_SAMPLES);

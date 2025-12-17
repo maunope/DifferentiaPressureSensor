@@ -12,7 +12,9 @@
 void kalman_init(kalman_filter_t *kf, float q, float r, float initial_value) {
     kf->q = q;
     kf->r = r;
-    kf->p = 0.0f;
+    // Initialize with some uncertainty. Setting p to 0 would make the filter
+    // completely ignore the first measurement.
+    kf->p = 1.0f;
     kf->x = initial_value;
     kf->k = 0.0f;
 }
