@@ -517,6 +517,14 @@ esp_err_t spi_sdcard_delete_file(const char *path)
     }
 
     ESP_LOGI(TAG, "Deleting file: %s", path);
+
+    // CRITICAL FIX: Check if the file being deleted is the currently active log file.
+    if (strcmp(path, current_filepath) == 0) {
+        ESP_LOGW(TAG, "The active log file '%s' is being deleted. Forcing rotation on next write.", current_filepath);
+        // By clearing the current filename, we force a new file with a header to be created on the next write.
+        current_filepath[0] = '\0';
+    }
+
     if (unlink(path) == 0)
     {
         ESP_LOGI(TAG, "File deleted successfully.");
