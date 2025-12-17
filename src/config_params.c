@@ -31,15 +31,16 @@ static const config_params_t s_default_params = {
     .kf_diff_press_r = 4.0f,  // Measurement noise for differential pressure
     .kf_batt_v_q = 0.001f,    // Process noise for battery voltage (very slow change)
     .kf_batt_v_r = 0.1f,      // Measurement noise for battery voltage
-    // High-frequency defaults can be more aggressive (trust measurements more)
-    .kf_temp_q_hf = 0.02f,
-    .kf_temp_r_hf = 0.8f,
-    .kf_press_q_hf = 0.02f,
-    .kf_press_r_hf = 0.8f,
-    .kf_diff_press_q_hf = 0.2f,
-    .kf_diff_press_r_hf = 5.0f,
-    .kf_batt_v_q_hf = 0.002f,
-    .kf_batt_v_r_hf = 0.2f,
+    // High-frequency defaults. 'r' (measurement noise) is sensor-dependent and should be the same as normal mode.
+    // 'q' (process noise) is scaled down because there is less time for the value to change between samples (5s vs 60s -> 12x).
+    .kf_temp_q_hf = 0.01f / 12.0f,       // kf_temp_q / 12
+    .kf_temp_r_hf = 0.5f,                 // kf_temp_r
+    .kf_press_q_hf = 0.01f / 12.0f,      // kf_press_q / 12
+    .kf_press_r_hf = 0.5f,                // kf_press_r
+    .kf_diff_press_q_hf = 0.1f / 12.0f,  // kf_diff_press_q / 12
+    .kf_diff_press_r_hf = 4.0f,           // kf_diff_press_r
+    .kf_batt_v_q_hf = 0.001f / 12.0f,    // kf_batt_v_q / 12
+    .kf_batt_v_r_hf = 0.1f,               // kf_batt_v_r
 };
 
 void config_params_init(void) {
