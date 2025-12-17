@@ -75,12 +75,14 @@ For extremely large or dense files, the most efficient way to perform a full ana
 
 #### Data View Toggle
 
-When previewing a CSV file, the sparkline graphs can display either the raw sensor data or the smoothed (Kalman-filtered) data.
+When previewing a CSV file, the sparkline graphs can display either the raw sensor data or the smoothed (Kalman-filtered) data. The filter parameters are configured in `config.ini`.
 
 *   **Smoothed View (Default)**: This view shows the data after it has been processed by the Kalman filter. It is generally cleaner and easier to interpret, as it removes sensor noise.
 *   **Raw View**: This view shows the unprocessed data directly from the sensors. It is useful for diagnostics and for observing the unfiltered sensor behavior.
 
 You can switch between these views using the **"Smoothed"** and **"Raw"** toggle buttons located in the "Controls" panel above the data table.
+
+The system uses two distinct sets of Kalman filter parameters: one for normal logging (`kf_*_q`, `kf_*_r`) and one for high-frequency logging (`kf_*_q_hf`, `kf_*_r_hf`). All of these can be configured in `config.ini`. If the high-frequency parameters are not specified, the device will automatically calculate appropriate defaults based on the normal-frequency settings, providing a good baseline for both logging speeds out-of-the-box.
 
 #### Scrolling
 

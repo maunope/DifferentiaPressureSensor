@@ -17,9 +17,9 @@ Please refer to the following main guides for usage guidance and documentation:
 *   **Sensor Datalogging**: Periodically reads:
     *   Temperature and atmospheric pressure from a BMP280 sensor.
     *   Differential pressure from an Omron D6F-PH sensor.
-    *   LiPo battery voltage and percentage. 
+    *   LiPo battery voltage and percentage.
     *   Device uptime in seconds.
-*   **Sensor Data Smoothing**: Configurable Kalman filtering is applied to all sensors readings
+*   **Dual-Mode Data Smoothing**: Configurable Kalman filtering is applied to all sensor readings. The system uses two distinct sets of filter parameters for "Normal" and "High-Frequency" logging modes. All parameters (`kf_*_q`, `kf_*_r`, `kf_*_q_hf`, `kf_*_r_hf`) can be customized in `config.ini`. If high-frequency (`_hf`) parameters are omitted, the system automatically calculates sensible defaults based on the normal-frequency values.
 *   **SD Card Storage**: Logs sensor data to CSV files on an SD card, with support for file rotation based on size (1MB limit, approx. 2 weeks of recording at 1 point per minute).
 *   **Real-Time Clock (RTC)**: Utilizes a DS3231 RTC for accurate timestamps. The system can synchronize its time from the RTC on startup.
 *   **OLED Display & UI**: Features a menu-driven user interface on an OLED display, controlled by a rotary encoder with a push-button. The UI displays:
