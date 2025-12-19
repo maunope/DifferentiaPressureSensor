@@ -1,6 +1,5 @@
 #include "datalogger_task.h"
 #include "freertos/FreeRTOS.h"
-#include <esp_vfs_fat.h>
 #include <stdio.h>
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -9,7 +8,6 @@
 #include "esp_timer.h"
 #include <time.h>
 #include <math.h>
-#include <sys/stat.h>
 
 #include "../lib/buffers.h"
 #include "../lib/i2c_bmp280/i2c_bmp280.h"
@@ -143,68 +141,13 @@ static void update_sensor_buffer(datalogger_task_params_t *params)
 
     float filtered_pressure_kpa;
     if (kf_initialized && !isnan(raw_pressure_kpa)) {
-        ESP_LOGD(TAG, "KF_PRESS Before: x=%.4f, p=%.4f, k=%.4f", kf_pressure.x, kf_pressure.p, kf_pressure.k);
-        ESP_LOGD(TAG, "KF_PRESS Update: raw=%.4f, q=%.4f, r=%.4f", raw_pressure_kpa, kf_pressure.q, kf_pressure.r);
         filtered_pressure_kpa = kalman_update(&kf_pressure, raw_pressure_kpa);
-        ESP_LOGD(TAG, "KF_PRESS After: x=%.4f, p=%.4f, k=%.4f", kf_pressure.x, kf_pressure.p, kf_pressure.k);
     } else {
         filtered_pressure_kpa = raw_pressure_kpa;
     }
 
     float filtered_diff_pressure_pa = kf_initialized && !isnan(raw_diff_pressure_pa) ? kalman_update(&kf_diff_pressure, raw_diff_pressure_pa) : raw_diff_pressure_pa;
     float filtered_battery_voltage = kf_initialized && !isnan(raw_battery_voltage) ? kalman_update(&kf_battery_voltage, raw_battery_voltage) : raw_battery_voltage;
-
-    // --- Dump Kalman filter data to file if pressure discrepancy is too large
-    if (!isnan(raw_pressure_kpa) && !isnan(filtered_pressure_kpa))
-    {
-        float diff_percent = fabs(filtered_pressure_kpa - raw_pressure_kpa) / raw_pressure_kpa * 100.0f;
-        if (diff_percent > 5.0f)
-        {
-            time_t now = time(NULL);
-            struct tm local_tm;
-            convert_gmt_to_cet(now, &local_tm);
-            char time_buf[30];
-            strftime(time_buf, sizeof(time_buf), "%Y%m%d_%H%M%S", &local_tm);
-            char filename[64];
-            snprintf(filename, sizeof(filename), "/sdcard/err_%s.txt", time_buf);
-
-            FILE *f = fopen(filename, "w");
-            if (f != NULL)
-            {
-                fprintf(f, "raw_temperature_c: %f\n", raw_temperature_c);
-                fprintf(f, "filtered_temperature_c: %f\n", filtered_temperature_c);
-                fprintf(f, "raw_pressure_kpa: %f\n", raw_pressure_kpa);
-                fprintf(f, "filtered_pressure_kpa: %f\n", filtered_pressure_kpa);
-                fprintf(f, "raw_diff_pressure_pa: %f\n", raw_diff_pressure_pa);
-                fprintf(f, "filtered_diff_pressure_pa: %f\n", filtered_diff_pressure_pa);
-                fprintf(f, "raw_battery_voltage: %f\n", raw_battery_voltage);
-                fprintf(f, "filtered_battery_voltage: %f\n", filtered_battery_voltage);
-                fprintf(f, "kf_temperature.x: %f\n", kf_temperature.x);
-                fprintf(f, "kf_temperature.p: %f\n", kf_temperature.p);
-                fprintf(f, "kf_temperature.k: %f\n", kf_temperature.k);
-                fprintf(f, "kf_pressure.x: %f\n", kf_pressure.x);
-                fprintf(f, "kf_pressure.p: %f\n", kf_pressure.p);
-                fprintf(f, "kf_pressure.k: %f\n", kf_pressure.k);
-                fprintf(f, "kf_diff_pressure.x: %f\n", kf_diff_pressure.x);
-                fprintf(f, "kf_diff_pressure.p: %f\n", kf_diff_pressure.p);
-                fprintf(f, "kf_diff_pressure.k: %f\n", kf_diff_pressure.k);
-                fprintf(f, "kf_battery_voltage.x: %f\n", kf_battery_voltage.x);
-                fprintf(f, "kf_battery_voltage.p: %f\n", kf_battery_voltage.p);
-                fprintf(f, "kf_battery_voltage.k: %f\n", kf_battery_voltage.k);
-                fprintf(f, "q_temp: %f, r_temp: %f\n", kf_temperature.q, kf_temperature.r);
-                fprintf(f, "q_press: %f, r_press: %f\n", kf_pressure.q, kf_pressure.r);
-                fprintf(f, "q_diff: %f, r_diff: %f\n", kf_diff_pressure.q, kf_diff_pressure.r);
-                fprintf(f, "q_batt: %f, r_batt: %f\n", kf_battery_voltage.q, kf_battery_voltage.r);
-                fclose(f);
-                ESP_LOGW(TAG, "Pressure discrepancy > 5%%, dumping Kalman data to: %s", filename);
-            }
-            else
-            {
-                ESP_LOGE(TAG, "Failed to open %s for Kalman data dump.", filename);
-            }
-        }
-    }
-
 
     // --- Now, lock the buffer and update it with all new values ---
     if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(100)) == pdTRUE)
