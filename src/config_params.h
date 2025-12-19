@@ -53,6 +53,13 @@ typedef struct {
 void config_params_init(void);
 
 /**
+ * @brief Gets the version of the currently loaded configuration.
+ *
+ * @return A version number that changes whenever the config is reloaded.
+ */
+uint32_t config_get_version(void);
+
+/**
  * @brief Gets a pointer to the global configuration parameters structure.
  *
  * @return A const pointer to the config_params_t structure.

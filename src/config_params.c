@@ -7,6 +7,7 @@ static const char *TAG = "ConfigParams";
 
 // Global instance of the configuration parameters
 static config_params_t g_config_params;
+static uint32_t g_config_version = 0;
 
 /**
  * @brief Default configuration values.
@@ -25,20 +26,20 @@ static const config_params_t s_default_params = {
     .hf_log_interval_ms = 4900,
     .kf_temp_q = 0.01f,       // Process noise for temperature (low, as it changes slowly)
     .kf_temp_r = 0.5f,        // Measurement noise for temperature
-    .kf_press_q = 0.01f,      // Process noise for pressure
-    .kf_press_r = 0.5f,       // Measurement noise for pressure
-    .kf_diff_press_q = 0.1f,  // Process noise for differential pressure (can be a bit more noisy)
-    .kf_diff_press_r = 4.0f,  // Measurement noise for differential pressure
+    .kf_press_q = 0.1f,       // Process noise for pressure. Increased to follow input more closely.
+    .kf_press_r = 0.05f,      // Measurement noise for pressure. Reduced to trust sensor more.
+    .kf_diff_press_q = 0.08f, // Process noise for differential pressure. Reduced slightly for more stability.
+    .kf_diff_press_r = 2.5f,  // Measurement noise for diff pressure. Reduced to make the filter more responsive.
     .kf_batt_v_q = 0.001f,    // Process noise for battery voltage (very slow change)
     .kf_batt_v_r = 0.1f,      // Measurement noise for battery voltage
     // High-frequency defaults. 'r' (measurement noise) is sensor-dependent and should be the same as normal mode.
     // 'q' (process noise) is scaled down because there is less time for the value to change between samples (5s vs 60s -> 12x).
     .kf_temp_q_hf = 0.01f / 12.0f,       // kf_temp_q / 12
     .kf_temp_r_hf = 0.5f,                 // kf_temp_r
-    .kf_press_q_hf = 0.01f / 12.0f,      // kf_press_q / 12
-    .kf_press_r_hf = 0.5f,                // kf_press_r
-    .kf_diff_press_q_hf = 0.1f / 12.0f,  // kf_diff_press_q / 12
-    .kf_diff_press_r_hf = 4.0f,           // kf_diff_press_r
+    .kf_press_q_hf = 0.1f / 12.0f,       // kf_press_q / 12
+    .kf_press_r_hf = 0.05f,               // kf_press_r
+    .kf_diff_press_q_hf = 0.08f / 12.0f, // kf_diff_press_q / 12
+    .kf_diff_press_r_hf = 2.5f,          // kf_diff_press_r
     .kf_batt_v_q_hf = 0.001f / 12.0f,    // kf_batt_v_q / 12
     .kf_batt_v_r_hf = 0.1f,               // kf_batt_v_r
 };
@@ -97,9 +98,16 @@ void config_params_init(void) {
     ESP_LOGI(TAG, "Diff.Press (Q/R): %.4f/%.4f", g_config_params.kf_diff_press_q_hf, g_config_params.kf_diff_press_r_hf);
     ESP_LOGI(TAG, "Batt. V (Q/R): %.4f/%.4f", g_config_params.kf_batt_v_q_hf, g_config_params.kf_batt_v_r_hf);
     ESP_LOGI(TAG, "--------------------------");
+
+    // Increment the version number to signal that the config has been (re)loaded.
+    g_config_version++;
 }
 
 const config_params_t* config_params_get(void) {
     // Return a const pointer to prevent modification outside of this module.
     return &g_config_params;
+}
+
+uint32_t config_get_version(void) {
+    return g_config_version;
 }

@@ -133,7 +133,10 @@ static bool handle_stop_web_server(void);
 
 /**
  * @brief Callback for clockwise rotation from the rotary encoder.
- * this method is executed in the rotary econder task, hence it makes sense to send a message to main task here
+ * 
+ * This method is executed in the rotary encoder's task context. It sends two messages:
+ * 1. A specific event to the uiRender_task for immediate UI updates.
+ * 2. A generic activity command to the main_task to reset the sleep timer.
  */
 static void on_encoder_rotate_cw(void)
 {
@@ -144,7 +147,10 @@ static void on_encoder_rotate_cw(void)
 
 /**
  * @brief Callback for counter-clockwise rotation from the rotary encoder.
- * this method is executed in the rotary econder task, hence it makes sense to send a message to main task here
+ * 
+ * This method is executed in the rotary encoder's task context. It sends two messages:
+ * 1. A specific event to the uiRender_task for immediate UI updates.
+ * 2. A generic activity command to the main_task to reset the sleep timer.
  */
 static void on_encoder_rotate_ccw(void)
 {
@@ -156,7 +162,10 @@ static void on_encoder_rotate_ccw(void)
 
 /**
  * @brief Callback for button press from the rotary encoder.
- * this method is executed in the rotary econder task, hence it makes sense to send a message to main task here
+ * 
+ * This method is executed in the rotary encoder's task context. It sends two messages:
+ * 1. A specific event to the uiRender_task for immediate UI updates.
+ * 2. A generic activity command to the main_task to reset the sleep timer.
  */
 static void on_encoder_button_press(void)
 {
@@ -168,7 +177,10 @@ static void on_encoder_button_press(void)
 
 /**
  * @brief Callback for button long press from the rotary encoder.
- * this method is executed in the rotary econder task, hence it makes sense to send a message to main task here
+ * 
+ * This method is executed in the rotary encoder's task context. It sends two messages:
+ * 1. A specific event to the uiRender_task for immediate UI updates.
+ * 2. A generic activity command to the main_task to reset the sleep timer.
  */
 static void on_encoder_button_long_press(void)
 {

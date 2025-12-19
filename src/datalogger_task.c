@@ -1,5 +1,7 @@
 #include "datalogger_task.h"
 #include "freertos/FreeRTOS.h"
+#include <esp_vfs_fat.h>
+#include <stdio.h>
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "esp_log.h"
@@ -7,6 +9,7 @@
 #include "esp_timer.h"
 #include <time.h>
 #include <math.h>
+#include <sys/stat.h>
 
 #include "../lib/buffers.h"
 #include "../lib/i2c_bmp280/i2c_bmp280.h"
@@ -15,6 +18,7 @@
 #include "../lib/spi_sdcard/spi_sdcard.h"
 #include "../lib/ui/time_utils.h"
 #include "../lib/kalman/kalman.h"
+#include "../lib/wifi_manager/wifi_manager.h"
 #include "config_params.h"
 
 static const char *TAG = "DataloggerTask";
@@ -23,11 +27,14 @@ static const char *TAG = "DataloggerTask";
 
 // --- Kalman Filter States ---
 // Statically allocated to persist across function calls without using global variables in the header.
+// These are no longer RTC_DATA_ATTR. We will re-initialize them on every wake-up
+// to ensure a clean and consistent state, preventing corruption from deep sleep cycles.
 RTC_DATA_ATTR static kalman_filter_t kf_temperature;
 RTC_DATA_ATTR static kalman_filter_t kf_pressure;
 RTC_DATA_ATTR static kalman_filter_t kf_diff_pressure;
 RTC_DATA_ATTR static kalman_filter_t kf_battery_voltage;
 RTC_DATA_ATTR static bool kf_initialized = false;
+
 
 /**
  * @brief Reads all relevant sensors and updates the global sensor buffer.
@@ -39,6 +46,7 @@ RTC_DATA_ATTR static bool kf_initialized = false;
 static void update_sensor_buffer(datalogger_task_params_t *params)
 {
     const int MAX_I2C_RETRIES = 3;
+    const config_params_t *cfg = config_params_get();
     const int RETRY_DELAY_MS = 50;
     ESP_LOGD(TAG, "Updating sensor buffer...");
 
@@ -113,11 +121,90 @@ static void update_sensor_buffer(datalogger_task_params_t *params)
         ESP_LOGE(TAG, "Failed to acquire I2C mutex for sensor readings.");
     }
 
+    // --- Determine which Kalman parameters to use ---
+    bool is_hf = false;
+    if (xSemaphoreTake(g_sensor_buffer_mutex, 0) == pdTRUE) {
+        is_hf = g_sensor_buffer.high_freq_mode_enabled;
+        xSemaphoreGive(g_sensor_buffer_mutex);
+    }
+
+    // Update filter parameters in the struct
+    kf_temperature.q = is_hf ? cfg->kf_temp_q_hf : cfg->kf_temp_q;
+    kf_temperature.r = is_hf ? cfg->kf_temp_r_hf : cfg->kf_temp_r;
+    kf_pressure.q = is_hf ? cfg->kf_press_q_hf : cfg->kf_press_q;
+    kf_pressure.r = is_hf ? cfg->kf_press_r_hf : cfg->kf_press_r;
+    kf_diff_pressure.q = is_hf ? cfg->kf_diff_press_q_hf : cfg->kf_diff_press_q;
+    kf_diff_pressure.r = is_hf ? cfg->kf_diff_press_r_hf : cfg->kf_diff_press_r;
+    kf_battery_voltage.q = is_hf ? cfg->kf_batt_v_q_hf : cfg->kf_batt_v_q;
+    kf_battery_voltage.r = is_hf ? cfg->kf_batt_v_r_hf : cfg->kf_batt_v_r;
+
     // --- Apply Kalman filters if initialized ---
     float filtered_temperature_c = kf_initialized && !isnan(raw_temperature_c) ? kalman_update(&kf_temperature, raw_temperature_c) : raw_temperature_c;
-    float filtered_pressure_kpa = kf_initialized && !isnan(raw_pressure_kpa) ? kalman_update(&kf_pressure, raw_pressure_kpa) : raw_pressure_kpa;
+
+    float filtered_pressure_kpa;
+    if (kf_initialized && !isnan(raw_pressure_kpa)) {
+        ESP_LOGD(TAG, "KF_PRESS Before: x=%.4f, p=%.4f, k=%.4f", kf_pressure.x, kf_pressure.p, kf_pressure.k);
+        ESP_LOGD(TAG, "KF_PRESS Update: raw=%.4f, q=%.4f, r=%.4f", raw_pressure_kpa, kf_pressure.q, kf_pressure.r);
+        filtered_pressure_kpa = kalman_update(&kf_pressure, raw_pressure_kpa);
+        ESP_LOGD(TAG, "KF_PRESS After: x=%.4f, p=%.4f, k=%.4f", kf_pressure.x, kf_pressure.p, kf_pressure.k);
+    } else {
+        filtered_pressure_kpa = raw_pressure_kpa;
+    }
+
     float filtered_diff_pressure_pa = kf_initialized && !isnan(raw_diff_pressure_pa) ? kalman_update(&kf_diff_pressure, raw_diff_pressure_pa) : raw_diff_pressure_pa;
     float filtered_battery_voltage = kf_initialized && !isnan(raw_battery_voltage) ? kalman_update(&kf_battery_voltage, raw_battery_voltage) : raw_battery_voltage;
+
+    // --- Dump Kalman filter data to file if pressure discrepancy is too large
+    if (!isnan(raw_pressure_kpa) && !isnan(filtered_pressure_kpa))
+    {
+        float diff_percent = fabs(filtered_pressure_kpa - raw_pressure_kpa) / raw_pressure_kpa * 100.0f;
+        if (diff_percent > 5.0f)
+        {
+            time_t now = time(NULL);
+            struct tm local_tm;
+            convert_gmt_to_cet(now, &local_tm);
+            char time_buf[30];
+            strftime(time_buf, sizeof(time_buf), "%Y%m%d_%H%M%S", &local_tm);
+            char filename[64];
+            snprintf(filename, sizeof(filename), "/sdcard/err_%s.txt", time_buf);
+
+            FILE *f = fopen(filename, "w");
+            if (f != NULL)
+            {
+                fprintf(f, "raw_temperature_c: %f\n", raw_temperature_c);
+                fprintf(f, "filtered_temperature_c: %f\n", filtered_temperature_c);
+                fprintf(f, "raw_pressure_kpa: %f\n", raw_pressure_kpa);
+                fprintf(f, "filtered_pressure_kpa: %f\n", filtered_pressure_kpa);
+                fprintf(f, "raw_diff_pressure_pa: %f\n", raw_diff_pressure_pa);
+                fprintf(f, "filtered_diff_pressure_pa: %f\n", filtered_diff_pressure_pa);
+                fprintf(f, "raw_battery_voltage: %f\n", raw_battery_voltage);
+                fprintf(f, "filtered_battery_voltage: %f\n", filtered_battery_voltage);
+                fprintf(f, "kf_temperature.x: %f\n", kf_temperature.x);
+                fprintf(f, "kf_temperature.p: %f\n", kf_temperature.p);
+                fprintf(f, "kf_temperature.k: %f\n", kf_temperature.k);
+                fprintf(f, "kf_pressure.x: %f\n", kf_pressure.x);
+                fprintf(f, "kf_pressure.p: %f\n", kf_pressure.p);
+                fprintf(f, "kf_pressure.k: %f\n", kf_pressure.k);
+                fprintf(f, "kf_diff_pressure.x: %f\n", kf_diff_pressure.x);
+                fprintf(f, "kf_diff_pressure.p: %f\n", kf_diff_pressure.p);
+                fprintf(f, "kf_diff_pressure.k: %f\n", kf_diff_pressure.k);
+                fprintf(f, "kf_battery_voltage.x: %f\n", kf_battery_voltage.x);
+                fprintf(f, "kf_battery_voltage.p: %f\n", kf_battery_voltage.p);
+                fprintf(f, "kf_battery_voltage.k: %f\n", kf_battery_voltage.k);
+                fprintf(f, "q_temp: %f, r_temp: %f\n", kf_temperature.q, kf_temperature.r);
+                fprintf(f, "q_press: %f, r_press: %f\n", kf_pressure.q, kf_pressure.r);
+                fprintf(f, "q_diff: %f, r_diff: %f\n", kf_diff_pressure.q, kf_diff_pressure.r);
+                fprintf(f, "q_batt: %f, r_batt: %f\n", kf_battery_voltage.q, kf_battery_voltage.r);
+                fclose(f);
+                ESP_LOGW(TAG, "Pressure discrepancy > 5%%, dumping Kalman data to: %s", filename);
+            }
+            else
+            {
+                ESP_LOGE(TAG, "Failed to open %s for Kalman data dump.", filename);
+            }
+        }
+    }
+
 
     // --- Now, lock the buffer and update it with all new values ---
     if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(100)) == pdTRUE)
@@ -156,6 +243,15 @@ static void update_sensor_buffer(datalogger_task_params_t *params)
 static void update_battery_status(void)
 {
     float raw_voltage = battery_reader_get_voltage();
+    const config_params_t *cfg = config_params_get();
+    bool is_hf = false;
+    if (xSemaphoreTake(g_sensor_buffer_mutex, 0) == pdTRUE) {
+        is_hf = g_sensor_buffer.high_freq_mode_enabled;
+        xSemaphoreGive(g_sensor_buffer_mutex);
+    }
+    kf_battery_voltage.q = is_hf ? cfg->kf_batt_v_q_hf : cfg->kf_batt_v_q;
+    kf_battery_voltage.r = is_hf ? cfg->kf_batt_v_r_hf : cfg->kf_batt_v_r;
+
     if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(100)) == pdTRUE)
     {
         g_sensor_buffer.raw_battery_voltage = raw_voltage;
@@ -181,11 +277,13 @@ void datalogger_task(void *pvParameters)
     datalogger_task_params_t *params = (datalogger_task_params_t *)pvParameters;
     const uint32_t LOG_INTERVAL_MS_NORMAL = params->log_interval_ms;
     const uint32_t LOG_INTERVAL_MS_HF = params->hf_log_interval_ms;
-    ESP_LOGI(TAG, "Datalogger task started with intervals: Normal=%lu ms, HF=%lu ms", (unsigned long)LOG_INTERVAL_MS_NORMAL, (unsigned long)LOG_INTERVAL_MS_HF);
 
     // Wait until the main app signals that all initialization is complete.
+    // This is CRITICAL to ensure the system time is synchronized from the DS3231
+    // before we attempt to make any time-based logging decisions.
     ESP_LOGI(TAG, "Waiting for initialization to complete...");
     xEventGroupWaitBits(g_init_event_group, INIT_DONE_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
+    ESP_LOGI(TAG, "Initialization complete. Datalogger proceeding.");
 
     const config_params_t *cfg = config_params_get();
 
@@ -195,22 +293,28 @@ void datalogger_task(void *pvParameters)
     bool params_changed = false;
 
     // Check if the currently loaded Kalman parameters (from RTC memory) match the
-    // parameters from the config file. If not, it means the config has changed.
-    if (kf_initialized) {
-        bool is_normal = (kf_temperature.q == cfg->kf_temp_q && kf_temperature.r == cfg->kf_temp_r);
-        bool is_hf = (kf_temperature.q == cfg->kf_temp_q_hf && kf_temperature.r == cfg->kf_temp_r_hf);
-        if (!is_normal && !is_hf) {
-            params_changed = true;
-        }
+    // parameters from the config file. This check is now removed because q and r are no longer
+    // part of the filter's state. Instead, we check a separate RTC variable.
+    static RTC_DATA_ATTR uint32_t rtc_config_version = 0;
+    uint32_t current_config_version = config_get_version();
+
+    if (kf_initialized && rtc_config_version != current_config_version)
+    {
+        params_changed = true;
+        // Update the RTC version to match the new config
+        rtc_config_version = current_config_version;
     }
 
     if (params_changed) {
         ESP_LOGW(TAG, "Kalman filter parameters have changed. Re-seeding filters.");
     }
 
-    if (is_cold_boot || !kf_initialized || params_changed) {
+    // Only re-initialize on a cold boot, if the filters were never initialized, or if config params changed.
+    if (is_cold_boot || !kf_initialized || params_changed)
+    {
         if (is_cold_boot && !params_changed)
         {
+            // This log helps confirm that a filter reset is intentional (e.g., on cold boot)
             ESP_LOGI(TAG, "Cold boot or filters uninitialized. Seeding Kalman filters...");
         }
         // Perform initial sensor readings to get a stable baseline
@@ -222,12 +326,13 @@ void datalogger_task(void *pvParameters)
             vTaskDelay(pdMS_TO_TICKS(250)); // Small delay between readings
             if (xSemaphoreTake(g_i2c_bus_mutex, portMAX_DELAY))
             {
-                float temp, press_pa;
+                float temp;
+                long press_pa; // Changed from float to long to match bmp280_force_read signature
                 if (params->bmp280_available)
                 {
-                    bmp280_force_read(params->bmp280_dev, &temp, (long *)&press_pa);
+                    bmp280_force_read(params->bmp280_dev, &temp, &press_pa);
                     temp_sum += temp;
-                    press_sum += press_pa / 1000.0f; // to kPa
+                    press_sum += (float)press_pa / 1000.0f; // to kPa
                 }
                 if (params->d6fph_available)
                 {
@@ -258,86 +363,53 @@ void datalogger_task(void *pvParameters)
         }
     }
 
+
     // Set the CSV header for all new log files.
     spi_sdcard_set_csv_header("timestamp_gmt,datetime_local,raw_temp_c,filtered_temp_c,raw_press_kpa,filtered_press_kpa,raw_diff_press_pa,filtered_diff_press_pa,raw_batt_v,filtered_batt_v,batt_perc,uptime_s");
 
     // Perform an initial sensor update right after startup.
     update_sensor_buffer(params);
-    // Track the last refresh time to avoid polling sensors too frequently.
-    uint64_t last_sensor_refresh_ms = 0;
+    // This must be in RTC memory to survive deep sleep and prevent a race condition
+    // where a sensor refresh happens immediately on wake, causing a double update.
+    static RTC_DATA_ATTR uint64_t last_sensor_refresh_ms = 0;
     static bool is_logging_paused = false;
     static time_t last_sleep_check_ts = 0;
+    if (is_cold_boot) last_sensor_refresh_ms = 0; // Ensure it's zeroed on a true cold boot
+    
+    // This variable is local to the task and manages the timestamp for scheduling the next log.
+    // It is initialized once and then updated only when a write is attempted.
+    // This decouples the scheduling logic from the global buffer's state, which is used for UI display.
+    static time_t last_write_ts_for_scheduling = 0;
 
     while (1)
     {
         datalogger_cmd_msg_t msg;
         uint64_t current_time_ms = esp_timer_get_time() / 1000;
 
-        // Check for a command without blocking. The main timing is handled by the vTaskDelay at the end.
+        // --- Command Processing ---
         if (xQueueReceive(g_datalogger_cmd_queue, &msg, 0) == pdPASS)
         {
             if (msg.cmd == DATALOGGER_CMD_FORCE_REFRESH)
             {
-                // A full refresh was requested.
                 ESP_LOGD(TAG, "Full sensor refresh requested.");
                 update_sensor_buffer(params);
                 last_sensor_refresh_ms = current_time_ms;
             }
             else if (msg.cmd == DATALOGGER_CMD_REFRESH_BATTERY)
             {
-                ESP_LOGD(TAG, "Battery status refresh requested.");
                 update_battery_status();
             }
             else if (msg.cmd == DATALOGGER_CMD_PAUSE_WRITES)
             {
                 ESP_LOGI(TAG, "Pausing writes to SD card.");
                 vTaskSuspend(NULL); // Suspend self. Execution resumes here after vTaskResume.
-
-                ESP_LOGI(TAG, "Resumed. Performing warm-up read.");
-                // After resuming (especially after sleep), perform an initial read
-                // to ensure the sensor has fresh data and is fully awake. This "primes"
-                // the sensor before the next timed read occurs.
-                float temp, diff_press;
-                long press;
-                if (xSemaphoreTake(g_i2c_bus_mutex, portMAX_DELAY))
-                {
-                    esp_err_t force_read_err = ESP_FAIL;
-                    if (params->bmp280_available)
-                    {
-                        // Use the new blocking function to guarantee a fresh reading
-                        force_read_err = bmp280_force_read(params->bmp280_dev, &temp, &press);
-                    }
-                    else
-                    {
-                        temp = NAN;
-                        press = 0;
-                    }
-                    if (params->d6fph_available) // Check if D6F-PH is available
-                    {
-                        // Also read the D6F-PH sensor
-                        d6fph_read_pressure(params->d6fph_dev, &diff_press);
-                    }
-                    xSemaphoreGive(g_i2c_bus_mutex);
-
-                    if (force_read_err == ESP_OK)
-                    {
-                        // Now update the global buffer with this guaranteed fresh data
-                        if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(100)))
-                        {
-                            g_sensor_buffer.raw_temperature_c = temp;
-                            g_sensor_buffer.raw_pressure_kpa = press / 1000.0f; // Convert Pa to kPa
-                            g_sensor_buffer.raw_diff_pressure_pa = diff_press;
-                            g_sensor_buffer.raw_battery_voltage = battery_reader_get_voltage();
-                            g_sensor_buffer.battery_percentage = battery_reader_get_percentage();
-                            xSemaphoreGive(g_sensor_buffer_mutex);
-                        }
-                    }
-                }
+                ESP_LOGI(TAG, "Resumed from suspension.");
             }
             else if (msg.cmd == DATALOGGER_CMD_SET_MODE)
             {
                 bool was_paused = is_logging_paused;
                 is_logging_paused = (msg.mode == DATALOGGER_MODE_PAUSED);
+                bool is_hf_now = (msg.mode == DATALOGGER_MODE_HF);
 
                 if (xSemaphoreTake(g_sensor_buffer_mutex, portMAX_DELAY))
                 {
@@ -346,36 +418,13 @@ void datalogger_task(void *pvParameters)
                     xSemaphoreGive(g_sensor_buffer_mutex);
                 }
 
-                ESP_LOGI(TAG, "Datalogger mode set to: %d (Paused: %d, HF: %d)", msg.mode, is_logging_paused, (msg.mode == DATALOGGER_MODE_HF));
-
-                // --- Switch Kalman Filter Parameters ---
-                // This preserves the filter's state (x, p) but updates the noise coefficients.
-                if (kf_initialized) {
-                    if (msg.mode == DATALOGGER_MODE_HF) {
-                        ESP_LOGI(TAG, "Switching to High-Frequency Kalman parameters.");
-                        kf_temperature.q = cfg->kf_temp_q_hf;
-                        kf_temperature.r = cfg->kf_temp_r_hf;
-                        kf_pressure.q = cfg->kf_press_q_hf;
-                        kf_pressure.r = cfg->kf_press_r_hf;
-                        kf_diff_pressure.q = cfg->kf_diff_press_q_hf;
-                        kf_diff_pressure.r = cfg->kf_diff_press_r_hf;
-                        kf_battery_voltage.q = cfg->kf_batt_v_q_hf;
-                        kf_battery_voltage.r = cfg->kf_batt_v_r_hf;
-                    } else { // DATALOGGER_MODE_NORMAL or DATALOGGER_MODE_PAUSED
-                        ESP_LOGI(TAG, "Switching to Normal-Frequency Kalman parameters.");
-                        kf_temperature.q = cfg->kf_temp_q;
-                        kf_temperature.r = cfg->kf_temp_r;
-                        kf_pressure.q = cfg->kf_press_q;
-                        kf_pressure.r = cfg->kf_press_r;
-                        kf_diff_pressure.q = cfg->kf_diff_press_q;
-                        kf_diff_pressure.r = cfg->kf_diff_press_r;
-                        kf_battery_voltage.q = cfg->kf_batt_v_q;
-                        kf_battery_voltage.r = cfg->kf_batt_v_r;
-                    }
-                }
-                // Force a file rotation on any mode change to clearly separate data segments.
-                // Especially important when coming out of a paused state.
-                if (was_paused && !is_logging_paused)
+                ESP_LOGI(TAG, "Datalogger mode set to: %d (Paused: %d, HF: %d)", msg.mode, is_logging_paused, is_hf_now);
+                
+                // Force a file rotation on any mode change to separate data segments.
+                // This is critical when switching between normal/HF or resuming from pause.
+                // We also reset the scheduling timestamp to now to ensure the next log happens
+                // after one full interval in the new mode.
+                if (was_paused != is_logging_paused || g_sensor_buffer.high_freq_mode_enabled != is_hf_now)
                     spi_sdcard_rotate_file();
             }
             else if (msg.cmd == DATALOGGER_CMD_ROTATE_FILE)
@@ -404,39 +453,23 @@ void datalogger_task(void *pvParameters)
 
         time_t current_ts = time(NULL);
 
-        bool hf_mode_active = false;
+        // Initialize with safe defaults in case the mutex is not available.
+        uint32_t current_log_interval;
 
-        time_t last_write_ts = 0;
-        uint32_t current_log_interval = LOG_INTERVAL_MS_NORMAL;
         // Get the last write time from the shared buffer
         if (xSemaphoreTake(g_sensor_buffer_mutex, pdMS_TO_TICKS(50)))
         {
-            hf_mode_active = g_sensor_buffer.high_freq_mode_enabled;
-            current_log_interval = hf_mode_active ? LOG_INTERVAL_MS_HF : LOG_INTERVAL_MS_NORMAL;
-            // fake write time if actual is 0 (no write  made since boot) to avoid issues on first iteration (if it is 0, it will trigger immediately)
-            // does no harm to "last write display" on UI because it wont' go to shared buffer until after first write,
-            // kind of sucks, but that's that
-            if (g_sensor_buffer.last_write_attempt_ts == 0)
-            {
-                // This is the first check after boot.
-                // If the device has been awake for less than a log interval,
-                // pretend the last write just happened to prevent an immediate log.
-                if ((esp_timer_get_time() / 1000) < current_log_interval)
-                {
-                    last_write_ts = current_ts;
-                }
-                else
-                {
-                    // Device has been awake longer than an interval, so allow the write.
-                    last_write_ts = 1;
-                }
+            current_log_interval = g_sensor_buffer.high_freq_mode_enabled ? LOG_INTERVAL_MS_HF : LOG_INTERVAL_MS_NORMAL;
+            
+            // On first run (cold boot or wake), initialize our scheduling timestamp.
+            if (last_write_ts_for_scheduling == 0) {
+                ESP_LOGI(TAG, "First run after boot. Setting initial write timestamp to now.");
+                last_write_ts_for_scheduling = (g_sensor_buffer.last_write_attempt_ts > 0) ? g_sensor_buffer.last_write_attempt_ts : current_ts;
             }
-            else
-            {
-                last_write_ts = g_sensor_buffer.last_write_attempt_ts;
-            }
-
             xSemaphoreGive(g_sensor_buffer_mutex);
+        } else {
+            current_log_interval = LOG_INTERVAL_MS_NORMAL;
+            ESP_LOGW(TAG, "Could not obtain sensor buffer mutex to check log time.");
         }
 
         // If paused, we don't log, but we should still check if it's time to sleep.
@@ -466,7 +499,7 @@ void datalogger_task(void *pvParameters)
 
         // ESP_LOGI(TAG, "Checking log time. Current: %lu, Last write: %lu, Interval: %lu ms, Paused: %d", (unsigned long)current_ts, (unsigned long)last_write_ts, (unsigned long)current_log_interval, is_logging_paused);
         //  Check if enough time (in seconds) has passed for the next log.
-        time_t next_log_ts = last_write_ts + (time_t)ceil((double)current_log_interval / 1000.0);
+        time_t next_log_ts = last_write_ts_for_scheduling + (time_t)ceil((double)current_log_interval / 1000.0);
         ESP_LOGD(TAG, "Current TS: %lld, Next Log TS: %lld, Paused: %d", (long long)current_ts, (long long)next_log_ts, is_logging_paused);
         if (!is_logging_paused && current_ts >= next_log_ts)
         {
@@ -538,7 +571,7 @@ void datalogger_task(void *pvParameters)
             const int MAX_SD_RETRIES = 3;
             for (int i = 0; i < MAX_SD_RETRIES; i++)
             {
-                write_err = spi_sdcard_write_line(csv_line, hf_mode_active);
+                write_err = spi_sdcard_write_line(csv_line, g_sensor_buffer.high_freq_mode_enabled);
                 if (write_err == ESP_OK)
                 {
                     break; // Success
@@ -553,18 +586,20 @@ void datalogger_task(void *pvParameters)
                 if (write_err == ESP_OK)
                 {
                     g_sensor_buffer.writeStatus = WRITE_STATUS_OK;
-                    g_sensor_buffer.last_write_attempt_ts = current_ts;
                     g_sensor_buffer.last_successful_write_ts = current_ts; // Mark successful write with current timestamp
                     ESP_LOGI(TAG, "Successfully wrote to SD card.");
                 }
                 else
                 {
                     g_sensor_buffer.writeStatus = WRITE_STATUS_FAIL;
-                    // Also update the timestamp to prevent immediate retries after waking up.
-                    g_sensor_buffer.last_write_attempt_ts = current_ts;
-                    ESP_LOGE(TAG, "Failed to write to SD card after all retries.");
                 }
+                // ALWAYS update the attempt timestamp and the local scheduling variable
+                g_sensor_buffer.last_write_attempt_ts = current_ts;
+                last_write_ts_for_scheduling = current_ts;
                 xSemaphoreGive(g_sensor_buffer_mutex);
+            }
+            else {
+                ESP_LOGE(TAG, "Failed to acquire sensor buffer mutex to update write status.");
             }
             // send a sleep command regardless of write success, this is a safety measure as sleep
             // triggers a full power cycle on the SPI card, which can help recover from certain SD card issues

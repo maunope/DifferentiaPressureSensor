@@ -9,11 +9,11 @@
  * It contains all the necessary state variables for the filter.
  */
 typedef struct {
-    double q; // Process noise covariance
-    double r; // Measurement noise covariance
-    double p; // Estimation error covariance
-    double x; // Value
-    double k; // Kalman gain
+    double p; /**< Estimation error covariance */
+    double x; /**< Current value */
+    double k; /**< Kalman gain */
+    double q; /**< Process noise covariance */
+    double r; /**< Measurement noise covariance */
 } kalman_filter_t;
 
 /**
@@ -21,10 +21,10 @@ typedef struct {
  *
  * @param kf Pointer to the Kalman filter structure to initialize.
  * @param q Process noise covariance. A smaller value indicates a more stable process.
- * @param r Measurement noise covariance. A larger value indicates less trust in the measurement.
+ * @param r Measurement noise covariance. A larger value indicates less trust in the measurement. This is also used as the initial estimation error covariance `p`.
  * @param initial_value The initial value to seed the filter with.
  */
-void kalman_init(kalman_filter_t *kf, float q, float r, float initial_value);
+void kalman_init(kalman_filter_t *kf, double q, double r, double initial_value);
 
 /**
  * @brief Updates the Kalman filter with a new measurement.
@@ -33,4 +33,4 @@ void kalman_init(kalman_filter_t *kf, float q, float r, float initial_value);
  * @param measurement The new raw measurement from the sensor.
  * @return The new filtered value.
  */
-float kalman_update(kalman_filter_t *kf, float measurement);
+double kalman_update(kalman_filter_t *kf, double measurement);
